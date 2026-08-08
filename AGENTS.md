@@ -83,8 +83,11 @@ python scripts/check_ai_assets.py
 
 ### 运行应用
 
+> Python 环境用 `uv` 管理（仓库默认无 `.venv`，系统 `python3` 未装依赖）：
+> `uv venv .venv` → `uv pip install -r requirements.txt` → 后续用 `uv run python main.py ...`。
+
 ```bash
-python main.py
+uv run python main.py
 python main.py --debug
 python main.py --dry-run
 python main.py --stocks 600519,hk00700,AAPL
