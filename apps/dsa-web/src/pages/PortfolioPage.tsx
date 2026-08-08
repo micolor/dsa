@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pie, PieChart, ResponsiveContainer, Tooltip, Legend, Cell } from 'recharts';
+import { RefreshCw } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
@@ -957,14 +958,9 @@ const PortfolioPage: React.FC = () => {
     : null;
 
   return (
-    <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
+    <div className="portfolio-page flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
+      <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
       <section className="space-y-3">
-        <div className="space-y-2">
-          <h1 className="text-xl md:text-2xl font-semibold text-foreground">{text.title}</h1>
-          <p className="text-xs md:text-sm text-secondary">
-            {text.description}
-          </p>
-        </div>
         {hasAccounts ? (
           <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_280px] gap-2 items-end">
@@ -1010,9 +1006,10 @@ const PortfolioPage: React.FC = () => {
                   type="button"
                   onClick={() => void handleRefresh()}
                   disabled={isLoading || fxRefreshing}
-                  className="btn-secondary text-sm flex-1"
+                  className="btn-secondary text-sm flex-1 inline-flex items-center justify-center gap-2"
                 >
-                  {isLoading ? text.refreshing : text.refreshData}
+                  <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span className="sr-only">{isLoading ? text.refreshing : text.refreshData}</span>
                 </button>
                 <button
                   type="button"
@@ -1158,11 +1155,12 @@ const PortfolioPage: React.FC = () => {
             <p className="text-xs text-secondary">{text.fxStatus}</p>
             <button
               type="button"
-              className="btn-secondary !px-3 !py-1 !text-xs shrink-0"
+              className="btn-secondary !px-2.5 !py-1 shrink-0 inline-flex items-center justify-center gap-2"
               onClick={() => void handleRefreshFx()}
               disabled={!hasAccounts || isLoading || fxRefreshing}
             >
-              {fxRefreshing ? text.refreshing : text.refreshFx}
+              <RefreshCw className={`h-3.5 w-3.5 ${fxRefreshing ? 'animate-spin' : ''}`} />
+              <span className="sr-only">{fxRefreshing ? text.refreshing : text.refreshFx}</span>
             </button>
           </div>
           <div className="mt-2">{snapshot?.fxStale ? <Badge variant="warning">{text.stale}</Badge> : <Badge variant="success">{text.latest}</Badge>}</div>
@@ -1516,8 +1514,9 @@ const PortfolioPage: React.FC = () => {
                 <option value="cash">资金流水</option>
                 <option value="corporate">公司行为</option>
               </select>
-              <button type="button" className="btn-secondary text-sm" onClick={() => void loadEvents()} disabled={eventLoading}>
-                {eventLoading ? '加载中...' : '刷新流水'}
+              <button type="button" className="btn-secondary text-sm inline-flex items-center justify-center gap-2" onClick={() => void loadEvents()} disabled={eventLoading}>
+                <RefreshCw className={`h-4 w-4 ${eventLoading ? 'animate-spin' : ''}`} />
+                <span className="sr-only">{eventLoading ? '加载中...' : '刷新流水'}</span>
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -1642,6 +1641,7 @@ const PortfolioPage: React.FC = () => {
           </div>
         </Card>
       </section>
+      </div>
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
         title="删除错误流水"

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, Clock3, Cpu, Database, Gauge, RefreshCw } from 'lucide-react';
 import { usageApi, type UsageDashboard, type UsageModelBreakdown, type UsagePeriod } from '../api/usage';
 import type { ParsedApiError } from '../api/error';
-import { ApiErrorAlert, AppPage, Card, EmptyState, PageHeader, StatCard } from '../components/common';
+import { ApiErrorAlert, AppPage, Card, EmptyState, StatCard } from '../components/common';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey, UiTextParams } from '../i18n/uiText';
 import { cn } from '../utils/cn';
@@ -144,12 +144,8 @@ const TokenUsagePage: React.FC = () => {
   return (
     <AppPage>
       <div className="space-y-5">
-        <PageHeader
-          eyebrow={t('usage.eyebrow')}
-          title={t('usage.title')}
-          description={t('usage.description')}
-          actions={(
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex justify-end">
+          <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex rounded-xl border border-border/70 bg-card/70 p-1">
                 {PERIOD_OPTIONS.map((option) => (
                   <button
@@ -169,16 +165,15 @@ const TokenUsagePage: React.FC = () => {
               </div>
               <button
                 type="button"
-                className="btn-secondary inline-flex items-center gap-2"
+                className="btn-secondary inline-flex items-center justify-center gap-2"
                 onClick={() => void loadDashboard()}
                 disabled={loading}
               >
                 <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
-                {t('usage.refresh')}
+                <span className="sr-only">{t('usage.refresh')}</span>
               </button>
-            </div>
-          )}
-        />
+          </div>
+        </div>
 
         {error ? <ApiErrorAlert error={error} actionLabel={t('common.retry')} onAction={() => void loadDashboard()} /> : null}
 

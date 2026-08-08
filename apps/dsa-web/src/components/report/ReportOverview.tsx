@@ -246,9 +246,9 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   return (
     <div className="space-y-5">
       {/* 主信息区 - 两列布局 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-        {/* 左侧：股票信息与结论 */}
-        <div className="lg:col-span-2 space-y-5">
+      <div className="flex flex-col gap-5 items-start lg:flex-row">
+        {/* 中间：股票信息与结论 */}
+        <div className="flex-1 min-w-0 w-full space-y-5">
           {/* 股票头部 */}
           <Card variant="gradient" padding="md" className="home-report-hero">
             <div className="mb-5 flex items-start justify-between gap-3">
@@ -295,13 +295,15 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 recordId={meta.id}
                 reportTitle={`${meta.stockName || meta.stockCode}-${meta.stockCode}`}
                 reportLanguage={reportLanguage}
+                size="sm"
+                iconOnly
               />
             </div>
 
             {/* 关键结论 */}
             <div className="home-divider border-t pt-5">
               <span className="label-uppercase">{text.keyInsights}</span>
-              <p className="mt-2 max-w-[62ch] whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
+              <p className="mt-2 max-w-full whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || text.noAnalysisSummary}
               </p>
             </div>
@@ -372,7 +374,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         </div>
 
         {/* 右侧：情绪指标 / 自选操作 */}
-        <div className="flex flex-col space-y-4">
+        <div className="flex w-full shrink-0 flex-col space-y-4 lg:w-72">
           {watchlist && meta.reportType !== 'market_review' && (
             <Card variant="bordered" padding="sm" className="home-panel-card">
               <div className="text-center space-y-3">

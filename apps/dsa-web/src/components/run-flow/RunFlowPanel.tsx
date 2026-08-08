@@ -145,7 +145,7 @@ export const RunFlowPanel: React.FC<RunFlowPanelProps> = ({ source, title }) => 
           loadingText={t('runFlow.refreshing')}
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {t('runFlow.refresh')}
+          <span className="sr-only">{t('runFlow.refresh')}</span>
         </Button>
       </div>
 

@@ -270,7 +270,7 @@ export const MarketStructureCard: React.FC<MarketStructureCardProps> = ({ contex
         </div>
 
         {(riskTags.length > 0 || missingFields.length > 0) && (
-          <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-3 border-t border-subtle pt-4 md:grid-cols-2">
             {riskTags.length > 0 && (
               <div>
                 <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-secondary-text">

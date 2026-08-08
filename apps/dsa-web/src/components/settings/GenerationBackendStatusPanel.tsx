@@ -191,7 +191,7 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button type="button" variant="settings-secondary" size="sm" disabled={disabled || isLoading} isLoading={isLoading} loadingText={t('settings.generationBackendRefreshing')} onClick={() => void refresh()}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {t('settings.generationBackendRefresh')}
+            <span className="sr-only">{t('settings.generationBackendRefresh')}</span>
           </Button>
           <Button type="button" variant="settings-secondary" size="sm" disabled={disabled || isSmoking} isLoading={isSmoking} loadingText={t('settings.generationBackendSmokeTesting')} onClick={() => void runSmoke()}>
             <FlaskConical className="h-4 w-4" aria-hidden="true" />

@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 import type { ReportDetails as ReportDetailsType, ReportLanguage } from '../../types/analysis';
 import { Card } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
@@ -78,10 +79,10 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
           <button
             type="button"
             onClick={() => copyToClipboard(jsonStr, panel)}
-            className="home-accent-link text-xs text-muted-text"
+            className="home-accent-link flex h-6 w-6 items-center justify-center text-muted-text"
             aria-label={copiedPanels[panel] ? text.copied : text.copy}
           >
-            {copiedPanels[panel] ? text.copied : text.copy}
+            {copiedPanels[panel] ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
         </span>
         <pre className="home-trace-pre home-trace-pre-content text-xs text-foreground font-mono overflow-x-auto p-3 bg-base rounded-lg max-h-80 overflow-y-auto text-left w-0 min-w-full">

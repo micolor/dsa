@@ -380,7 +380,6 @@ export const ReportDiagnostics: React.FC<ReportDiagnosticsProps> = ({
                 className="shrink-0"
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? text.copied : text.copy}
               </Button>
             </div>
           </div>

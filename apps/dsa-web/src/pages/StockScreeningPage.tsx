@@ -16,7 +16,6 @@ import {
   Pickaxe,
   Plane,
   Play,
-  PlusCircle,
   RefreshCw,
   Search,
   Shield,
@@ -1252,15 +1251,8 @@ const StockScreeningPage: React.FC = () => {
   };
 
   return (
-    <AppPage className="max-w-6xl space-y-6 pb-12 pt-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-cyan text-cyan shadow-[0_0_24px_hsl(var(--primary)/0.18)]">
-            <PlusCircle className="h-4 w-4" />
-          </span>
-          <h1 className="text-2xl font-bold tracking-normal text-foreground">选股</h1>
-        </div>
-
+    <AppPage className="space-y-6 pb-12 pt-6">
+      <div className="flex justify-end">
         <div className="inline-flex w-fit items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-4 py-2 text-sm shadow-soft-card">
           <span className={`h-2.5 w-2.5 rounded-full ${isScreeningEnabled ? 'bg-success' : 'bg-warning'}`} />
           <span className="font-medium text-secondary-text">{statusText}</span>
@@ -1319,8 +1311,8 @@ const StockScreeningPage: React.FC = () => {
                 disabled={!isScreeningEnabled || loadingHotspots}
                 onClick={() => void loadHotspots(true)}
               >
-                <RefreshCw className="h-4 w-4" />
-                刷新热点题材
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">刷新热点题材</span>
               </Button>
               ) : null}
             </div>

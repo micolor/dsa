@@ -17,6 +17,9 @@ interface ShareImageButtonProps {
   reportTitle: string;
   reportLanguage?: ReportLanguage;
   className?: string;
+  size?: 'md' | 'sm';
+  /** 仅图标显示（隐藏文字标签），用于紧凑的卡片工具条 */
+  iconOnly?: boolean;
 }
 
 const safeFilenamePart = (value: string): string => {
@@ -38,7 +41,11 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
   reportTitle,
   reportLanguage = 'zh',
   className = '',
+  size = 'md',
+  iconOnly = false,
 }) => {
+  const isSmall = size === 'sm';
+  const iconClass = isSmall ? 'h-3.5 w-3.5' : 'h-4 w-4';
   const isDesktopRuntime = typeof window !== 'undefined' && Boolean((window as DesktopWindow).dsaDesktop);
   const activeRecordId = isDesktopRuntime ? undefined : recordId;
   const text = getReportText(normalizeReportLanguage(reportLanguage));
@@ -173,14 +180,14 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
           type="button"
           onClick={() => void handleShare()}
           disabled={state === 'loading'}
-          className={`home-surface-button flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-medium text-secondary-text hover:text-foreground disabled:opacity-50 ${className}`}
+          className={`home-surface-button flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg font-medium text-secondary-text hover:text-foreground disabled:opacity-50 ${iconOnly ? 'h-8 w-8' : isSmall ? 'h-8 px-2.5 text-xs gap-2' : 'h-9 px-3 text-sm gap-2'} ${className}`}
           aria-label={tooltipText}
         >
-          {state === 'loading' ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
-          {state === 'success' ? <Check className="h-5 w-5 text-success" aria-hidden="true" /> : null}
-          {state === 'error' ? <TriangleAlert className="h-5 w-5 text-danger" aria-hidden="true" /> : null}
-          {state === 'idle' || state === 'ready' ? <Share2 className="h-5 w-5" aria-hidden="true" /> : null}
-          <span>{tooltipText}</span>
+          {state === 'loading' ? <Loader2 className={`${iconClass} animate-spin`} aria-hidden="true" /> : null}
+          {state === 'success' ? <Check className={`${iconClass} text-success`} aria-hidden="true" /> : null}
+          {state === 'error' ? <TriangleAlert className={`${iconClass} text-danger`} aria-hidden="true" /> : null}
+          {state === 'idle' || state === 'ready' ? <Share2 className={iconClass} aria-hidden="true" /> : null}
+          {!iconOnly ? <span>{tooltipText}</span> : null}
         </button>
       </span>
     </Tooltip>

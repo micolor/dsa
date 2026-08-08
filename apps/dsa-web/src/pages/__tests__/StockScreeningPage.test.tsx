@@ -396,8 +396,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByRole('heading', { name: '选股' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /展开热点题材/ }));
     fireEvent.click(await screen.findByRole('button', { name: /文字媒体/ }));
 
     expect(await screen.findByText('文字媒体：热度 100.0，阶段 初次异动，核心股 中文在线。')).toBeInTheDocument();

@@ -435,7 +435,7 @@ const BacktestPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-full flex flex-col rounded-[1.5rem] bg-transparent">
+    <div className="flex h-[calc(100vh-5rem)] w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
       {/* Header */}
       <header className="flex-shrink-0 border-b border-white/5 px-3 py-3 sm:px-4">
         <div className="flex max-w-5xl flex-wrap items-center gap-2">

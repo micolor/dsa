@@ -456,7 +456,7 @@ const FirstRunSetupCard: React.FC<FirstRunSetupCardProps> = ({
               onClick={() => void onRefresh()}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {t('settings.setupGuideRefresh')}
+              <span className="sr-only">{t('settings.setupGuideRefresh')}</span>
             </Button>
             <Button type="button" variant="settings-secondary" size="sm" onClick={() => setIsHidden(true)}>
               {t('settings.setupGuideHide')}
@@ -816,7 +816,7 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
                 onClick={() => void refreshSchedulerStatus()}
               >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                {t('settings.schedulerRefresh')}
+                <span className="sr-only">{t('settings.schedulerRefresh')}</span>
               </Button>
               <Button
                 type="button"
@@ -1473,18 +1473,11 @@ const SettingsPage: React.FC = () => {
   );
 
   return (
-    <div className="settings-page min-h-full px-4 pb-6 pt-4 md:px-6">
-      <div className="mb-4 rounded-lg border settings-border bg-card/90 px-4 py-4 shadow-soft-card backdrop-blur-sm">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">{t('settings.pageTitle')}</h1>
-            <p className="max-w-3xl text-xs leading-5 text-muted-text sm:text-sm sm:leading-6">
-              {t('settings.pageDescription')}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
+    <div className="settings-page flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex justify-end">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
               type="button"
               variant="settings-secondary"
               size="sm"
@@ -1512,12 +1505,11 @@ const SettingsPage: React.FC = () => {
                   ? t('settings.saveConfigWithCount', { count: effectiveDirtyCount })
                   : t('settings.saveConfig')}
             </Button>
-          </div>
         </div>
-
+      </div>
+      <div className="mb-4">
         {saveError ? (
           <ApiErrorAlert
-            className="mt-3"
             error={saveError}
             actionLabel={retryAction === 'save' ? t('settings.saveRetry') : undefined}
             onAction={retryAction === 'save' ? () => void retry() : undefined}
@@ -1869,6 +1861,7 @@ const SettingsPage: React.FC = () => {
           </section>
         </div>
       )}
+      </div>
 
       {toast ? (
         <div className="fixed bottom-5 right-5 z-50 w-[320px] max-w-[calc(100vw-24px)]">

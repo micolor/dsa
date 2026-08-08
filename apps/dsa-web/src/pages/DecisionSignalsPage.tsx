@@ -15,7 +15,6 @@ import {
   Drawer,
   EmptyState,
   InlineAlert,
-  PageHeader,
   Pagination,
 } from '../components/common';
 import {
@@ -1182,25 +1181,20 @@ const DecisionSignalsPage: React.FC = () => {
   return (
     <AppPage>
       <div className="space-y-5">
-        <PageHeader
-          eyebrow={t('decisionSignals.activeOnly')}
-          title={t('decisionSignals.title')}
-          description={t('decisionSignals.description')}
-          actions={(
-            <button
-              type="button"
-              className="btn-secondary inline-flex items-center gap-2"
-              onClick={() => {
-                void loadSignals();
-                void loadOutcomeStats();
-              }}
-              disabled={loading}
-            >
-              <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
-              {t('decisionSignals.refresh')}
-            </button>
-          )}
-        />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center justify-center gap-2"
+            onClick={() => {
+              void loadSignals();
+              void loadOutcomeStats();
+            }}
+            disabled={loading}
+          >
+            <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
+            <span className="sr-only">{t('decisionSignals.refresh')}</span>
+          </button>
+        </div>
 
         <Card title={t('decisionSignals.stockContextTitle')} subtitle={t('decisionSignals.stockContextDescription')} padding="md">
           <form

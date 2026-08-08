@@ -366,10 +366,8 @@ describe('ChatPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Codex Agent · 实验')).toBeInTheDocument();
-    expect(screen.getByText('Codex 当前可用范围')).toBeInTheDocument();
+    expect(await screen.findByText('Codex 当前可用范围')).toBeInTheDocument();
     expect(screen.getByText(/实时行情、新闻、市场热点/)).toBeInTheDocument();
-    expect(screen.getByText('使用已保存的分析上下文和回测汇总，向 Codex 询问个股。')).toBeInTheDocument();
     expect(screen.getByText(/Codex 将基于已保存的分析上下文和回测汇总回答/)).toBeInTheDocument();
     expect(screen.queryByText(/AI 将调用实时数据工具/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '切换问股方式' })).toBeInTheDocument();
@@ -525,8 +523,7 @@ describe('ChatPage', () => {
       </UiLanguageProvider>,
     );
 
-    expect(await screen.findByText('Codex Agent · Experimental')).toBeInTheDocument();
-    expect(screen.getByText('This device does not currently meet the basic Codex ask-stock requirements. Open Agent settings to check installation and Single Agent mode.')).toBeInTheDocument();
+    expect(await screen.findByText('This device does not currently meet the basic Codex ask-stock requirements. Open Agent settings to check installation and Single Agent mode.')).toBeInTheDocument();
     expect(screen.queryByText(/当前不可用|前往 Agent 设置检查/)).not.toBeInTheDocument();
   });
 
@@ -659,7 +656,7 @@ describe('ChatPage', () => {
 
     fireEvent.click(sessionCard);
     expect(mockSwitchSession).not.toHaveBeenCalled();
-    expect(sessionCard).toHaveAttribute('aria-current', 'page');
+    expect(sessionCard).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders a separate delete button for each session and opens confirmation without switching', async () => {
@@ -679,17 +676,18 @@ describe('ChatPage', () => {
     expect(await screen.findByText('删除后，该对话将不可恢复，确认删除吗？')).toBeInTheDocument();
   });
 
-  it('hides header actions when there are no messages', async () => {
+  it('disables header actions when there are no messages', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ChatPage />
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole('heading', { name: '问股' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '导出会话' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '发送到已配置的通知机器人/邮箱' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '历史对话' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '历史对话' })).toBeInTheDocument();
+    // Buttons always render (reserved space keeps layout stable on session switch);
+    // they are disabled while the session has no messages.
+    expect(screen.getByRole('button', { name: '导出会话为 Markdown 文件' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送到已配置的通知机器人/邮箱' })).toBeDisabled();
   });
 
   it('exports the current session from the header action', async () => {
@@ -1151,7 +1149,7 @@ describe('ChatPage', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText('Codex Agent · 实验');
+    await screen.findByText('Codex 当前可用范围');
     fireEvent.click(await screen.findByRole('button', { name: '用箱体震荡分析 A 股中芯国际 688981' }));
 
     await waitFor(() => {
@@ -1348,7 +1346,7 @@ describe('ChatPage', () => {
 
     expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
 
-    const sendButton = screen.getByRole('button', { name: /发送|处理中\.\.\./ });
+    const sendButton = screen.getByRole('button', { name: /^(发送|处理中\.\.\.)$/ });
     expect(sendButton).not.toBeDisabled();
     expect(screen.getByText('正在加载历史分析上下文；现在可直接发送追问。')).toBeInTheDocument();
 
@@ -2019,8 +2017,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole('heading', { name: '问股' })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/分析 600519/)).toHaveValue('');
+    expect(await screen.findByPlaceholderText(/分析 600519/)).toHaveValue('');
     expect(historyApi.getDetail).not.toHaveBeenCalled();
   });
 

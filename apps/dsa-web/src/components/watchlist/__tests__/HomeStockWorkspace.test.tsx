@@ -77,7 +77,7 @@ describe('HomeStockWorkspace', () => {
     fireEvent.click(row);
 
     expect(onHistoryItemClick).toHaveBeenCalledWith(21);
-    expect(row.tagName).toBe('BUTTON');
+    expect(row).toHaveAttribute('role', 'button');
     expect(row).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -110,7 +110,7 @@ describe('HomeStockWorkspace', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('正在查找最新分析详情，请稍候。');
     expect(onHistoryItemClick).not.toHaveBeenCalled();
-    expect(screen.getByText('正在查找详情...')).toBeInTheDocument();
+    expect(screen.queryByText('正在查找详情...')).not.toBeInTheDocument();
   });
 
   it('shows retry feedback instead of no-detail copy when the latest detail lookup failed', async () => {
@@ -127,7 +127,7 @@ describe('HomeStockWorkspace', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('最新分析详情暂时无法确认，请稍后重试。');
     expect(screen.queryByText('暂无分析详情，可先分析。')).not.toBeInTheDocument();
-    expect(screen.getByText('详情暂不可用')).toBeInTheDocument();
+    expect(screen.queryByText('详情暂不可用')).not.toBeInTheDocument();
     expect(onHistoryItemClick).not.toHaveBeenCalled();
   });
 
@@ -177,7 +177,7 @@ describe('HomeStockWorkspace', () => {
     });
 
     const row = screen.getByTestId('watchlist-row-AAPL');
-    fireEvent.click(row.querySelector('button[aria-pressed]') as HTMLButtonElement);
+    fireEvent.click(row.querySelector('[role="button"][aria-pressed]') as HTMLElement);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
 
     rerenderWatchlistRows([{
@@ -195,7 +195,7 @@ describe('HomeStockWorkspace', () => {
     }]);
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    expect(row.querySelector('button[aria-pressed]')).toBeInTheDocument();
+    expect(row.querySelector('[role="button"][aria-pressed]')).toBeInTheDocument();
   });
 
   it('clears a no-detail notice when the matching row receives a detail', async () => {
@@ -236,7 +236,7 @@ describe('HomeStockWorkspace', () => {
     });
 
     const row = screen.getByTestId('watchlist-row-AAPL');
-    fireEvent.click(row.querySelector('button[aria-pressed]') as HTMLButtonElement);
+    fireEvent.click(row.querySelector('[role="button"][aria-pressed]') as HTMLElement);
     expect(await screen.findByRole('alert')).toHaveTextContent('\u6682\u65e0\u5206\u6790\u8be6\u60c5\uff0c\u53ef\u5148\u5206\u6790\u3002');
 
     rerenderWatchlistRows([{

@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Check, ChevronDown, Copy, SlidersHorizontal } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ScrollArea, Tooltip } from '../components/common';
+import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
@@ -217,6 +217,8 @@ const ChatPage: React.FC = () => {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [introToastVisible, setIntroToastVisible] = useState(false);
+  const introToastShownRef = useRef(false);
   const [contextCompressionEnabled, setContextCompressionEnabled] = useState(false);
   const [contextCompressionLoaded, setContextCompressionLoaded] = useState(false);
   const [contextCompressionSaving, setContextCompressionSaving] = useState(false);
@@ -242,6 +244,7 @@ const ChatPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const sendToastTimerRef = useRef<number | null>(null);
+  const introToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -257,6 +260,9 @@ const ChatPage: React.FC = () => {
     return () => {
       if (sendToastTimerRef.current !== null) {
         window.clearTimeout(sendToastTimerRef.current);
+      }
+      if (introToastTimerRef.current !== null) {
+        window.clearTimeout(introToastTimerRef.current);
       }
       Object.values(timers).forEach((timerId) => {
         if (timerId !== undefined) {
@@ -683,6 +689,27 @@ const ChatPage: React.FC = () => {
     setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
+  const showIntroToast = useCallback(() => {
+    if (introToastShownRef.current) return;
+    introToastShownRef.current = true;
+    setIntroToastVisible(true);
+    if (introToastTimerRef.current !== null) {
+      window.clearTimeout(introToastTimerRef.current);
+    }
+    introToastTimerRef.current = window.setTimeout(() => {
+      setIntroToastVisible(false);
+      introToastTimerRef.current = null;
+    }, 4500);
+  }, []);
+
+  const dismissIntroToast = useCallback(() => {
+    if (introToastTimerRef.current !== null) {
+      window.clearTimeout(introToastTimerRef.current);
+      introToastTimerRef.current = null;
+    }
+    setIntroToastVisible(false);
+  }, []);
+
   const handleSend = useCallback(
     async (
       overrideMessage?: string,
@@ -691,6 +718,7 @@ const ChatPage: React.FC = () => {
     ) => {
       const msgText = (overrideMessage ?? input).trim();
       if (!msgText || loading || !agentAvailable || !agentStatus) return;
+      showIntroToast();
       if (overrideMessage !== undefined) {
         setInput(msgText);
       }
@@ -751,7 +779,7 @@ const ChatPage: React.FC = () => {
         },
       });
     },
-    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, startStream, stockIndex],
+    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, showIntroToast, startStream, stockIndex],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -775,6 +803,14 @@ const ChatPage: React.FC = () => {
       setSendToast(null);
       sendToastTimerRef.current = null;
     }, durationMs);
+  }, []);
+
+  const dismissSendToast = useCallback(() => {
+    if (sendToastTimerRef.current !== null) {
+      window.clearTimeout(sendToastTimerRef.current);
+      sendToastTimerRef.current = null;
+    }
+    setSendToast(null);
   }, []);
 
   const toggleThinking = (msgId: string) => {
@@ -937,32 +973,21 @@ const ChatPage: React.FC = () => {
 
   const sidebarContent = (
     <>
-      <div className="flex items-center justify-between border-b border-white/5 bg-white/2 p-3.5">
-        <h2 className="text-sm font-semibold text-cyan uppercase tracking-[0.2em] flex items-center gap-2">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          历史对话
-        </h2>
-        <button
-          onClick={handleStartNewChat}
-          className="rounded-lg p-1.5 text-muted-text transition-all hover:bg-white/10 hover:text-foreground"
-          aria-label="开启新对话"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-        </button>
+      <div className="border-b border-subtle px-3 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground tracking-tight">
+            <svg className="w-4 h-4 flex-shrink-0 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="truncate">历史对话</span>
+          </h2>
+          <Button variant="ghost" size="sm" onClick={handleStartNewChat} aria-label="开启新对话">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            新对话
+          </Button>
+        </div>
       </div>
       <ScrollArea testId="chat-session-list-scroll" viewportClassName="p-3">
         {sessionsLoading ? (
@@ -981,57 +1006,51 @@ const ChatPage: React.FC = () => {
           />
         ) : (
           <div className="space-y-2">
-            {sessions.map((s) => (
-              <div key={s.session_id} className="session-item-row">
-                <button
-                  type="button"
+            {sessions.map((s) => {
+              const isActive = s.session_id === sessionId;
+              return (
+                <ListItemRow
+                  key={s.session_id}
+                  wrapperClassName="home-history-item w-full min-w-0 flex-1"
+                  buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
+                    isActive ? 'home-history-item-selected' : ''
+                  }`}
+                  ariaLabel={`切换到对话 ${s.title}`}
                   onClick={() => handleSwitchSession(s.session_id)}
-                  className={`session-item ${s.session_id === sessionId ? 'active' : ''}`}
-                  aria-label={`切换到对话 ${s.title}`}
-                  aria-current={s.session_id === sessionId ? 'page' : undefined}
-                >
-                  <div className="indicator" />
-                  <div className="content">
-                    <span className="title">{s.title}</span>
-                    <div className="mt-0.5 flex items-center gap-2">
-                      <span className="meta">
+                  pressed={isActive}
+                  leading={(
+                    <div
+                      className={`w-1 h-8 rounded-full flex-shrink-0 ${
+                        isActive ? 'bg-primary' : 'bg-subtle'
+                      }`}
+                      style={isActive ? { boxShadow: '0 0 10px hsl(var(--primary) / 0.4)' } : undefined}
+                    />
+                  )}
+                  title={(
+                    <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
+                      {s.title}
+                    </span>
+                  )}
+                  meta={(
+                    <>
+                      <span className="text-[11px] text-muted-text">
                         {s.message_count} 条对话
                       </span>
                       {s.last_active && (
                         <>
-                          <span className="separator" />
-                          <span className="meta">
+                          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+                          <span className="text-[11px] text-muted-text">
                             {new Date(s.last_active).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
                           </span>
                         </>
                       )}
-                    </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className="delete-btn"
-                  onClick={() => {
-                    setDeleteConfirmId(s.session_id);
-                  }}
-                  aria-label={`删除对话 ${s.title}`}
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            ))}
+                    </>
+                  )}
+                  onDelete={() => setDeleteConfirmId(s.session_id)}
+                  deleteAriaLabel={`删除对话 ${s.title}`}
+                />
+              );
+            })}
           </div>
         )}
       </ScrollArea>
@@ -1045,98 +1064,104 @@ const ChatPage: React.FC = () => {
   return (
     <div
       data-testid="chat-workspace"
-      className="flex h-[calc(100vh-5rem)] w-full min-w-0 gap-4 overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
+      className="flex h-[calc(100vh-4rem)] w-full min-w-0 flex-col overflow-hidden px-3 pb-4 sm:h-[calc(100vh-4.5rem)] md:px-4"
     >
-      {/* Desktop sidebar */}
-      <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card md:flex">
-        {sidebarContent}
-      </div>
-
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        >
-          <div className="page-drawer-overlay absolute inset-0" />
-          <div
-            className="absolute left-0 top-0 bottom-0 w-72 flex flex-col glass-card overflow-hidden border-r border-white/10 bg-card/90 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+        {/* Top action bar: mobile menu left, external export/send buttons right */}
+        <div className="mb-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
+            aria-label="历史对话"
           >
-            {sidebarContent}
-          </div>
-        </div>
-      )}
-
-      {/* Delete confirmation dialog */}
-      <ConfirmDialog
-        isOpen={Boolean(deleteConfirmId)}
-        title="删除对话"
-        message="删除后，该对话将不可恢复，确认删除吗？"
-        confirmText="删除"
-        cancelText="取消"
-        isDanger
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteConfirmId(null)}
-      />
-
-      {/* Main chat area */}
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="mb-4 flex-shrink-0 space-y-3">
-          <div className="flex items-start justify-between gap-4">
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
-                aria-label="历史对话"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 6h16M4 12h16M4 18h16"
-                  />
-                </svg>
-              </button>
-              <svg
-                className="w-6 h-6 text-cyan"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                />
-              </svg>
-              问股
-              {agentStatus ? (
-                <Badge
-                  variant={agentStatus.backend === 'codex_app_server' ? 'warning' : 'history'}
-                  size="sm"
-                >
-                  {t(agentStatus.backend === 'codex_app_server' ? 'chat.codexBackendBadge' : 'chat.defaultBackendBadge')}
-                </Badge>
-              ) : null}
-            </h1>
-            {messages.length > 0 && (
-              <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                <Tooltip content="导出会话为 Markdown 文件">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      onClick={() => downloadSession(messages)}
-                      aria-label="导出会话为 Markdown 文件"
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+          <div className="ml-auto flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+              <Tooltip content="导出会话为 Markdown 文件">
+                <span className="inline-flex">
+                  <Button
+                    variant="action-primary"
+                    size="sm"
+                    disabled={messages.length === 0}
+                    onClick={() => downloadSession(messages)}
+                    aria-label="导出会话为 Markdown 文件"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
                     >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
+                    </svg>
+                    导出会话
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip content="发送到已配置的通知机器人/邮箱">
+                <span className="inline-flex">
+                  <Button
+                    variant="action-primary"
+                    size="sm"
+                    disabled={sending || messages.length === 0}
+                    onClick={async () => {
+                      if (sending) return;
+                      setSending(true);
+                      setSendToast(null);
+                      try {
+                        const content = formatSessionAsMarkdown(messages);
+                        await agentApi.sendChat(content);
+                        showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
+                      } catch (err) {
+                        const parsed = getParsedApiError(err);
+                        showSendFeedback({
+                          type: 'error',
+                          message: parsed.message || '发送失败',
+                        }, 5000);
+                      } finally {
+                        setSending(false);
+                      }
+                    }}
+                    aria-label="发送到已配置的通知机器人/邮箱"
+                  >
+                    {sending ? (
+                      <svg
+                        className="w-4 h-4 animate-spin"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                    ) : (
                       <svg
                         className="w-4 h-4"
                         fill="none"
@@ -1147,84 +1172,55 @@ const ChatPage: React.FC = () => {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                          d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
                         />
                       </svg>
-                      导出会话
-                    </Button>
-                  </span>
-                </Tooltip>
-                <Tooltip content="发送到已配置的通知机器人/邮箱">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      disabled={sending}
-                      onClick={async () => {
-                        if (sending) return;
-                        setSending(true);
-                        setSendToast(null);
-                        try {
-                          const content = formatSessionAsMarkdown(messages);
-                          await agentApi.sendChat(content);
-                          showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
-                        } catch (err) {
-                          const parsed = getParsedApiError(err);
-                          showSendFeedback({
-                            type: 'error',
-                            message: parsed.message || '发送失败',
-                          }, 5000);
-                        } finally {
-                          setSending(false);
-                        }
-                      }}
-                      aria-label="发送到已配置的通知机器人/邮箱"
-                    >
-                      {sending ? (
-                        <svg
-                          className="w-4 h-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                          />
-                        </svg>
-                      )}
-                      发送
-                    </Button>
-                  </span>
-                </Tooltip>
-              </div>
-            )}
+                    )}
+                    发送
+                  </Button>
+                </span>
+              </Tooltip>
+            </div>
           </div>
-          <p className="text-secondary-text text-sm">
-            {t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
-          </p>
+        </div>
+
+        {/* Content row: sidebar + main chat */}
+        <div className="flex min-h-0 flex-1 gap-4">
+          {/* Desktop sidebar */}
+          <div className="hidden w-64 flex-shrink-0 flex-col overflow-hidden glass-card md:flex">
+            {sidebarContent}
+          </div>
+
+          {/* Mobile sidebar overlay */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-40 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <div className="page-drawer-overlay absolute inset-0" />
+              <div
+                className="absolute left-0 top-0 bottom-0 w-72 flex flex-col glass-card overflow-hidden border-r border-white/10 bg-card/90 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {sidebarContent}
+              </div>
+            </div>
+          )}
+
+          {/* Delete confirmation dialog */}
+          <ConfirmDialog
+            isOpen={Boolean(deleteConfirmId)}
+            title="删除对话"
+            message="删除后，该对话将不可恢复，确认删除吗？"
+            confirmText="删除"
+            cancelText="取消"
+            isDanger
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteConfirmId(null)}
+          />
+
+          {/* Main chat area */}
+          <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           {agentStatus?.backend === 'codex_app_server' ? (
             <InlineAlert
               variant="warning"
@@ -1239,20 +1235,57 @@ const ChatPage: React.FC = () => {
                   {t('chat.codexChangeBackend')}
                 </Button>
               )}
-              className="rounded-xl px-3 py-2 text-xs shadow-none"
+              className="mb-4 rounded-xl px-3 py-2 text-xs shadow-none"
             />
           ) : null}
-          {sendToast ? (
-            <InlineAlert
-              variant={sendToast.type === 'success' ? 'success' : 'danger'}
-              title={sendToast.type === 'success' ? '发送成功' : '发送失败'}
-              message={sendToast.message}
-              className="max-w-md rounded-xl px-3 py-2 text-xs shadow-none"
-            />
-          ) : null}
-        </header>
+          {/* Floating toast overlays (do not affect layout) */}
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 px-4">
+            {introToastVisible ? (
+              <InlineAlert
+                variant="info"
+                style={{ backgroundColor: 'hsl(var(--primary) / 0.4)', backdropFilter: 'blur(12px)' }}
+                title={t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
+                message="输入股票代码或名称，选择技能后即可开始分析。"
+                action={(
+                  <button
+                    type="button"
+                    onClick={dismissIntroToast}
+                    className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
+                    aria-label="关闭提示"
+                  >
+                    ✕
+                  </button>
+                )}
+                className="pointer-events-auto w-full max-w-md rounded-xl px-3 py-2 text-xs shadow-soft-card"
+              />
+            ) : null}
+            {sendToast ? (
+              <InlineAlert
+                variant={sendToast.type === 'success' ? 'success' : 'danger'}
+                style={{
+                  backgroundColor: sendToast.type === 'success'
+                    ? 'hsl(var(--success) / 0.4)'
+                    : 'hsl(var(--danger) / 0.4)',
+                  backdropFilter: 'blur(12px)',
+                }}
+                title={sendToast.type === 'success' ? '发送成功' : '发送失败'}
+                message={sendToast.message}
+                action={(
+                  <button
+                    type="button"
+                    onClick={dismissSendToast}
+                    className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
+                    aria-label="关闭提示"
+                  >
+                    ✕
+                  </button>
+                )}
+                className="pointer-events-auto w-full max-w-md rounded-xl px-3 py-2 text-xs shadow-soft-card"
+              />
+            ) : null}
+          </div>
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
           {/* Messages */}
           <ScrollArea
             className="relative z-10 flex-1"
@@ -1363,7 +1396,7 @@ const ChatPage: React.FC = () => {
                             className="chat-copy-btn"
                             aria-label={copiedMessages.has(msg.id) ? text.copied : text.copy}
                           >
-                            {copiedMessages.has(msg.id) ? text.copied : text.copy}
+                            {copiedMessages.has(msg.id) ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                           </button>
                           <button
                             type="button"
@@ -1403,7 +1436,7 @@ const ChatPage: React.FC = () => {
                 <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
                   AI
                 </div>
-                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm border border-white/6 bg-card/72 px-5 py-4">
+                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm bg-card/72 px-5 py-4 shadow-soft-card">
                   <div className="flex items-center gap-2.5 text-sm text-secondary-text">
                     <div className="relative w-4 h-4 flex-shrink-0">
                       <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
@@ -1687,6 +1720,7 @@ const ChatPage: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

@@ -11,9 +11,8 @@ import {
   Plus,
   RefreshCw,
   Star,
-  Trash2,
 } from 'lucide-react';
-import { Badge, Button, InlineAlert, Input, ScrollArea, StatusDot } from '../common';
+import { Badge, Button, InlineAlert, Input, ListItemRow, ScrollArea, StatusDot, Tooltip } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBar } from '../history';
 import type { StockBarItem, TaskInfo } from '../../types/analysis';
@@ -121,120 +120,133 @@ const WatchlistRowItem: React.FC<{
   const taskLabel = getTaskStatusLabel(row.activeTask, t);
   const isLatestDetailLoading = Boolean(row.isTodayStatusLoading);
   const isLatestDetailUnavailable = !isLatestDetailLoading && Boolean(row.isTodayStatusUnknown);
-  const item = isLatestDetailLoading || isLatestDetailUnavailable ? undefined : row.latestItem;
-  const stockName = row.latestItem?.stockName || row.code;
-  const canOpenDetail = typeof item?.id === 'number';
+  // Keep showing the last-known detail during a refresh (so the row doesn't blank
+  // out and jitter); loading only blocks opening it, preventing stale-detail clicks.
+  const item = row.latestItem;
+  const stockName = item?.stockName || row.code;
+  const canOpenDetail = !isLatestDetailLoading && !isLatestDetailUnavailable && typeof item?.id === 'number';
 
   const handleOpenDetail = () => {
     onOpenDetail(row);
   };
 
-  return (
+  const score = typeof item?.sentimentScore === 'number' ? item.sentimentScore : null;
+  const color = score !== null ? getSentimentColor(score) : null;
+  const leading = color ? (
     <div
-      className={`home-subpanel group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2.5 text-left transition-colors ${
-        selected
-          ? 'border-primary/35 bg-primary/10'
-          : 'hover:border-subtle-hover hover:bg-base/65'
-      }`}
-      data-testid={`watchlist-row-${row.code}`}
-    >
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={canOpenDetail
-          ? t('watchlist.openLatestDetailAria', { code: row.code })
-          : isLatestDetailLoading
-            ? t('watchlist.latestDetailLoadingAria', { code: row.code })
-            : isLatestDetailUnavailable
-              ? t('watchlist.latestDetailUnavailableAria', { code: row.code })
-            : t('watchlist.noLatestDetailAria', { code: row.code })}
-        className="grid min-w-0 cursor-pointer gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/30"
-        onClick={handleOpenDetail}
-      >
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
+      className="w-1 h-8 rounded-full flex-shrink-0"
+      style={{ backgroundColor: color, boxShadow: `0 0 10px ${color}40` }}
+    />
+  ) : (
+    <div className="w-1 h-8 rounded-full flex-shrink-0 bg-subtle" />
+  );
+
+  return (
+    <ListItemRow
+      wrapperClassName="home-history-item w-full min-w-0 flex-1"
+      wrapperTestId={`watchlist-row-${row.code}`}
+      buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${selected ? 'home-history-item-selected' : ''}`}
+      pressed={selected}
+      leading={leading}
+      ariaLabel={canOpenDetail
+        ? t('watchlist.openLatestDetailAria', { code: row.code })
+        : isLatestDetailLoading
+          ? t('watchlist.latestDetailLoadingAria', { code: row.code })
+          : isLatestDetailUnavailable
+            ? t('watchlist.latestDetailUnavailableAria', { code: row.code })
+          : t('watchlist.noLatestDetailAria', { code: row.code })}
+      onClick={handleOpenDetail}
+      title={(
+        <div className="flex min-w-0 items-center gap-2">
+          <Tooltip
+            content={canOpenDetail ? t('common.details') : undefined}
+            className="min-w-0"
+          >
             <span className="truncate text-sm font-semibold text-foreground">
               {truncateStockName(stockName)}
             </span>
-            {row.isTodayStatusLoading ? (
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-text" aria-label={t('watchlist.todayStatusLoading')} />
-            ) : row.isTodayStatusUnknown ? (
-              <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label={t('watchlist.todayStatusUnavailable')} />
-            ) : row.analyzedToday ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-label={t('watchlist.analyzedToday')} />
-            ) : (
-              <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-text" aria-label={t('watchlist.notAnalyzedToday')} />
-            )}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[11px] text-secondary-text">{row.code}</span>
-            {item?.lastAnalysisTime ? (
-              <>
-                <span className="h-1 w-1 rounded-full bg-subtle-hover" />
-                <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
-              </>
-            ) : null}
-          </div>
-          <div className="flex min-w-0 items-center justify-between gap-2 text-[11px]">
-            <span className={`truncate ${canOpenDetail ? 'text-primary' : isLatestDetailLoading ? 'text-muted-text' : 'text-warning'}`}>
-              {canOpenDetail
-                ? t('common.details')
-                : isLatestDetailLoading
-                  ? t('watchlist.latestDetailLoadingCta')
-                  : isLatestDetailUnavailable
-                    ? t('watchlist.latestDetailUnavailableCta')
-                    : t('watchlist.noLatestDetailCta')}
-            </span>
-          </div>
-          {row.activeTask ? (
-            <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-text">
-              <StatusDot
-                tone={row.activeTask.status === 'processing' ? 'info' : 'neutral'}
-                pulse={row.activeTask.status === 'processing'}
-                className="h-1.5 w-1.5"
-              />
-              <span className="truncate">{t('watchlist.taskRunning', { status: taskLabel })}</span>
-            </div>
-          ) : null}
+          </Tooltip>
+          {row.isTodayStatusLoading ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-text" aria-label={t('watchlist.todayStatusLoading')} />
+          ) : row.isTodayStatusUnknown ? (
+            <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label={t('watchlist.todayStatusUnavailable')} />
+          ) : row.analyzedToday ? (
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-label={t('watchlist.analyzedToday')} />
+          ) : (
+            <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-text" aria-label={t('watchlist.notAnalyzedToday')} />
+          )}
         </div>
-      </button>
-      <div className="flex shrink-0 items-start gap-1.5">
-        <ScoreBadge item={item} />
-        <Button
-          type="button"
-          variant="ghost"
-          size="xsm"
-          className="h-7 w-7 px-0"
-          disabled={disabled}
-          aria-label={t('watchlist.removeAria', { code: row.code })}
-          onClick={() => void onRemove(row.code)}
-        >
-          <Trash2 className="h-3.5 w-3.5 text-danger" aria-hidden="true" />
-        </Button>
-      </div>
-    </div>
+      )}
+      trailing={<ScoreBadge item={item} />}
+      onDelete={() => void onRemove(row.code)}
+      deleteAriaLabel={t('watchlist.removeAria', { code: row.code })}
+      deleteDisabled={disabled}
+      meta={(
+        <>
+          <span className="font-mono text-[11px] text-secondary-text">{row.code}</span>
+          {item?.lastAnalysisTime ? (
+            <>
+              <span className="h-1 w-1 rounded-full bg-subtle-hover" />
+              <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
+            </>
+          ) : null}
+        </>
+      )}
+      actionsTestId="watchlist-row-actions"
+      footer={row.activeTask ? (
+        <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-text">
+          <StatusDot
+            tone={row.activeTask.status === 'processing' ? 'info' : 'neutral'}
+            pulse={row.activeTask.status === 'processing'}
+            className="h-1.5 w-1.5"
+          />
+          <span className="truncate">{t('watchlist.taskRunning', { status: taskLabel })}</span>
+        </div>
+      ) : undefined}
+    />
   );
 };
 
-const TodayItem: React.FC<{ item: StockBarItem; onClick: (recordId: number) => void }> = ({ item, onClick }) => {
+const TodayItem: React.FC<{ item: StockBarItem; onClick: (recordId: number) => void; selected: boolean }> = ({ item, onClick, selected }) => {
+  const { t } = useUiLanguage();
   const stockName = item.stockName || item.stockCode;
+  const score = typeof item.sentimentScore === 'number' ? item.sentimentScore : null;
+  const color = score !== null ? getSentimentColor(score) : null;
+
+  const leading = color ? (
+    <div
+      className="w-1 h-8 rounded-full flex-shrink-0"
+      style={{ backgroundColor: color, boxShadow: `0 0 10px ${color}40` }}
+    />
+  ) : (
+    <div className="w-1 h-8 rounded-full flex-shrink-0 bg-subtle" />
+  );
 
   return (
-    <button
-      type="button"
-      className="home-subpanel grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 text-left"
+    <ListItemRow
+      wrapperClassName="home-history-item w-full min-w-0 flex-1"
+      buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${selected ? 'home-history-item-selected' : ''}`}
+      ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
       onClick={() => onClick(item.id)}
-    >
-      <div className="min-w-0">
-        <span className="block truncate text-sm font-semibold text-foreground">
+      leading={leading}
+      title={(
+        <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
           {truncateStockName(stockName)}
         </span>
-        <span className="mt-1 block truncate font-mono text-[11px] text-secondary-text">
-          {item.stockCode}
-        </span>
-      </div>
-      <ScoreBadge item={item} />
-    </button>
+      )}
+      trailing={<ScoreBadge item={item} />}
+      meta={(
+        <>
+          <span className="text-[11px] text-secondary-text font-mono">{item.stockCode}</span>
+          {item.lastAnalysisTime ? (
+            <>
+              <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+              <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
+            </>
+          ) : null}
+        </>
+      )}
+    />
   );
 };
 
@@ -345,10 +357,10 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     </div>
   );
 
-  if (activeTab === 'history') {
-    return (
-      <div className={`flex min-h-0 flex-1 flex-col gap-2 ${className}`}>
-        {renderTabs}
+  return (
+    <div className={`flex min-h-0 flex-1 flex-col gap-2 ${className}`}>
+      {renderTabs}
+      {activeTab === 'history' ? (
         <StockBar
           items={historyItems}
           isLoading={isLoadingHistory}
@@ -359,21 +371,16 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
           isDeleting={isDeleting}
           className="flex-1 overflow-hidden"
         />
-      </div>
-    );
-  }
-
-  return (
-    <aside className={`glass-card flex min-h-0 flex-1 flex-col overflow-hidden ${className}`}>
-      <div className="space-y-2.5 border-b border-subtle px-3 py-3 sm:px-4">
-        {renderTabs}
-
-        {activeTab === 'watchlist' ? (
+      ) : (
+        <aside className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="space-y-2 border-b border-subtle px-3 py-3 sm:px-4">
+            {activeTab === 'watchlist' ? (
           <>
             <DashboardPanelHeader
               className="mb-0"
               title={t('watchlist.title')}
               titleClassName="text-sm font-medium"
+              headingClassName="items-center"
               leading={<Star className="h-4 w-4 text-primary" aria-hidden="true" />}
               actions={(
                 <div className="flex items-center gap-1.5">
@@ -395,13 +402,16 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 </div>
               )}
             />
-            <div className="flex flex-wrap gap-1.5">
-              <Badge variant="default" className="gap-1 shadow-none text-[11px]">
-                {t('watchlist.todayCoverage')} {watchlistAnalyzedTodayCount}/{watchlistRows.length}
-              </Badge>
-              <Badge variant="default" className="gap-1 shadow-none text-[11px]">
-                {t('watchlist.pendingToday')} {pendingWatchlistCount}
-              </Badge>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-text">
+              <span>
+                {t('watchlist.todayCoverage')}{' '}
+                <span className="font-medium text-secondary-text">{watchlistAnalyzedTodayCount}/{watchlistRows.length}</span>
+              </span>
+              <span className="h-1 w-1 rounded-full bg-subtle-hover" aria-hidden="true" />
+              <span>
+                {t('watchlist.pendingToday')}{' '}
+                <span className="font-medium text-secondary-text">{pendingWatchlistCount}</span>
+              </span>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -474,8 +484,27 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
               className="mb-0"
               title={t('watchlist.todayTitle')}
               titleClassName="text-sm font-medium"
-              leading={<CalendarDays className="h-4 w-4 text-cyan" aria-hidden="true" />}
-              actions={<span className="text-[11px] text-muted-text">{t('common.itemsCount', { count: todayItems.length })}</span>}
+              headingClassName="items-center"
+              leading={<CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />}
+              actions={(
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-muted-text">{t('common.itemsCount', { count: todayItems.length })}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xsm"
+                    className="h-7 w-7 px-0"
+                    disabled={watchlistLoading || isLoadingTodayItems}
+                    onClick={() => {
+                      setWorkspaceNoticeCode(null);
+                      void onRefreshWatchlist();
+                    }}
+                    aria-label={t('watchlist.refreshAria')}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              )}
             />
             <div className="flex flex-wrap gap-1.5">
               <Badge variant="default" className="gap-1 shadow-none text-[11px]">
@@ -544,18 +573,31 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
             description={t('watchlist.todayEmptyDescription')}
           />
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2 text-[11px] text-muted-text">
               <ArrowDownWideNarrow className="h-3.5 w-3.5" aria-hidden="true" />
               {t('watchlist.todaySortHint')}
             </div>
             {todayItems.map((item) => (
-              <TodayItem key={`${item.stockCode}-${item.id}`} item={item} onClick={onHistoryItemClick} />
+              <TodayItem
+                key={`${item.stockCode}-${item.id}`}
+                item={item}
+                onClick={onHistoryItemClick}
+                selected={
+                  (typeof selectedRecordId === 'number' && selectedRecordId === item.id)
+                  || (
+                    Boolean(selectedStockCode)
+                    && areStockCodesEquivalent(selectedStockCode ?? '', item.stockCode)
+                  )
+                }
+              />
             ))}
           </div>
-        )}
-      </ScrollArea>
-    </aside>
+            )}
+          </ScrollArea>
+        </aside>
+      )}
+    </div>
   );
 };
 

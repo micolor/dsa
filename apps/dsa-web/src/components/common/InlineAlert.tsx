@@ -9,6 +9,7 @@ interface InlineAlertProps {
   variant?: InlineAlertVariant;
   action?: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 const variantStyles: Record<InlineAlertVariant, string> = {
@@ -24,10 +25,12 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
   variant = 'info',
   action,
   className = '',
+  style,
 }) => {
   return (
     <div
       role="alert"
+      style={style}
       className={cn('max-w-full overflow-hidden rounded-2xl border px-4 py-3 shadow-soft-card', variantStyles[variant], className)}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

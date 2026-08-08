@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { BarChart3, Check, SlidersHorizontal, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
@@ -16,7 +17,7 @@ import { MarketReviewReportView } from '../components/report/MarketReviewReportV
 import { MarketReviewRegionSelector } from '../components/market-review/MarketReviewRegionSelector';
 import { ReportSummary } from '../components/report/ReportSummary';
 import { RunFlowPanel } from '../components/run-flow';
-import { TaskPanel } from '../components/tasks';
+import { FloatingTaskPanel } from '../components/tasks';
 import {
   HomeStockWorkspace,
   type HomeWatchlistRow,
@@ -62,7 +63,6 @@ const DUPLICATE_BANNER_AUTO_DISMISS_MS = 5000;
 const BATCH_ANALYSIS_CHUNK_SIZE = 50;
 const TODAY_ANALYSIS_PAGE_SIZE = 100;
 const WATCHLIST_HISTORY_LOOKUP_CONCURRENCY = 4;
-const TASK_PANEL_COLLAPSED_STORAGE_KEY = 'dsa.home.taskPanelCollapsed';
 const SERVER_LOCAL_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 
 type BatchAnalyzeStatus = {
@@ -155,31 +155,6 @@ function chunkStockCodes(codes: string[]): string[][] {
   return chunks;
 }
 
-function readTaskPanelCollapsedPreference(): boolean | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  try {
-    const rawValue = window.sessionStorage.getItem(TASK_PANEL_COLLAPSED_STORAGE_KEY);
-    if (rawValue === 'true') return true;
-    if (rawValue === 'false') return false;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function writeTaskPanelCollapsedPreference(collapsed: boolean): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.sessionStorage.setItem(TASK_PANEL_COLLAPSED_STORAGE_KEY, String(collapsed));
-  } catch {
-    // Session storage is best-effort; keep the in-memory toggle state working.
-  }
-}
-
 function countBatchAccepted(result: AnalyzeAsyncResponse): { accepted: number; duplicates: number } {
   if ('accepted' in result) {
     return {
@@ -261,9 +236,6 @@ const HomePage: React.FC = () => {
   const [runFlowDrawer, setRunFlowDrawer] = useState<RunFlowDrawerState>({ open: false });
   const [duplicateBannerVisible, setDuplicateBannerVisible] = useState(false);
   const [sidebarWorkspaceTab, setSidebarWorkspaceTab] = useState<HomeWorkspaceTab>('history');
-  const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState<boolean>(() => (
-    readTaskPanelCollapsedPreference() ?? false
-  ));
   const [isBatchAnalyzingWatchlist, setIsBatchAnalyzingWatchlist] = useState(false);
   const [batchAnalyzeStatus, setBatchAnalyzeStatus] = useState<BatchAnalyzeStatus>(null);
   const [watchlistHistoryItemsByCode, setWatchlistHistoryItemsByCode] = useState<Map<string, StockBarItem>>(new Map());
@@ -284,7 +256,6 @@ const HomePage: React.FC = () => {
   const duplicateBannerTimer = useRef<number | null>(null);
   const marketReviewPollTimer = useRef<number | null>(null);
   const stockBarLoadStartedRef = useRef(false);
-  const taskPanelPreferenceSettledRef = useRef(readTaskPanelCollapsedPreference() !== null);
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
   const strategyMenuRef = useRef<HTMLDivElement | null>(null);
   const strategyButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -391,22 +362,6 @@ const HomePage: React.FC = () => {
 
     return clearDuplicateBannerTimer;
   }, [clearDuplicateBannerTimer, duplicateError]);
-
-  useEffect(() => {
-    if (taskPanelPreferenceSettledRef.current || activeTasks.length === 0) {
-      return;
-    }
-    const nextCollapsed = activeTasks.length > 1;
-    setIsTaskPanelCollapsed(nextCollapsed);
-    writeTaskPanelCollapsedPreference(nextCollapsed);
-    taskPanelPreferenceSettledRef.current = true;
-  }, [activeTasks.length]);
-
-  const handleTaskPanelCollapsedChange = useCallback((collapsed: boolean) => {
-    setIsTaskPanelCollapsed(collapsed);
-    taskPanelPreferenceSettledRef.current = true;
-    writeTaskPanelCollapsedPreference(collapsed);
-  }, []);
 
   useEffect(() => {
     document.title = t('home.pageTitle');
@@ -1008,8 +963,6 @@ const HomePage: React.FC = () => {
           }
           return true;
         }
-
-        return true;
       };
 
       if (await poll()) {
@@ -1140,9 +1093,11 @@ const HomePage: React.FC = () => {
         hasFailedHistoryLookup
         || (stockBarRefreshFailed && !hasPendingHistoryLookup)
       );
-      const latestItem = isTodayStatusLoading || isTodayStatusUnknown
-        ? undefined
-        : latestItemCandidate;
+      // Keep the last-known item while a refresh/status check is in flight so the
+      // row keeps showing its score/name/color instead of blanking out (visible
+      // jitter on every stock-bar refresh). Stale-detail clicks are still blocked
+      // separately via `isTodayStatusLoading` in the open handler.
+      const latestItem = latestItemCandidate || undefined;
       return {
         code,
         latestItem,
@@ -1359,12 +1314,6 @@ const HomePage: React.FC = () => {
   const sidebarContent = useMemo(
     () => (
       <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
-        <TaskPanel
-          tasks={activeTasks}
-          onOpenRunFlow={openTaskRunFlow}
-          collapsed={isTaskPanelCollapsed}
-          onCollapsedChange={handleTaskPanelCollapsedChange}
-        />
         <HomeStockWorkspace
           activeTab={sidebarWorkspaceTab}
           onTabChange={setSidebarWorkspaceTab}
@@ -1394,21 +1343,17 @@ const HomePage: React.FC = () => {
       </div>
     ),
     [
-      activeTasks,
       batchAnalyzeStatus,
       handleAnalyzeWatchlist,
       handleDeleteStock,
       handleHistoryItemClick,
       handleRefreshWatchlist,
-      handleTaskPanelCollapsedChange,
       isBatchAnalyzingWatchlist,
       isDeletingStock,
       isLoadingStockBar,
       isLoadingTodayAnalysisItems,
-      isTaskPanelCollapsed,
       todayAnalysisLoadFailed,
       mergedStockBarItems,
-      openTaskRunFlow,
       selectedReport?.meta.id,
       selectedReport?.meta.stockCode,
       sidebarWorkspaceTab,
@@ -1423,14 +1368,44 @@ const HomePage: React.FC = () => {
     ],
   );
 
+  // The homepage is a fixed-height box whose content scrolls in an inner
+  // container, so the mouse wheel only works while hovering that container.
+  // Forward wheel events over the header / any non-scrollable region to the
+  // scroll container so scrolling works from anywhere on the page.
+  const handleDashboardWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const section = dashboardScrollRef.current;
+    if (!section) return;
+
+    const target = e.target as Node;
+    let el: Element | null = target instanceof Element ? target : null;
+    while (el && el !== document.body) {
+      if (el === section) return; // already inside the scroll container -> native
+      const style = window.getComputedStyle(el);
+      const oy = style.overflowY;
+      if (
+        (oy === 'auto' || oy === 'scroll' || oy === 'overlay') &&
+        el.scrollHeight > el.clientHeight
+      ) {
+        return; // inside another scrollable (dropdown / menu) -> native
+      }
+      el = el.parentElement;
+    }
+
+    // Wheel over a non-scrollable region (search header, gaps) -> forward it.
+    e.preventDefault();
+    section.scrollTop += e.deltaY;
+  }, []);
+
   return (
+    <MotionConfig reducedMotion="user">
     <div
       data-testid="home-dashboard"
-      className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
+      onWheel={handleDashboardWheel}
+      className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-4.5rem)]"
     >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full lg:max-w-6xl mx-auto w-full">
-        <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible px-3 py-3 md:px-4 md:py-4">
-          <div className="flex min-w-0 flex-1 flex-col gap-2.5 md:flex-row md:items-center">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 w-full">
+        <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible px-3 pb-3 md:px-4 md:pb-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5 lg:flex-row lg:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <button
                 onClick={() => setSidebarOpen(true)}
@@ -1470,39 +1445,45 @@ const HomePage: React.FC = () => {
                     <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedStrategy?.name || t('home.strategy')}</span>
                   </button>
-                  {strategyMenuOpen ? (
-                    <div
-                      id="strategy-menu"
-                      role="menu"
-                      aria-labelledby="strategy-menu-button"
-                      onKeyDown={handleStrategyMenuKeyDown}
-                      className="absolute right-0 top-11 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
-                    >
-                      {strategyOptions.map((option, index) => {
-                        const selected = selectedStrategyId === option.id;
-                        return (
-                          <button
-                            key={option.id || 'default'}
-                            ref={(node) => {
-                              strategyItemRefs.current[index] = node;
-                            }}
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            tabIndex={-1}
-                            onClick={() => selectStrategy(option.id)}
-                            className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
-                          >
-                            <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
-                            <span className="min-w-0">
-                              <span className="block font-medium">{option.name}</span>
-                              <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{option.description}</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                  <AnimatePresence>
+                    {strategyMenuOpen ? (
+                      <motion.div
+                        id="strategy-menu"
+                        role="menu"
+                        aria-labelledby="strategy-menu-button"
+                        onKeyDown={handleStrategyMenuKeyDown}
+                        initial={{ opacity: 0, scale: 0.97, transformOrigin: 'top right' }}
+                        animate={{ opacity: 1, scale: 1, transformOrigin: 'top right' }}
+                        exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }}
+                        transition={{ type: 'spring', duration: 0.28, bounce: 0 }}
+                        className="absolute right-0 top-11 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
+                      >
+                        {strategyOptions.map((option, index) => {
+                          const selected = selectedStrategyId === option.id;
+                          return (
+                            <button
+                              key={option.id || 'default'}
+                              ref={(node) => {
+                                strategyItemRefs.current[index] = node;
+                              }}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={selected}
+                              tabIndex={-1}
+                              onClick={() => selectStrategy(option.id)}
+                              className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
+                            >
+                              <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
+                              <span className="min-w-0">
+                                <span className="block font-medium">{option.name}</span>
+                                <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{option.description}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
                 </div>
               ) : null}
             </div>
@@ -1515,6 +1496,7 @@ const HomePage: React.FC = () => {
               <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground has-disabled:cursor-not-allowed has-disabled:opacity-50">
                 <input
                   type="checkbox"
+                  name="notifyPush"
                   checked={notify}
                   disabled={isSubmittingMarketReview}
                   onChange={(e) => setNotify(e.target.checked)}
@@ -1617,22 +1599,34 @@ const HomePage: React.FC = () => {
             {sidebarContent}
           </div>
 
-          {sidebarOpen ? (
-            <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
-              <div className="page-drawer-overlay absolute inset-0" />
-              <div
-                className="dashboard-card absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                {sidebarContent}
+          <AnimatePresence>
+            {sidebarOpen ? (
+              <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
+                <motion.div
+                  className="page-drawer-overlay absolute inset-0"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                />
+                <motion.div
+                  className="dashboard-card absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                  initial={{ x: '-100%' }}
+                  animate={{ x: 0 }}
+                  exit={{ x: '-100%', transition: { duration: 0.18 } }}
+                  transition={{ type: 'spring', duration: 0.32, bounce: 0 }}
+                >
+                  {sidebarContent}
+                </motion.div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </AnimatePresence>
 
           <section
             ref={dashboardScrollRef}
             data-testid="home-dashboard-scroll"
-            className="flex-1 min-w-0 min-h-0 overflow-x-auto overflow-y-auto px-3 pb-4 md:px-6 touch-pan-y"
+            className="flex-1 min-w-0 min-h-0 overflow-x-auto overflow-y-auto px-3 pb-4 md:px-4 touch-pan-y"
           >
             {marketReviewNotice ? (
               <div className="mb-3">
@@ -1676,7 +1670,7 @@ const HomePage: React.FC = () => {
                 <DashboardStateBlock title={t('home.loadingReport')} loading />
               </div>
             ) : !marketReviewReport && selectedReport ? (
-              <div className={isHistoryTrendOpen ? 'max-w-6xl space-y-4 pb-8' : 'max-w-4xl space-y-4 pb-8'}>
+              <div className="space-y-4 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {!isMarketReviewHistoryReport ? (
                     <>
@@ -1820,7 +1814,9 @@ const HomePage: React.FC = () => {
         </Drawer>
       ) : null}
 
+      <FloatingTaskPanel tasks={activeTasks} onOpenRunFlow={openTaskRunFlow} />
     </div>
+    </MotionConfig>
   );
 };
 

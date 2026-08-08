@@ -23,6 +23,7 @@ export * from './Select';
 export * from './Badge';
 export * from './StatusDot';
 export * from './Tooltip';
+export * from './ListItemRow';
 export * from './Pagination';
 export * from './ConfirmDialog';
 export * from '../layout/Shell';

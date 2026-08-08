@@ -491,11 +491,13 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             <ShareImageButton
               recordId={recordId}
               reportTitle={displayTitle}
               reportLanguage={reportLanguage}
+              size="sm"
+              iconOnly
             />
             {canOpenRunFlow ? (
               <Tooltip content={runFlowText['runFlow.open']}>
@@ -503,10 +505,10 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onOpenRunFlow(recordId)}
-                    className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground"
+                    className="home-surface-button flex h-8 w-8 items-center justify-center rounded-lg text-secondary-text hover:text-foreground"
                     aria-label={formatUiText(runFlowText['runFlow.openHistoryAria'], { recordId })}
                   >
-                    <Workflow className="h-5 w-5" aria-hidden="true" />
+                    <Workflow className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </span>
               </Tooltip>
@@ -517,15 +519,15 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   type="button"
                   onClick={() => void handleCopy('markdown')}
                   disabled={isLoading || !content || copiedType !== null}
-                  className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                  className="home-surface-button flex h-8 w-8 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
                   aria-label={text.copyMarkdownSource}
                 >
                   {copiedType === 'markdown' ? (
-                    <svg className="h-5 w-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-3.5 w-3.5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
-                    <Clipboard className="h-5 w-5" aria-hidden="true" />
+                    <Clipboard className="h-3.5 w-3.5" aria-hidden="true" />
                   )}
                 </button>
               </span>
@@ -536,15 +538,15 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   type="button"
                   onClick={() => void handleCopy('text')}
                   disabled={isLoading || !content || copiedType !== null}
-                  className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                  className="home-surface-button flex h-8 w-8 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
                   aria-label={text.copyPlainText}
                 >
                   {copiedType === 'text' ? (
-                    <svg className="h-5 w-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-3.5 w-3.5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
-                    <FileText className="h-5 w-5" aria-hidden="true" />
+                    <FileText className="h-3.5 w-3.5" aria-hidden="true" />
                   )}
                 </button>
               </span>
@@ -711,7 +713,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
       {isLoading ? (
         <Card variant="bordered" padding="md" className="home-panel-card text-left">
           <div className="flex h-64 flex-col items-center justify-center">
-            <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
+            <div className="home-spinner h-9 w-9 animate-spin border-[3px]" />
             <p className="mt-4 text-sm text-secondary-text">{text.loadingReport}</p>
           </div>
         </Card>

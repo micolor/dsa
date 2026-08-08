@@ -52,6 +52,7 @@ function FallbackInput({
   return (
     <input
       type="text"
+      name="stockQuery"
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
@@ -259,6 +260,7 @@ function StockAutocompleteInner({
       <input
         ref={inputRef}
         type="text"
+        name="stockQuery"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}

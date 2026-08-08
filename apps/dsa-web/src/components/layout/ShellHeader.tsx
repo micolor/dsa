@@ -2,25 +2,14 @@ import type React from 'react';
 import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
-import type { UiTextKey } from '../../i18n/uiText';
 import { UiLanguageToggle } from '../i18n/UiLanguageToggle';
 import { ThemeToggle } from '../theme/ThemeToggle';
+import { ROUTE_TITLES } from './routeTitles';
 
 type ShellHeaderProps = {
   collapsed: boolean;
   onToggleSidebar: () => void;
   onOpenMobileNav: () => void;
-};
-
-const TITLES: Record<string, { title: UiTextKey; description: UiTextKey }> = {
-  '/': { title: 'layout.route.home.title', description: 'layout.route.home.description' },
-  '/chat': { title: 'layout.route.chat.title', description: 'layout.route.chat.description' },
-  '/portfolio': { title: 'layout.route.portfolio.title', description: 'layout.route.portfolio.description' },
-  '/screening': { title: 'layout.route.screening.title', description: 'layout.route.screening.description' },
-  '/backtest': { title: 'layout.route.backtest.title', description: 'layout.route.backtest.description' },
-  '/alerts': { title: 'layout.route.alerts.title', description: 'layout.route.alerts.description' },
-  '/usage': { title: 'layout.route.usage.title', description: 'layout.route.usage.description' },
-  '/settings': { title: 'layout.route.settings.title', description: 'layout.route.settings.description' },
 };
 
 export const ShellHeader: React.FC<ShellHeaderProps> = ({
@@ -30,7 +19,7 @@ export const ShellHeader: React.FC<ShellHeaderProps> = ({
 }) => {
   const location = useLocation();
   const { t } = useUiLanguage();
-  const current = TITLES[location.pathname];
+  const current = ROUTE_TITLES[location.pathname];
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/84 backdrop-blur-xl">

@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useState, useEffect, useCallback } from 'react';
+import { RefreshCw } from 'lucide-react';
 import type { ParsedApiError } from '../../api/error';
 import { getParsedApiError } from '../../api/error';
 import { ApiErrorAlert, Card } from '../common';
@@ -39,6 +40,7 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
   const [isLoading, setIsLoading] = useState(false);
   const [items, setItems] = useState<NewsIntelItem[]>([]);
   const [error, setError] = useState<ParsedApiError | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   const fetchNews = useCallback(async () => {
     if (!recordId) return;
@@ -52,12 +54,14 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
       setError(getParsedApiError(err));
     } finally {
       setIsLoading(false);
+      setHasLoaded(true);
     }
   }, [recordId, limit]);
 
   useEffect(() => {
     setItems([]);
     setError(null);
+    setHasLoaded(false);
 
     if (recordId) {
       fetchNews();
@@ -75,19 +79,21 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         title={text.relatedNews}
         actions={(
           <div className="flex items-center gap-2">
-            {isLoading ? (
-              <div className="home-spinner h-3.5 w-3.5 animate-spin border-2" aria-hidden="true" />
-            ) : null}
+            <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
+              {isLoading ? (
+                <div className="home-spinner h-3.5 w-3.5 animate-spin border-2" aria-hidden="true" />
+              ) : null}
+            </span>
             <span className="home-accent-chip px-2 py-0.5 text-xs text-muted-text">
               {sourceText.sourceLabel}
             </span>
             <button
               type="button"
               onClick={() => void fetchNews()}
-              className="home-accent-link text-xs"
-              aria-label={text.refresh}
+              className="home-accent-link inline-flex items-center gap-1"
             >
-              {text.refresh}
+              <RefreshCw className="h-3 w-3" />
+              <span className="sr-only">{text.refresh}</span>
             </button>
           </div>
         )}
@@ -105,7 +111,9 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         />
       )}
 
-      {isLoading && !error && (
+      {/* Loading block shows only on the very first fetch, so a manual refresh
+          never swaps the empty state for a taller loading block (would jump). */}
+      {isLoading && !error && !hasLoaded && (
         <DashboardStateBlock
           compact
           loading
@@ -113,9 +121,10 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         />
       )}
 
-      {!isLoading && !error && items.length === 0 && (
+      {hasLoaded && !error && items.length === 0 && (
         <DashboardStateBlock
           compact
+          className={`transition-opacity duration-200 ${isLoading ? 'opacity-60' : ''}`}
           title={text.noNews}
           description={text.noNewsDescription}
           icon={(
@@ -126,8 +135,9 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         />
       )}
 
-      {!isLoading && !error && items.length > 0 && (
-        <div className="space-y-3 text-left">
+      {!error && items.length > 0 && (
+        <div className={`space-y-3 text-left transition-opacity duration-200 ${isLoading ? 'opacity-60' : ''}`}>
+          {isLoading ? <div className="sr-only" aria-live="polite">{text.loadingNews}</div> : null}
           {items.map((item, index) => (
             <div
               key={item.url || `${item.title}-${index}`}

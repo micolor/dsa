@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface JsonViewerProps {
@@ -88,11 +89,12 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({
       {/* 复制按钮 */}
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 px-2 py-1 text-xs rounded
+        className="absolute top-2 right-2 flex items-center justify-center p-1.5 rounded
           bg-slate-700 hover:bg-slate-600 text-gray-300
           transition-colors z-10"
+        aria-label={copied ? t('common.copied') : t('common.copy')}
       >
-        {copied ? t('common.copied') : t('common.copy')}
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
 
       {/* JSON 内容 */}

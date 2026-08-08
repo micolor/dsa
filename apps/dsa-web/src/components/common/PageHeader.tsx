@@ -3,8 +3,8 @@ import { cn } from '../../utils/cn';
 
 interface PageHeaderProps {
   eyebrow?: string;
-  title: string;
-  description?: string;
+  title: React.ReactNode;
+  description?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
 }
@@ -17,12 +17,12 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   className = '',
 }) => {
   return (
-    <header className={cn('glass-panel-lg px-5 py-5', className)}>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          {eyebrow ? <span className="label-uppercase">{eyebrow}</span> : null}
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">{title}</h1>
-          {description ? <p className="mt-2 max-w-2xl text-sm text-secondary-text md:text-base">{description}</p> : null}
+    <header className={cn('space-y-1.5', className)}>
+      {eyebrow ? <span className="label-uppercase">{eyebrow}</span> : null}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">{title}</h1>
+          {description ? <p className="max-w-2xl text-xs text-secondary-text md:text-sm">{description}</p> : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

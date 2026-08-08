@@ -429,7 +429,6 @@ describe('DecisionSignalsPage', () => {
   it('loads active signals by default', async () => {
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'AI 建议' })).toBeInTheDocument();
     await waitFor(() => {
       expect(decisionSignalsApi.list).toHaveBeenCalledWith(expect.objectContaining({
         status: 'active',
@@ -487,7 +486,6 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'AI 建议' })).toBeInTheDocument();
     await waitFor(() => {
       expect(decisionSignalsApi.list).toHaveBeenCalledWith({
         sourceReportId: 3001,
@@ -524,14 +522,13 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'AI signals' })).toBeInTheDocument();
+    await screen.findByText('Horizon');
     expect(within(screen.getByLabelText('Market')).getByRole('option', { name: 'Japan' })).toHaveValue('jp');
     expect(within(screen.getByLabelText('Market')).getByRole('option', { name: 'Korea' })).toHaveValue('kr');
     expect(within(screen.getByLabelText('Phase')).getByRole('option', { name: 'Closing auction' })).toHaveValue('closing_auction');
     expect(within(screen.getByLabelText('Source')).getByRole('option', { name: 'Market review' })).toHaveValue('market_review');
     expect(screen.getByLabelText('Source report ID')).toBeInTheDocument();
     expect(screen.getAllByText('Japan').length).toBeGreaterThan(1);
-    expect(screen.getByText('Horizon')).toBeInTheDocument();
     expect(screen.getByText('10 days')).toBeInTheDocument();
     expect(screen.getByText('Plan quality: Partial')).toBeInTheDocument();
     expect(screen.getByText('Phase: Closing auction')).toBeInTheDocument();
@@ -1177,7 +1174,6 @@ describe('DecisionSignalsPage', () => {
     renderPage();
 
     expect(await screen.findByText('暂无可用候选，可直接输入股票代码或名称。')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'AI 建议' })).toBeInTheDocument();
   });
 
   it('deduplicates history candidates with market-aware keys and falls back to stock code without market', async () => {

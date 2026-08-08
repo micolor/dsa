@@ -261,8 +261,8 @@ describe('HomePage', () => {
 
     const dashboard = await screen.findByTestId('home-dashboard');
     expect(dashboard).toBeInTheDocument();
-    expect(dashboard.className).toContain('h-[calc(100vh-5rem)]');
-    expect(dashboard.className).toContain('lg:h-[calc(100vh-2rem)]');
+    expect(dashboard.className).toContain('h-[calc(100vh-4rem)]');
+    expect(dashboard.className).toContain('sm:h-[calc(100vh-4.5rem)]');
     expect(dashboard.firstElementChild?.className).toContain('min-h-0');
     expect(dashboard.querySelector('.flex-1.flex.min-h-0.overflow-hidden')).toBeTruthy();
     expect(screen.getByTestId('home-dashboard-scroll')).toBeInTheDocument();
@@ -357,6 +357,7 @@ describe('HomePage', () => {
       </MemoryRouter>,
     );
 
+    fireEvent.mouseOver(await screen.findByTestId('floating-task-panel-button'));
     fireEvent.click(await screen.findByRole('button', { name: '查看 贵州茅台 运行流' }));
 
     await waitFor(() => {
@@ -1628,8 +1629,7 @@ describe('HomePage', () => {
     ).toBeTruthy();
   });
 
-  it('keeps the task panel collapsed after task stream updates', async () => {
-    window.sessionStorage.setItem('dsa.home.taskPanelCollapsed', 'false');
+  it('shows live task progress in the floating task panel', async () => {
     vi.mocked(historyApi.getList).mockResolvedValue({
       total: 0,
       page: 1,
@@ -1671,11 +1671,12 @@ describe('HomePage', () => {
       </MemoryRouter>,
     );
 
-    const collapseButton = await screen.findByRole('button', { name: '折叠任务面板' });
-    fireEvent.click(collapseButton);
+    const floatingButton = await screen.findByTestId('floating-task-panel-button');
+    expect(floatingButton).toBeInTheDocument();
 
-    expect(await screen.findByTestId('task-panel-collapsed-summary')).toHaveTextContent('1 进行中');
-    expect(screen.queryByTestId('task-panel-item')).not.toBeInTheDocument();
+    fireEvent.mouseOver(floatingButton);
+    const taskItems = await screen.findAllByTestId('task-panel-item');
+    expect(taskItems).toHaveLength(2);
 
     const taskStreamOptions = vi.mocked(useTaskStream).mock.calls.at(-1)?.[0];
     act(() => {
@@ -1692,76 +1693,7 @@ describe('HomePage', () => {
       });
     });
 
-    expect(await screen.findByRole('button', { name: '展开任务面板' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByTestId('task-panel-collapsed-summary')).toHaveTextContent('1 进行中');
-    expect(screen.getByTestId('task-panel-collapsed-summary')).toHaveTextContent('1 等待中');
-    expect(screen.queryByTestId('task-panel-item')).not.toBeInTheDocument();
-  });
-
-  it('keeps the task panel usable when sessionStorage access is blocked', async () => {
-    const sessionGetItemSpy = vi.spyOn(window.sessionStorage, 'getItem').mockImplementation((key: string) => {
-      if (key === 'dsa.home.taskPanelCollapsed') {
-        throw new DOMException('Access denied', 'SecurityError');
-      }
-      return null;
-    });
-    const sessionSetItemSpy = vi.spyOn(window.sessionStorage, 'setItem').mockImplementation((key: string, value: string) => {
-      void value;
-      if (key === 'dsa.home.taskPanelCollapsed') {
-        throw new DOMException('Access denied', 'SecurityError');
-      }
-    });
-    try {
-      vi.mocked(historyApi.getList).mockResolvedValue({
-        total: 0,
-        page: 1,
-        limit: 20,
-        items: [],
-      });
-      vi.mocked(analysisApi.getTasks).mockResolvedValue({
-        total: 2,
-        pending: 1,
-        processing: 1,
-        tasks: [
-          {
-            taskId: 'task-1',
-            traceId: 'trace-1',
-            stockCode: '600519',
-            stockName: '贵州茅台',
-            status: 'processing',
-            progress: 35,
-            message: '分析中',
-            reportType: 'detailed',
-            createdAt: '2026-06-08T08:00:00Z',
-          },
-          {
-            taskId: 'task-2',
-            stockCode: 'AAPL',
-            stockName: 'Apple',
-            status: 'pending',
-            progress: 0,
-            message: '等待中',
-            reportType: 'detailed',
-            createdAt: '2026-06-08T08:01:00Z',
-          },
-        ],
-      });
-
-      render(
-        <MemoryRouter>
-          <HomePage />
-        </MemoryRouter>,
-      );
-
-      expect(await screen.findByTestId('task-panel-collapsed-summary')).toHaveTextContent('1 进行中');
-
-      fireEvent.click(screen.getByRole('button', { name: '展开任务面板' }));
-
-      expect(await screen.findByRole('button', { name: '折叠任务面板' })).toHaveAttribute('aria-expanded', 'true');
-    } finally {
-      sessionGetItemSpy.mockRestore();
-      sessionSetItemSpy.mockRestore();
-    }
+    expect(await screen.findByText('72%')).toBeInTheDocument();
   });
 
   it('keeps Shanghai-day records that fall on the previous server date', async () => {
@@ -2846,6 +2778,9 @@ describe('HomePage', () => {
         <HomePage />
       </MemoryRouter>,
     );
+
+    const floatingButton = await screen.findByTestId('floating-task-panel-button');
+    fireEvent.mouseOver(floatingButton);
 
     expect(await screen.findByText('分析任务')).toBeInTheDocument();
     expect(screen.getByText('正在抓取最新行情')).toBeInTheDocument();

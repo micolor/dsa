@@ -123,7 +123,7 @@ export function AgentBackendStatusPanel({
             onClick={() => void refresh()}
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {t('settings.agentBackendRefresh')}
+            <span className="sr-only">{t('settings.agentBackendRefresh')}</span>
           </Button>
         </div>
       </div>

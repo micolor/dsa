@@ -29,7 +29,7 @@
   --card-foreground: 228 35% 12%;
   --popover: 0 0% 100%;
   --popover-foreground: 228 35% 12%;
-  --primary: 193 100% 43%;
+  --primary: 247 84% 58%;
   --primary-foreground: 216 33% 97%;
   --secondary: 214 32% 91%;
   --secondary-foreground: 228 35% 16%;
@@ -41,8 +41,8 @@
   --destructive-foreground: 210 33% 98%;
   --border: 217 28% 84%;
   --input: 217 28% 84%;
-  --ring: 193 100% 43%;
-  --radius: 1rem;
+  --ring: 247 84% 58%;
+  --radius: 1.25rem;
   --elevated: 0 0% 100%;
   --hover: 214 29% 90%;
   --secondary-text: 224 18% 28%;
@@ -97,6 +97,7 @@
   --border-dim: hsl(var(--border-dim-raw) / 0.05);
   --border-subtle: hsl(var(--border-subtle-raw) / 0.04);
   --border-subtle-hover: hsl(var(--border-subtle-raw) / 0.06);
+  --border-card: hsl(var(--border-subtle-raw) / 0.02);
   --border-default: var(--border-dim);
   --border-hover: hsl(var(--primary) / 0.24);
   --border-selected: hsl(var(--primary) / 0.32);
@@ -133,21 +134,21 @@
   --nav-brand-shadow: hsl(var(--primary) / 0.2);
 
   /* Shell Sidebar Custom */
-  --shell-sidebar-border: hsl(193 100% 43% / 0.35);
+  --shell-sidebar-border: hsl(247 84% 58% / 0.35);
 
   /* Home page related (using HSL format) */
   --home-loading-ring-track: hsl(var(--primary) / 0.2);
   --home-loading-ring-head: hsl(var(--primary));
   --page-drawer-overlay-bg: hsl(0 0% 0% / 0.6);
   --home-mobile-overlay-bg: var(--page-drawer-overlay-bg);
-  --home-action-ai-bg: hsl(var(--primary) / 0.1);
-  --home-action-ai-border: hsl(var(--primary) / 0.2);
-  --home-action-ai-text: hsl(var(--primary));
-  --home-action-ai-hover-bg: hsl(var(--primary) / 0.18);
-  --home-action-report-bg: hsl(247 84% 66% / 0.1);
-  --home-action-report-border: hsl(247 84% 66% / 0.2);
-  --home-action-report-text: hsl(247 84% 66%);
-  --home-action-report-hover-bg: hsl(247 84% 66% / 0.18);
+  --home-action-ai-bg: hsl(0 0% 100% / 0.55);
+  --home-action-ai-border: hsl(220 20% 45% / 0.16);
+  --home-action-ai-text: hsl(var(--foreground) / 0.82);
+  --home-action-ai-hover-bg: hsl(0 0% 100% / 0.9);
+  --home-action-report-bg: hsl(0 0% 100% / 0.55);
+  --home-action-report-border: hsl(220 20% 45% / 0.16);
+  --home-action-report-text: hsl(var(--foreground) / 0.82);
+  --home-action-report-hover-bg: hsl(0 0% 100% / 0.9);
   --home-accent-bg: hsl(var(--primary) / 0.1);
   --home-accent-bg-hover: hsl(var(--primary) / 0.16);
   --home-accent-border: hsl(var(--primary) / 0.2);
@@ -161,47 +162,47 @@
   --home-strategy-secondary: hsl(var(--primary));
   --home-strategy-stop: hsl(346 100% 63%);
   --home-strategy-take: hsl(38 100% 52%);
-  --home-panel-border: hsl(218 24% 82% / 0.92);
-  --home-panel-border-hover: hsl(193 100% 43% / 0.2);
-  --home-panel-border-selected: hsl(193 100% 43% / 0.34);
-  --home-panel-gradient-start: hsl(193 100% 43% / 0.1);
+  --home-panel-border: hsl(218 24% 82% / 0.55);
+  --home-panel-border-hover: hsl(247 84% 58% / 0.2);
+  --home-panel-border-selected: hsl(247 84% 58% / 0.34);
+  --home-panel-gradient-start: hsl(247 84% 58% / 0.1);
   --home-panel-gradient-mid: hsl(247 84% 66% / 0.08);
   --home-panel-gradient-end: hsl(218 22% 78% / 0.08);
   --home-panel-selected-shadow:
-    0 0 0 1px hsl(193 100% 43% / 0.08),
+    0 0 0 1px hsl(247 84% 58% / 0.08),
     0 10px 24px hsl(220 24% 36% / 0.1);
   --home-panel-subtle-bg: hsl(214 32% 98% / 0.98);
   --home-panel-subtle-bg-hover: hsl(214 36% 96% / 0.99);
   --home-history-item-bg: hsl(0 0% 100% / 0.82);
   --home-history-item-hover-bg: hsl(214 34% 96% / 0.99);
   --home-history-item-selected-bg:
-    linear-gradient(180deg, hsl(193 100% 43% / 0.08), hsl(214 42% 96% / 0.98));
-  --home-divider-border: hsl(218 24% 84% / 0.9);
+    linear-gradient(180deg, hsl(247 84% 58% / 0.08), hsl(214 42% 96% / 0.98));
+  --home-divider-border: hsl(var(--foreground) / 0.08);
   --home-surface-button-bg: hsl(214 36% 97% / 0.98);
   --home-surface-button-bg-hover: hsl(214 40% 95% / 0.99);
   --home-surface-button-border: hsl(218 24% 84% / 0.94);
-  --home-surface-button-border-hover: hsl(193 100% 43% / 0.22);
+  --home-surface-button-border-hover: hsl(247 84% 58% / 0.22);
   --home-state-icon-muted: hsl(var(--muted-text) / 0.85);
   --home-prose-border: hsl(var(--foreground) / 0.1);
   --home-prose-border-strong: hsl(var(--foreground) / 0.16);
   --home-prose-blockquote-border: hsl(247 84% 66% / 0.28);
   --home-prose-blockquote-bg: hsl(247 84% 66% / 0.08);
-  --home-panel-shadow: 0 14px 32px hsl(220 22% 34% / 0.08), 0 4px 10px hsl(220 18% 28% / 0.04);
-  --home-panel-shadow-hover: 0 18px 40px hsl(220 24% 32% / 0.12), 0 6px 16px hsl(220 20% 28% / 0.06);
-  --home-hero-border: hsl(193 100% 43% / 0.32);
-  --home-hero-gradient-start: hsl(193 100% 43% / 0.24);
+  --home-panel-shadow: 0 1px 2px hsl(220 22% 34% / 0.05), 0 8px 20px hsl(220 22% 34% / 0.07);
+  --home-panel-shadow-hover: 0 2px 4px hsl(220 24% 32% / 0.06), 0 12px 28px hsl(220 24% 32% / 0.1);
+  --home-hero-border: hsl(247 84% 58% / 0.32);
+  --home-hero-gradient-start: hsl(247 84% 58% / 0.24);
   --home-hero-gradient-mid: hsl(247 84% 66% / 0.14);
   --home-hero-gradient-end: hsl(218 22% 82% / 0.14);
   --home-hero-shadow: 0 18px 44px hsl(220 24% 34% / 0.12), 0 8px 18px hsl(220 20% 30% / 0.06);
-  --home-rail-border: hsl(218 24% 82% / 0.9);
+  --home-rail-border: hsl(218 24% 82% / 0.55);
   --home-rail-bg: linear-gradient(180deg, hsl(0 0% 100% / 0.98), hsl(214 36% 97% / 0.98));
   --home-rail-shadow: 0 14px 30px hsl(220 22% 34% / 0.09), 0 4px 10px hsl(220 18% 28% / 0.05);
-  --home-history-glow: hsl(193 100% 43% / 0.14);
+  --home-history-glow: hsl(247 84% 58% / 0.14);
   --autocomplete-hover-bg: #04d1f6;
 
   /* Shadows (using HSL format) */
-  --shadow-soft-card: 0 12px 24px hsl(220 20% 34% / 0.09), 0 3px 8px hsl(220 16% 28% / 0.05);
-  --shadow-soft-card-strong: 0 18px 34px hsl(220 20% 32% / 0.12), 0 6px 16px hsl(220 16% 28% / 0.07);
+  --shadow-soft-card: 0 1px 1px hsl(220 20% 34% / 0.02), inset 0 1px 0 hsl(0 0% 100% / 0.06);
+  --shadow-soft-card-strong: 0 1px 3px hsl(220 20% 32% / 0.06), 0 20px 40px hsl(220 20% 32% / 0.14), inset 0 1px 0 hsl(0 0% 100% / 0.08);
   --settings-surface: hsl(0 0% 100% / 0.97);
   --settings-surface-hover: hsl(214 44% 95% / 0.99);
   --settings-surface-strong: hsl(0 0% 100% / 0.99);
@@ -213,18 +214,18 @@
   --settings-border-soft: hsl(218 22% 84% / 0.94);
   --settings-border-strong: hsl(218 18% 68% / 0.98);
   --settings-border-overlay: hsl(218 22% 72% / 0.92);
-  --settings-accent-shadow: hsl(190 100% 50% / 0.08);
-  --settings-primary-border: hsl(190 100% 50% / 0.26);
+  --settings-accent-shadow: hsl(247 84% 62% / 0.08);
+  --settings-primary-border: hsl(247 84% 62% / 0.26);
   --settings-primary-gradient:
-    linear-gradient(135deg, hsl(190 100% 50% / 0.96), hsl(191 100% 40% / 0.96));
+    linear-gradient(135deg, hsl(247 84% 62% / 0.96), hsl(191 100% 40% / 0.96));
   --settings-primary-text: hsl(205 71% 6%);
-  --settings-primary-shadow: hsl(190 100% 50% / 0.2);
-  --settings-primary-shadow-hover: hsl(190 100% 50% / 0.22);
+  --settings-primary-shadow: hsl(247 84% 62% / 0.2);
+  --settings-primary-shadow-hover: hsl(247 84% 62% / 0.22);
   --settings-secondary-border: hsl(218 22% 74% / 0.96);
   --settings-secondary-bg: hsl(214 36% 95% / 0.98);
-  --settings-secondary-border-hover: hsl(190 100% 50% / 0.38);
-  --settings-secondary-bg-hover: hsl(190 100% 50% / 0.12);
-  --settings-glow-hover: hsl(190 100% 50% / 0.38);
+  --settings-secondary-border-hover: hsl(247 84% 62% / 0.38);
+  --settings-secondary-bg-hover: hsl(247 84% 62% / 0.12);
+  --settings-glow-hover: hsl(247 84% 62% / 0.38);
   --settings-skeleton-strong: hsl(218 20% 84% / 0.92);
   --settings-skeleton-soft: hsl(218 22% 92% / 0.96);
   --input-surface-bg: var(--bg-card);
@@ -308,7 +309,7 @@
   --card-foreground: 210 33% 98%;
   --popover: 230 24% 10%;
   --popover-foreground: 210 33% 98%;
-  --primary: 190 100% 50%;
+  --primary: 247 84% 62%;
   --primary-foreground: 228 35% 8%;
   --secondary: 231 19% 15%;
   --secondary-foreground: 210 33% 94%;
@@ -320,7 +321,7 @@
   --destructive-foreground: 210 33% 98%;
   --border: 226 19% 20%;
   --input: 226 19% 20%;
-  --ring: 190 100% 50%;
+  --ring: 247 84% 62%;
   --elevated: 230 22% 12%;
   --hover: 231 20% 16%;
   --secondary-text: 228 16% 72%;
@@ -376,6 +377,7 @@
   --border-dim: hsl(var(--border-dim-raw) / 0.06);
   --border-subtle: hsl(var(--border-subtle-raw) / 0.08);
   --border-subtle-hover: hsl(var(--border-subtle-raw) / 0.15);
+  --border-card: hsl(var(--border-subtle-raw) / 0.05);
   --border-default: var(--border-dim);
   --border-hover: hsl(var(--primary) / 0.34);
   --border-selected: hsl(var(--primary) / 0.46);
@@ -415,14 +417,14 @@
   --home-loading-ring-head: hsl(var(--primary));
   --page-drawer-overlay-bg: hsl(0 0% 0% / 0.6);
   --home-mobile-overlay-bg: var(--page-drawer-overlay-bg);
-  --home-action-ai-bg: hsl(var(--primary) / 0.1);
-  --home-action-ai-border: hsl(var(--primary) / 0.2);
-  --home-action-ai-text: hsl(var(--primary));
-  --home-action-ai-hover-bg: hsl(var(--primary) / 0.2);
-  --home-action-report-bg: hsl(247 84% 72% / 0.1);
-  --home-action-report-border: hsl(247 84% 72% / 0.2);
-  --home-action-report-text: hsl(247 84% 72%);
-  --home-action-report-hover-bg: hsl(247 84% 72% / 0.2);
+  --home-action-ai-bg: hsl(0 0% 100% / 0.06);
+  --home-action-ai-border: hsl(0 0% 100% / 0.12);
+  --home-action-ai-text: hsl(var(--foreground) / 0.85);
+  --home-action-ai-hover-bg: hsl(0 0% 100% / 0.12);
+  --home-action-report-bg: hsl(0 0% 100% / 0.06);
+  --home-action-report-border: hsl(0 0% 100% / 0.12);
+  --home-action-report-text: hsl(var(--foreground) / 0.85);
+  --home-action-report-hover-bg: hsl(0 0% 100% / 0.12);
   --home-accent-bg: hsl(var(--primary) / 0.1);
   --home-accent-bg-hover: hsl(var(--primary) / 0.18);
   --home-accent-border: hsl(var(--primary) / 0.22);
@@ -442,6 +444,8 @@
   --home-panel-gradient-start: hsl(var(--primary) / 0.3);
   --home-panel-gradient-mid: hsl(247 84% 72% / 0.24);
   --home-panel-gradient-end: hsl(var(--foreground) / 0.08);
+  --home-panel-shadow: 0 1px 2px hsl(215 25% 10% / 0.35), 0 8px 20px hsl(215 25% 10% / 0.32);
+  --home-panel-shadow-hover: 0 2px 4px hsl(215 25% 10% / 0.4), 0 12px 28px hsl(215 25% 10% / 0.4);
   --home-panel-selected-shadow:
     0 0 0 1px hsl(var(--primary) / 0.14),
     0 4px 16px hsl(var(--primary) / 0.16);
@@ -463,8 +467,8 @@
   --home-prose-blockquote-bg: hsl(247 84% 72% / 0.1);
 
   /* Shadows (Dark theme) */
-  --shadow-soft-card: 0 18px 48px hsl(215 25% 10% / 0.4);
-  --shadow-soft-card-strong: 0 24px 56px hsl(215 25% 10% / 0.5);
+  --shadow-soft-card: 0 1px 1px hsl(215 25% 10% / 0.1), inset 0 1px 0 hsl(0 0% 100% / 0.04);
+  --shadow-soft-card-strong: 0 24px 56px hsl(215 25% 10% / 0.5), inset 0 1px 0 hsl(0 0% 100% / 0.06);
   --settings-surface: hsl(0 0% 100% / 0.02);
   --settings-surface-hover: hsl(0 0% 100% / 0.05);
   --settings-surface-strong: hsl(var(--card) / 0.92);
@@ -476,18 +480,18 @@
   --settings-border-soft: hsl(0 0% 100% / 0.08);
   --settings-border-strong: hsl(0 0% 100% / 0.2);
   --settings-border-overlay: hsl(0 0% 100% / 0.45);
-  --settings-accent-shadow: hsl(190 100% 50% / 0.1);
-  --settings-primary-border: hsl(190 100% 50% / 0.26);
+  --settings-accent-shadow: hsl(247 84% 62% / 0.1);
+  --settings-primary-border: hsl(247 84% 62% / 0.26);
   --settings-primary-gradient:
-    linear-gradient(135deg, hsl(190 100% 50% / 0.96), hsl(191 100% 40% / 0.96));
+    linear-gradient(135deg, hsl(247 84% 62% / 0.96), hsl(191 100% 40% / 0.96));
   --settings-primary-text: hsl(205 71% 6%);
-  --settings-primary-shadow: hsl(190 100% 50% / 0.2);
-  --settings-primary-shadow-hover: hsl(190 100% 50% / 0.22);
+  --settings-primary-shadow: hsl(247 84% 62% / 0.2);
+  --settings-primary-shadow-hover: hsl(247 84% 62% / 0.22);
   --settings-secondary-border: hsl(0 0% 100% / 0.08);
   --settings-secondary-bg: hsl(0 0% 100% / 0.03);
-  --settings-secondary-border-hover: hsl(190 100% 50% / 0.3);
-  --settings-secondary-bg-hover: hsl(190 100% 50% / 0.06);
-  --settings-glow-hover: hsl(190 100% 50% / 0.38);
+  --settings-secondary-border-hover: hsl(247 84% 62% / 0.3);
+  --settings-secondary-bg-hover: hsl(247 84% 62% / 0.06);
+  --settings-glow-hover: hsl(247 84% 62% / 0.38);
   --settings-skeleton-strong: hsl(0 0% 100% / 0.1);
   --settings-skeleton-soft: hsl(0 0% 100% / 0.06);
   --input-surface-bg: var(--bg-card);
@@ -576,7 +580,11 @@
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: hsl(var(--background));
+    background:
+      radial-gradient(66rem 48rem at 12% -8%, hsl(247 84% 58% / 0.22), transparent 60%),
+      radial-gradient(58rem 44rem at 108% 112%, hsl(247 84% 66% / 0.22), transparent 60%),
+      radial-gradient(46rem 36rem at 80% 8%, hsl(247 84% 60% / 0.13), transparent 58%),
+      hsl(var(--background));
     color: hsl(var(--foreground));
   }
 }
@@ -703,12 +711,14 @@
 
 /* ============ Input Styles ============ */
 .input-surface {
-  background: var(--input-surface-bg);
+  background: hsl(var(--card) / 0.55);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
   border-color: var(--input-surface-border);
   color: var(--input-surface-text, var(--text-primary));
   caret-color: var(--input-surface-caret, var(--input-surface-text, var(--text-primary)));
   -webkit-text-fill-color: var(--input-surface-fill, var(--input-surface-text, var(--text-primary)));
-  box-shadow: var(--input-surface-shadow, var(--shadow-soft-card));
+  box-shadow: var(--input-surface-shadow, var(--shadow-soft-card)), inset 0 1px 0 hsl(0 0% 100% / 0.06);
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
@@ -984,6 +994,20 @@
   animation-name: slideInFromBottomMd;
 }
 
+/* 减少动效：保留透明度/颜色反馈，去掉位移与缩放类动效（"gentler, not zero"） */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up,
+  .animate-slide-in-right,
+  .animate-slide-in-left,
+  .zoom-in,
+  .slide-in-from-top-1,
+  .slide-in-from-top-2,
+  .slide-in-from-bottom-2,
+  .animate-pulse-glow {
+    animation: none;
+  }
+}
+
 /* ============ Glassmorphism Panels ============ */
 .glass-panel {
   @apply rounded-2xl border border-border/60 bg-card/70 shadow-soft-card backdrop-blur-md transition-all;
@@ -1089,11 +1113,13 @@ a {
   color: inherit;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 .terminal-card {
@@ -1110,33 +1136,12 @@ textarea {
   border: 1px solid var(--terminal-card-border);
   background: linear-gradient(
     180deg,
-    hsl(var(--card) / 0.96),
-    hsl(var(--background) / 0.96)
+    hsl(var(--card) / 0.5),
+    hsl(var(--background) / 0.45)
   );
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
   box-shadow: var(--terminal-card-shadow);
-}
-
-.terminal-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 1rem;
-  padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--terminal-card-gradient-start) 0%,
-    var(--terminal-card-gradient-mid) 52%,
-    var(--terminal-card-gradient-end) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 
 .terminal-card-hover {
@@ -1159,9 +1164,9 @@ textarea {
   padding: 1px;
   background: linear-gradient(
     180deg,
-    var(--border-accent) 0%,
-    var(--border-purple) 50%,
-    var(--border-dim) 100%
+    hsl(var(--foreground) / 0.12) 0%,
+    hsl(var(--foreground) / 0.05) 50%,
+    hsl(var(--foreground) / 0.09) 100%
   );
   box-shadow: var(--shadow-soft-card);
 }
@@ -1171,58 +1176,38 @@ textarea {
   border-radius: calc(1rem - 1px);
   background: linear-gradient(
     180deg,
-    hsl(var(--elevated) / 0.98),
-    hsl(var(--card) / 0.98)
+    hsl(var(--elevated) / 0.5),
+    hsl(var(--card) / 0.45)
   );
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
 }
 
 .glass-card {
   position: relative;
   overflow: hidden;
-  border-radius: 1rem;
-  border: 1px solid var(--border-subtle);
-  background: hsl(var(--card) / 0.72);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  border-radius: 1.25rem;
+  border: 1px solid var(--border-card);
+  background: hsl(var(--card) / 0.42);
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
   box-shadow: var(--shadow-soft-card);
-}
-
-.glass-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 1rem;
-  padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--border-accent) 0%,
-    var(--border-purple) 50%,
-    var(--border-subtle) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 
 .glass-card::after {
   content: "";
   position: absolute;
   top: 0;
-  left: 14%;
-  right: 14%;
+  left: 10%;
+  right: 10%;
   height: 1px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--border-subtle-hover) 50%,
+    hsl(var(--foreground) / 0.07) 50%,
     transparent 100%
   );
+  opacity: 0.25;
   pointer-events: none;
 }
 
@@ -1239,35 +1224,12 @@ textarea {
 .dashboard-card {
   position: relative;
   overflow: hidden;
-  border-radius: 1rem;
-  border: 1px solid var(--border-subtle);
-  background: hsl(var(--card) / 0.72);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  border-radius: 1.25rem;
+  border: 1px solid var(--border-card);
+  background: hsl(var(--card) / 0.42);
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
   box-shadow: var(--shadow-soft-card);
-}
-
-.dashboard-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 1rem;
-  padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--border-accent) 0%,
-    var(--border-purple) 50%,
-    var(--border-subtle) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 
 .dashboard-card::after {
@@ -1280,9 +1242,10 @@ textarea {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--border-subtle-hover) 50%,
+    hsl(var(--foreground) / 0.06) 50%,
     transparent 100%
   );
+  opacity: 0.4;
   pointer-events: none;
 }
 
@@ -1300,85 +1263,31 @@ textarea {
 
 .home-subpanel {
   position: relative;
-  overflow: hidden;
-  border-radius: 0.875rem;
-  border: 1px solid var(--home-panel-border);
-  background: var(--home-panel-subtle-bg);
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.72);
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+  border-radius: 0.75rem;
+  transition: background-color 0.18s ease;
 }
 
 .home-subpanel:hover {
-  border-color: var(--home-panel-border-hover);
   background: var(--home-panel-subtle-bg-hover);
-  box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.78),
-    0 10px 18px hsl(220 18% 30% / 0.08);
-  transform: translateY(-1px);
 }
 
 .home-history-item {
   position: relative;
-  overflow: hidden;
-  border-radius: 0.875rem;
-  border: 1px solid var(--home-panel-border);
-  background: var(--home-history-item-bg);
-  box-shadow: 0 8px 16px hsl(220 18% 30% / 0.04);
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
   transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
-}
-
-.home-history-item::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--home-panel-gradient-mid) 0%,
-    transparent 45%,
-    var(--home-panel-gradient-start) 100%
-  );
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
+    border-color 0.18s ease,
+    background-color 0.18s ease;
 }
 
 .home-history-item:hover {
-  border-color: var(--home-panel-border-hover);
   background: var(--home-history-item-hover-bg);
-  box-shadow: 0 12px 24px hsl(220 18% 30% / 0.08);
-  transform: translateY(-1px);
-}
-
-.home-history-item:hover::before {
-  opacity: 0.72;
 }
 
 .home-history-item-selected {
+  border-radius: 0.5rem;
   border-color: var(--home-panel-border-selected);
   background: var(--home-history-item-selected-bg);
-  box-shadow: var(--home-panel-selected-shadow);
-}
-
-.home-history-item-selected::before {
-  opacity: 1;
 }
 
 .home-surface-button {
@@ -1420,6 +1329,74 @@ textarea {
 .history-select-all-checkbox {
   position: relative;
   top: 1px;
+}
+
+/* macOS System Settings 风格勾选框（appearance:none 自绘，统一首页/历史等列表交互） */
+.mac-checkbox {
+  appearance: none;
+  position: relative;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card) / 0.96);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.72);
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.mac-checkbox:hover {
+  border-color: hsl(var(--primary) / 0.45);
+  background: hsl(var(--primary) / 0.04);
+}
+
+.mac-checkbox:checked {
+  border-color: transparent;
+  background: hsl(var(--primary));
+}
+
+.mac-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 43%;
+  width: 0.28rem;
+  height: 0.17rem;
+  border-left: 1.5px solid hsl(var(--primary-foreground));
+  border-bottom: 1.5px solid hsl(var(--primary-foreground));
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.mac-checkbox:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px hsl(var(--primary) / 0.16),
+    inset 0 1px 0 hsl(0 0% 100% / 0.76);
+}
+
+.mac-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dark .mac-checkbox {
+  border-color: hsl(var(--foreground) / 0.18);
+  background: hsl(var(--card) / 0.84);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04);
+}
+
+.dark .mac-checkbox:hover {
+  border-color: hsl(var(--primary) / 0.42);
+  background: hsl(var(--primary) / 0.09);
+}
+
+.dark .mac-checkbox:checked {
+  border-color: transparent;
+  background: hsl(var(--primary));
 }
 
 .home-accent-chip {
@@ -1480,6 +1457,25 @@ textarea {
   .group\/message:hover .chat-message-actions,
   .group\/message:focus-within .chat-message-actions {
     pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+/* Hover-reveal control that stays visible on touch / no-hover devices.
+   Keeps the hover affordance on fine pointers but never hides the action
+   from touch or keyboard users (mirrors the chat-message-actions pattern). */
+.reveal-on-hover {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reveal-on-hover {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .group\/item:hover .reveal-on-hover,
+  .group\/item:focus-within .reveal-on-hover {
     opacity: 1;
   }
 }
@@ -1700,7 +1696,7 @@ textarea {
 
 .home-rail-card {
   --terminal-card-border: var(--home-rail-border);
-  --terminal-card-gradient-start: hsl(193 100% 43% / 0.08);
+  --terminal-card-gradient-start: hsl(247 84% 58% / 0.08);
   --terminal-card-gradient-mid: hsl(247 84% 66% / 0.12);
   --terminal-card-gradient-end: hsl(218 22% 80% / 0.08);
   --terminal-card-shadow: var(--home-rail-shadow);
@@ -1825,14 +1821,8 @@ textarea {
   box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.08);
 }
 
-.dark .home-subpanel {
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.03);
-}
-
 .dark .home-subpanel:hover {
-  box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.04),
-    0 10px 18px hsl(220 18% 8% / 0.2);
+  background: var(--home-panel-subtle-bg-hover);
 }
 
 .dark .home-board-pill {
@@ -1971,20 +1961,20 @@ textarea {
 }
 
 .btn-primary {
-  border: 1px solid rgba(0, 212, 255, 0.26);
+  border: 1px solid hsl(247 84% 62% / 0.4);
   background: linear-gradient(
     135deg,
-    rgba(0, 212, 255, 0.96),
-    rgba(0, 168, 204, 0.96)
+    hsl(247 84% 58%),
+    hsl(247 84% 46%)
   );
-  color: #041118;
-  box-shadow: 0 12px 28px rgba(0, 212, 255, 0.2);
+  color: #fff;
+  box-shadow: 0 10px 24px hsl(247 84% 58% / 0.2);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  filter: brightness(1.04);
-  box-shadow: 0 18px 34px rgba(0, 212, 255, 0.22);
+  filter: brightness(1.05);
+  box-shadow: 0 16px 30px hsl(247 84% 58% / 0.24);
 }
 
 .btn-secondary {
@@ -2030,7 +2020,7 @@ textarea {
 :root:not(.dark) .portfolio-page .btn-primary:hover:not(:disabled) {
   box-shadow:
     inset 0 1px 0 hsl(0 0% 100% / 0.18),
-    0 18px 34px rgba(0, 212, 255, 0.22);
+    0 16px 30px hsl(247 84% 58% / 0.24);
 }
 
 .bg-hover {
@@ -2294,7 +2284,7 @@ textarea {
 .chat-bubble-user {
   background-color: var(--chat-bubble-user-bg);
   color: hsl(var(--foreground) / 0.88);
-  border: 1px solid var(--chat-bubble-user-border);
+  box-shadow: 0 2px 10px hsl(var(--primary) / 0.08);
   border-radius: 1rem;
   border-top-right-radius: 0.125rem;
 }
@@ -2302,7 +2292,7 @@ textarea {
 .chat-bubble-ai {
   background-color: var(--chat-bubble-ai-bg);
   color: hsl(var(--secondary-text) / 0.94);
-  border: 1px solid var(--chat-bubble-ai-border);
+  box-shadow: var(--shadow-soft-card);
   border-radius: 1rem;
   border-top-left-radius: 0.125rem;
 }

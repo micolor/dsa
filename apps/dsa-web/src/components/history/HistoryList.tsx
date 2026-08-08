@@ -133,7 +133,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   onChange={onToggleSelectAll}
                   disabled={isDeleting}
                   aria-label={t('history.selectAllHistoryAria')}
-                  className="history-select-all-checkbox h-3.5 w-3.5 cursor-pointer bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
+                  className="history-select-all-checkbox mac-checkbox cursor-pointer"
                 />
                 <span className="text-[11px] text-muted-text select-none">{t('common.selectAllCurrent')}</span>
               </label>
