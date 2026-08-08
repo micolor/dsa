@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { historyApi } from '../../api/history';
 import type { ReportLanguage } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
@@ -29,13 +29,14 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedType, setCopiedType] = useState<'markdown' | 'text' | null>(null);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleCopyMarkdown = useCallback(async () => {
     if (!content) return;
     try {
       await navigator.clipboard.writeText(content);
       setCopiedType('markdown');
-      setTimeout(() => setCopiedType(null), 2000);
+      copyResetTimerRef.current = setTimeout(() => setCopiedType(null), 2000);
     } catch (error) {
       console.error('Copy failed:', error);
     }
@@ -47,11 +48,13 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
       const plainText = markdownToPlainText(content);
       await navigator.clipboard.writeText(plainText);
       setCopiedType('text');
-      setTimeout(() => setCopiedType(null), 2000);
+      copyResetTimerRef.current = setTimeout(() => setCopiedType(null), 2000);
     } catch (error) {
       console.error('Copy failed:', error);
     }
   }, [content]);
+
+  useEffect(() => () => window.clearTimeout(copyResetTimerRef.current), []);
 
   useEffect(() => {
     let isMounted = true;

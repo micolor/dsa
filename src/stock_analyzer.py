@@ -264,7 +264,6 @@ class StockTrendAnalyzer:
     
     def _calculate_mas(self, df: pd.DataFrame) -> pd.DataFrame:
         """计算均线"""
-        df = df.copy()
         df['MA5'] = df['close'].rolling(window=5).mean()
         df['MA10'] = df['close'].rolling(window=10).mean()
         df['MA20'] = df['close'].rolling(window=20).mean()
@@ -285,8 +284,6 @@ class StockTrendAnalyzer:
         - DEA = EMA(DIF, 9)
         - MACD = (DIF - DEA) * 2
         """
-        df = df.copy()
-
         # 计算快慢线 EMA
         ema_fast = df['close'].ewm(span=self.MACD_FAST, adjust=False).mean()
         ema_slow = df['close'].ewm(span=self.MACD_SLOW, adjust=False).mean()
@@ -311,8 +308,6 @@ class StockTrendAnalyzer:
         - RS = avg_gain / avg_loss
         - RSI = 100 - (100 / (1 + RS))
         """
-        df = df.copy()
-
         for period in [self.RSI_SHORT, self.RSI_MID, self.RSI_LONG]:
             # 计算价格变化
             delta = df['close'].diff()

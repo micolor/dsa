@@ -593,27 +593,38 @@ const ChatPage: React.FC = () => {
     }
   }, [selectedSkillIds, setSelectedSkillIds]);
 
+  const clearAllCopyTimers = useCallback(() => {
+    Object.values(copyResetTimerRef.current).forEach((timerId) => {
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+      }
+    });
+    copyResetTimerRef.current = {};
+  }, []);
+
   const handleStartNewChat = useCallback(() => {
+    clearAllCopyTimers();
     followUpContextRef.current = null;
     setActiveStockContext(null);
     setActiveStockCode(null);
     requestScrollToBottom('auto');
     useAgentChatStore.getState().startNewChat();
     setSidebarOpen(false);
-  }, [requestScrollToBottom]);
+  }, [requestScrollToBottom, clearAllCopyTimers]);
 
   const handleSwitchSession = useCallback((targetSessionId: string) => {
     if (targetSessionId === sessionId) {
       setSidebarOpen(false);
       return;
     }
+    clearAllCopyTimers();
     followUpContextRef.current = null;
     setActiveStockContext(null);
     setActiveStockCode(null);
     requestScrollToBottom('auto');
     switchSession(targetSessionId);
     setSidebarOpen(false);
-  }, [requestScrollToBottom, sessionId, switchSession]);
+  }, [requestScrollToBottom, sessionId, switchSession, clearAllCopyTimers]);
 
   const confirmDelete = useCallback(() => {
     if (!deleteConfirmId) return;

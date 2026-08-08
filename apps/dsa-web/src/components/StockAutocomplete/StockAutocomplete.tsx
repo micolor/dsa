@@ -131,6 +131,7 @@ function StockAutocompleteInner({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const prevValueRef = useRef(value);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number; width: string } | null>(null);
 
   const updateDropdownPosition = () => {
@@ -185,6 +186,8 @@ function StockAutocompleteInner({
     console.error('Autocomplete runtime fallback activated.', autocompleteError);
   }, [autocompleteError]);
 
+  useEffect(() => () => window.clearTimeout(blurTimerRef.current), []);
+
   // Keyboard event handling
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     // Skip if composing (IME)
@@ -233,7 +236,7 @@ function StockAutocompleteInner({
 
   // Delay closing on blur (avoid immediate close when clicking suggestion items)
   const handleBlur = () => {
-    setTimeout(() => closeSuggestions(), 200);
+    blurTimerRef.current = setTimeout(() => closeSuggestions(), 200);
   };
 
   // Fallback mode: use normal input

@@ -130,7 +130,7 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         <div className="space-y-3 text-left">
           {items.map((item, index) => (
             <div
-              key={`${item.title}-${index}`}
+              key={item.url || `${item.title}-${index}`}
               className="home-subpanel home-news-item group p-4"
             >
               <div className="flex items-start justify-between gap-3">
