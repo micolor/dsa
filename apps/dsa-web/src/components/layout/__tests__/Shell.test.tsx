@@ -81,6 +81,7 @@ describe('Shell', () => {
       </MemoryRouter>
     );
 
+    fireEvent.click(screen.getByRole('button', { name: '打开导航菜单' }));
     fireEvent.click(screen.getByRole('button', { name: '退出' }));
 
     expect(await screen.findByRole('heading', { name: '退出登录' })).toBeInTheDocument();
