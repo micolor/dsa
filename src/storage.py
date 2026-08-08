@@ -2693,7 +2693,31 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             results = session.execute(data_query).scalars().all()
             
             return list(results), total
-    
+
+    def count_analysis_by_codes(self, codes: List[str]) -> Dict[str, int]:
+        """
+        按代码一次性统计历史记录数（GROUP BY），用于批量填充个股栏的
+        analysis_count，避免对每只股票逐条查询造成 N+1。
+
+        Args:
+            codes: 股票代码（含候选归一化格式）列表
+
+        Returns:
+            Dict[code, count]：命中该精确代码的历史记录数。未出现的代码不在结果中。
+        """
+        codes = sorted({str(c or "").strip() for c in codes if c})
+        if not codes:
+            return {}
+        from sqlalchemy import func
+
+        with self.get_session() as session:
+            rows = session.execute(
+                select(AnalysisHistory.code, func.count(AnalysisHistory.id))
+                .where(AnalysisHistory.code.in_(codes))
+                .group_by(AnalysisHistory.code)
+            ).all()
+            return {code: count for code, count in rows}
+
     def get_analysis_history_by_id(self, record_id: int) -> Optional[AnalysisHistory]:
         """
         根据数据库主键 ID 查询单条分析历史记录
@@ -3932,6 +3956,107 @@ def _coerce_llm_usage_non_negative_int(value: Any) -> Optional[int]:
             return None
         return int(text)
     return None
+
+
+class PaperAccountRecord(Base):
+    """Paper-trading virtual account (tracking AI decision-signal performance)."""
+
+    __tablename__ = 'paper_accounts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False, default='模拟盘')
+    initial_capital = Column(Float, nullable=False, default=1000000.0)
+    cash = Column(Float, nullable=False, default=1000000.0)
+    status = Column(String(16), nullable=False, default='active', index=True)
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now)
+
+
+class PaperPositionRecord(Base):
+    """Open/closed paper position tracking one stock per account."""
+
+    __tablename__ = 'paper_positions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('paper_accounts.id'), nullable=False, index=True)
+    stock_code = Column(String(16), nullable=False, index=True)
+    stock_name = Column(String(64))
+    market = Column(String(8), index=True)
+    quantity = Column(Float, nullable=False, default=0.0)
+    avg_cost = Column(Float)
+    current_price = Column(Float)
+    market_value = Column(Float)
+    open_signal_id = Column(Integer, ForeignKey('decision_signals.id'), index=True)
+    entry_date = Column(Date)
+    stop_loss = Column(Float)
+    target_price = Column(Float)
+    status = Column(String(16), nullable=False, default='open', index=True)
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now)
+
+    __table_args__ = (
+        Index('ix_paper_position_account_status', 'account_id', 'status'),
+        Index('ix_paper_position_account_stock', 'account_id', 'stock_code'),
+    )
+
+
+class PaperTradeRecord(Base):
+    """Executed paper trade (buy/sell fill)."""
+
+    __tablename__ = 'paper_trades'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('paper_accounts.id'), nullable=False, index=True)
+    signal_id = Column(Integer, ForeignKey('decision_signals.id'), index=True)
+    stock_code = Column(String(16), nullable=False, index=True)
+    stock_name = Column(String(64))
+    side = Column(String(8), nullable=False)  # buy / sell
+    quantity = Column(Float, nullable=False)
+    price = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)
+    trade_date = Column(Date, nullable=False, index=True)
+    reason = Column(String(32), default='signal_action')
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+
+    __table_args__ = (
+        Index('ix_paper_trade_account_date', 'account_id', 'trade_date'),
+    )
+
+
+class PaperSignalRecord(Base):
+    """Consumed decision-signal record (dedup + disposition)."""
+
+    __tablename__ = 'paper_signals'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('paper_accounts.id'), nullable=False, index=True)
+    signal_id = Column(Integer, ForeignKey('decision_signals.id'), nullable=False, index=True)
+    action = Column(String(16), nullable=False)
+    disposition = Column(String(16), nullable=False, default='ignored')
+    processed_at = Column(DateTime, default=utc_naive_now, index=True)
+
+    __table_args__ = (
+        Index('uq_paper_signal_account_signal', 'account_id', 'signal_id', unique=True),
+    )
+
+
+class PaperEquitySnapshotRecord(Base):
+    """Daily equity-curve snapshot (idempotent per account+date)."""
+
+    __tablename__ = 'paper_equity_snapshots'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('paper_accounts.id'), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    cash = Column(Float, nullable=False, default=0.0)
+    market_value = Column(Float, nullable=False, default=0.0)
+    net_value = Column(Float, nullable=False, default=0.0)
+    return_pct = Column(Float)
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+
+    __table_args__ = (
+        Index('uq_paper_equity_account_date', 'account_id', 'trade_date', unique=True),
+    )
 
 
 if __name__ == "__main__":

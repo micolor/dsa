@@ -2662,6 +2662,7 @@ class StockAnalysisPipeline:
                 summary = summarize_decision_signal(signal_result.get("item"))
                 if summary:
                     setattr(result, "decision_signal_summary", summary)
+                self._try_consume_paper_signal(signal_result.get("item"))
         except Exception as exc:
             logger.warning(
                 "Decision signal extraction skipped after history save: query_id=%s stock_code=%s error=%s",
@@ -2669,6 +2670,24 @@ class StockAnalysisPipeline:
                 getattr(result, "code", None),
                 exc,
                 exc_info=True,
+            )
+
+    def _try_consume_paper_signal(self, item: Any) -> None:
+        """Best-effort paper-trading consumption of a persisted decision signal."""
+        signal_id = getattr(item, "id", None)
+        if signal_id is None and isinstance(item, dict):
+            signal_id = item.get("id")
+        if not signal_id:
+            return
+        try:
+            from src.services.paper_service import PaperService
+
+            PaperService(self.db).process_signal(signal_id)
+        except Exception as exc:
+            logger.debug(
+                "paper signal consumption skipped: signal_id=%s error=%s",
+                signal_id,
+                exc,
             )
 
     @staticmethod

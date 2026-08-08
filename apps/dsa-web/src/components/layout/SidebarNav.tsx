@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bell, BriefcaseBusiness, Gauge, Home, LogOut, MessageSquareQuote, Search, Settings2 } from 'lucide-react';
+import { Activity, BarChart3, Bell, BriefcaseBusiness, Gauge, Home, LogOut, MessageSquareQuote, Search, Settings2, TrendingUp } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { SCREENING_CONFIG_CHANGED_EVENT, SYSTEM_CONFIG_CHANGED_EVENT, screeningApi } from '../../api/screening';
 import { useAuth } from '../../contexts/AuthContext';
@@ -35,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'decision-signals', labelKey: 'layout.nav.decisionSignals', to: '/decision-signals', icon: Activity },
   { key: 'backtest', labelKey: 'layout.nav.backtest', to: '/backtest', icon: BarChart3 },
   { key: 'alerts', labelKey: 'layout.nav.alerts', to: '/alerts', icon: Bell },
+  { key: 'paper', labelKey: 'layout.nav.paperTrading', to: '/paper', icon: TrendingUp },
   { key: 'usage', labelKey: 'layout.nav.usage', to: '/usage', icon: Gauge },
   { key: 'settings', labelKey: 'layout.nav.settings', to: '/settings', icon: Settings2 },
 ];
@@ -76,7 +77,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
   const navItems = showScreeningNav ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.key !== 'screening');
   const isRail = variant === 'rail';
   const itemBaseClass = cn(
-    'group relative flex h-[var(--nav-item-height)] w-full items-center overflow-hidden rounded-2xl border border-transparent text-sm leading-none text-secondary-text transition-all',
+    'group relative flex h-[var(--nav-item-height)] w-full items-center overflow-hidden rounded-xl border border-transparent text-sm leading-none text-secondary-text transition-all',
     isRail
       ? 'justify-center gap-2.5 px-2'
       : collapsed
@@ -87,8 +88,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
     itemBaseClass,
     'hover:bg-[var(--nav-hover-bg)] hover:text-foreground'
   );
-  const itemActiveClass = 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] font-medium text-[hsl(var(--primary))]';
-  const itemIconClass = cn(isRail ? 'h-[18px] w-[18px]' : 'h-5 w-5', 'shrink-0');
+  const itemActiveClass = 'bg-[var(--nav-active-bg)] font-medium text-[hsl(var(--primary))]';
+  const itemIconClass = cn(isRail ? 'h-[18px] w-[18px]' : 'h-4 w-4', 'shrink-0');
   const itemLabelClass = cn('truncate', isRail ? 'text-center' : '');
 
   return (
@@ -102,11 +103,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
       >
         <div
           className={cn(
-            'flex items-center justify-center bg-primary-gradient text-[hsl(var(--primary-foreground))] shadow-[0_12px_28px_var(--nav-brand-shadow)]',
+            'flex items-center justify-center bg-primary-gradient text-[hsl(var(--primary-foreground))] shadow-soft-card',
             isRail ? 'h-9 w-9 rounded-[1rem]' : 'h-10 w-10 rounded-2xl'
           )}
         >
-          <BarChart3 className={cn(isRail ? 'h-[19px] w-[19px]' : 'h-5 w-5')} />
+          <BarChart3 className={cn(isRail ? 'h-[19px] w-[19px]' : 'h-4 w-4')} />
         </div>
         {!collapsed ? (
           <p className={cn('min-w-0 truncate font-semibold text-foreground', isRail ? 'text-[0.95rem] leading-none' : 'text-sm')}>DSA</p>

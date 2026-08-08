@@ -213,7 +213,41 @@ class RuntimeSchedulerService:
     def _current_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
         if self._background_tasks_provider is not None:
             return self._background_tasks_provider(config)
-        return self._current_agent_event_monitor_background_tasks(config)
+        tasks = list(self._current_agent_event_monitor_background_tasks(config))
+        tasks.extend(self._current_paper_valuation_background_tasks(config))
+        return tasks
+
+    def _current_paper_valuation_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "paper_daily_valuation"
+        if not getattr(config, "paper_trading_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.paper_service import PaperService
+
+            interval_seconds = 1800  # 30 min; run_daily_valuation is idempotent per day
+
+            def paper_valuation_task() -> None:
+                try:
+                    account = PaperService().get_or_create_account()
+                    PaperService().run_daily_valuation(account["account_id"])
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("paper daily valuation failed: %s", exc)
+
+            cached = {"task": paper_valuation_task, "interval_seconds": interval_seconds}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
 
     def _current_agent_event_monitor_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
         name = "agent_event_monitor"
