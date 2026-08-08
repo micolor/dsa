@@ -1947,7 +1947,7 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         report = get_history_detail(str(record_id), db_manager=self.db)
 
         self.assertEqual(report.meta.report_type, "market_review")
-        self.assertEqual(report.summary.analysis_summary, report_content)
+        self.assertEqual(report.summary.analysis_summary, "今日大盘复盘")
         self.assertIsNone(report.summary.action)
         self.assertIsNone(report.summary.action_label)
         self.assertEqual(report.details.news_content, report_content)

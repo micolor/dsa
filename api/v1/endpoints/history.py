@@ -386,6 +386,20 @@ def get_stock_bar(
             if norm_code not in seen or record.id > seen[norm_code].id:
                 seen[norm_code] = record
 
+        # Batch the per-stock analysis_count into a single GROUP BY query instead
+        # of one `get_analysis_history_paginated` call per stock (N+1).
+        count_by_candidate: dict = {}
+        candidate_map: dict = {}
+        for norm_code in seen:
+            record = seen[norm_code]
+            display_stock_code = service._display_stock_code(record.code)
+            candidates = HistoryService._history_code_filter_candidates(display_stock_code)
+            candidate_map[norm_code] = candidates
+            for candidate in candidates:
+                count_by_candidate[candidate] = 0
+        if count_by_candidate:
+            count_by_candidate.update(db_manager.count_analysis_by_codes(list(count_by_candidate.keys())))
+
         items = []
         for norm_code in seen:
             record = seen[norm_code]
@@ -412,10 +426,10 @@ def get_stock_bar(
             )
 
             display_stock_code = service._display_stock_code(record.code)
-            analysis_count = db_manager.get_analysis_history_paginated(
-                code=HistoryService._history_code_filter_candidates(display_stock_code),
-                limit=1,
-            )[1]
+            analysis_count = sum(
+                count_by_candidate.get(candidate, 0)
+                for candidate in candidate_map[norm_code]
+            )
             items.append(
                 StockBarItem(
                     id=record.id,
