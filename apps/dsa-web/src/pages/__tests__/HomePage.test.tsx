@@ -325,48 +325,6 @@ describe('HomePage', () => {
     expect(screen.getByText('暂无个股记录')).toBeInTheDocument();
   });
 
-  it('opens the run-flow drawer from an active task in TaskPanel', async () => {
-    vi.mocked(historyApi.getList).mockResolvedValue({
-      total: 0,
-      page: 1,
-      limit: 20,
-      items: [],
-    });
-    vi.mocked(analysisApi.getTasks).mockResolvedValue({
-      total: 1,
-      pending: 0,
-      processing: 1,
-      tasks: [
-        {
-          taskId: 'task-1',
-          traceId: 'trace-1',
-          stockCode: '600519',
-          stockName: '贵州茅台',
-          status: 'processing',
-          progress: 35,
-          message: '分析中',
-          reportType: 'detailed',
-          createdAt: '2026-06-08T08:00:00Z',
-        },
-      ],
-    });
-
-    render(
-      <MemoryRouter>
-        <HomePage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.mouseOver(await screen.findByTestId('floating-task-panel-button'));
-    fireEvent.click(await screen.findByRole('button', { name: '查看 贵州茅台 运行流' }));
-
-    await waitFor(() => {
-      expect(analysisApi.getTaskFlow).toHaveBeenCalledWith('task-1');
-    });
-    expect(await screen.findByTestId('run-flow-panel')).toBeInTheDocument();
-    expect(screen.getByText('贵州茅台 运行流')).toBeInTheDocument();
-  });
-
   it('opens the run-flow drawer from completed report diagnostics', async () => {
     vi.mocked(historyApi.getList).mockResolvedValue({
       total: 1,
@@ -1629,73 +1587,6 @@ describe('HomePage', () => {
     ).toBeTruthy();
   });
 
-  it('shows live task progress in the floating task panel', async () => {
-    vi.mocked(historyApi.getList).mockResolvedValue({
-      total: 0,
-      page: 1,
-      limit: 20,
-      items: [],
-    });
-    vi.mocked(analysisApi.getTasks).mockResolvedValue({
-      total: 2,
-      pending: 1,
-      processing: 1,
-      tasks: [
-        {
-          taskId: 'task-1',
-          traceId: 'trace-1',
-          stockCode: '600519',
-          stockName: '贵州茅台',
-          status: 'processing',
-          progress: 35,
-          message: '分析中',
-          reportType: 'detailed',
-          createdAt: '2026-06-08T08:00:00Z',
-        },
-        {
-          taskId: 'task-2',
-          stockCode: 'AAPL',
-          stockName: 'Apple',
-          status: 'pending',
-          progress: 0,
-          message: '等待中',
-          reportType: 'detailed',
-          createdAt: '2026-06-08T08:01:00Z',
-        },
-      ],
-    });
-
-    render(
-      <MemoryRouter>
-        <HomePage />
-      </MemoryRouter>,
-    );
-
-    const floatingButton = await screen.findByTestId('floating-task-panel-button');
-    expect(floatingButton).toBeInTheDocument();
-
-    fireEvent.mouseOver(floatingButton);
-    const taskItems = await screen.findAllByTestId('task-panel-item');
-    expect(taskItems).toHaveLength(2);
-
-    const taskStreamOptions = vi.mocked(useTaskStream).mock.calls.at(-1)?.[0];
-    act(() => {
-      taskStreamOptions?.onTaskProgress?.({
-        taskId: 'task-1',
-        traceId: 'trace-1',
-        stockCode: '600519',
-        stockName: '贵州茅台',
-        status: 'processing',
-        progress: 72,
-        message: '分析进度更新',
-        reportType: 'detailed',
-        createdAt: '2026-06-08T08:00:00Z',
-      });
-    });
-
-    expect(await screen.findByText('72%')).toBeInTheDocument();
-  });
-
   it('keeps Shanghai-day records that fall on the previous server date', async () => {
     const todayInShanghai = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     const rangeStart = new Date(`${todayInShanghai}T12:00:00Z`);
@@ -2743,47 +2634,6 @@ describe('HomePage', () => {
     expect(historyCalls).toHaveLength(3);
     expect(historyCalls[1][0]).toHaveProperty('startDate');
     expect(historyCalls[2][0]).not.toHaveProperty('startDate');
-  });
-
-  it('renders active task panel content from dashboard state', async () => {
-    const activeTask = {
-      taskId: 'task-1',
-      stockCode: '600519',
-      stockName: '贵州茅台',
-      status: 'processing' as const,
-      progress: 45,
-      message: '正在抓取最新行情',
-      reportType: 'detailed',
-      createdAt: '2026-03-18T08:00:00Z',
-    };
-    vi.mocked(historyApi.getList).mockResolvedValue({
-      total: 0,
-      page: 1,
-      limit: 20,
-      items: [],
-    });
-    vi.mocked(analysisApi.getTasks).mockResolvedValue({
-      total: 1,
-      pending: 0,
-      processing: 1,
-      tasks: [activeTask],
-    });
-
-    useStockPoolStore.setState({
-      activeTasks: [activeTask],
-    });
-
-    render(
-      <MemoryRouter>
-        <HomePage />
-      </MemoryRouter>,
-    );
-
-    const floatingButton = await screen.findByTestId('floating-task-panel-button');
-    fireEvent.mouseOver(floatingButton);
-
-    expect(await screen.findByText('分析任务')).toBeInTheDocument();
-    expect(screen.getByText('正在抓取最新行情')).toBeInTheDocument();
   });
 
   it('triggers reanalyze for the current report even if the search input has other text', async () => {

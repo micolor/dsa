@@ -17,7 +17,6 @@ import { MarketReviewReportView } from '../components/report/MarketReviewReportV
 import { MarketReviewRegionSelector } from '../components/market-review/MarketReviewRegionSelector';
 import { ReportSummary } from '../components/report/ReportSummary';
 import { RunFlowPanel } from '../components/run-flow';
-import { FloatingTaskPanel } from '../components/tasks';
 import {
   HomeStockWorkspace,
   type HomeWatchlistRow,
@@ -836,15 +835,6 @@ const HomePage: React.FC = () => {
       skills: selectedAnalysisSkills,
     });
   }, [selectedAnalysisSkills, selectedReport, submitAnalysis]);
-
-  const openTaskRunFlow = useCallback((task: TaskInfo) => {
-    const stock = task.stockName || task.stockCode || task.taskId;
-    setRunFlowDrawer({
-      open: true,
-      source: { type: 'task', taskId: task.taskId },
-      title: t('runFlow.taskDrawerTitle', { stock }),
-    });
-  }, [t]);
 
   const openHistoryRunFlow = useCallback((recordId: number) => {
     const meta = selectedReport?.meta.id === recordId ? selectedReport.meta : null;
@@ -1813,8 +1803,6 @@ const HomePage: React.FC = () => {
           />
         </Drawer>
       ) : null}
-
-      <FloatingTaskPanel tasks={activeTasks} onOpenRunFlow={openTaskRunFlow} />
     </div>
     </MotionConfig>
   );

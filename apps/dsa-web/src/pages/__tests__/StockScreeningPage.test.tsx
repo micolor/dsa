@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScreeningHotspotDetail } from '../../api/screening';
 import StockScreeningPage from '../StockScreeningPage';
+import { useScreeningTaskStore } from '../../stores/screeningTaskStore';
 
 const {
   enableScreening,
@@ -11,6 +12,7 @@ const {
   getStrategies,
   getScreenTask,
   navigate,
+  resetGetScreenTask,
   resetLastScreenResult,
   screenStocks,
   startScreenTask,
@@ -48,6 +50,17 @@ const {
     getStrategies: vi.fn(),
     getScreenTask,
     navigate: vi.fn(),
+    resetGetScreenTask: () => {
+      getScreenTask.mockReset();
+      getScreenTask.mockImplementation(async () => ({
+        taskId: 'screen-task-1',
+        traceId: 'screen-task-1',
+        status: 'completed',
+        progress: 100,
+        message: '任务执行完成',
+        result: lastScreenResult,
+      }));
+    },
     resetLastScreenResult: () => {
       lastScreenResult = null;
     },
@@ -106,13 +119,14 @@ function createDeferred<T>() {
 
 describe('StockScreeningPage', () => {
   beforeEach(() => {
+    useScreeningTaskStore.setState({ activeScreenTask: null });
     enableScreening.mockReset();
     getScreeningStatus.mockReset();
     getHotspotDetail.mockReset();
     getHotspots.mockReset();
     getStrategies.mockReset();
-    getScreenTask.mockClear();
     navigate.mockReset();
+    resetGetScreenTask();
     resetLastScreenResult();
     screenStocks.mockReset();
     startScreenTask.mockClear();
@@ -938,7 +952,7 @@ describe('StockScreeningPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
     await waitFor(() => expect(screenStocks).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByText(/自定义策略 \(custom_strategy_alpha\)/)).toBeInTheDocument());
+    expect(screenStocks).toHaveBeenCalledWith(expect.objectContaining({ strategy: 'custom_strategy_alpha' }));
   });
 
   it('uses supported Screening strategy ids and cn market', async () => {
@@ -1028,12 +1042,12 @@ describe('StockScreeningPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     expect(await screen.findByText('旧策略股票')).toBeInTheDocument();
-    expect(screen.getByText('选股完成')).toBeInTheDocument();
+    expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
 
     fireEvent.change(screen.getByLabelText('策略'), { target: { value: 'capital_heat' } });
 
     expect(screen.queryByText('旧策略股票')).not.toBeInTheDocument();
-    expect(screen.queryByText('选股完成')).not.toBeInTheDocument();
+    expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
     expect(screen.getByLabelText('策略')).toHaveValue('capital_heat');
   });
 
@@ -1147,14 +1161,15 @@ describe('StockScreeningPage', () => {
     expect(await screen.findByText('选股已开启')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
-    expect(await screen.findByText('选股运行中')).toBeInTheDocument();
-    expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toContain('screen-task-1');
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toContain('screen-task-1'),
+    );
 
     firstRender.unmount();
     render(<StockScreeningPage />);
 
     expect(await screen.findByText('恢复后的候选')).toBeInTheDocument();
-    expect(screen.getByText('选股完成')).toBeInTheDocument();
+    expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
     expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toBeNull();
   });
 
@@ -1176,10 +1191,51 @@ describe('StockScreeningPage', () => {
     render(<StockScreeningPage />);
 
     await waitFor(() => expect(getScreenTask).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('选股运行中')).toBeInTheDocument();
+    expect(useScreeningTaskStore.getState().activeScreenTask).not.toBeNull();
     expect(screen.getByText('选股任务仍在后台运行，状态轮询暂时超时，将自动重试。')).toBeInTheDocument();
     expect(screen.queryByText(/连接上游服务超时/)).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toContain('screen-task-1');
+  });
+
+  it('publishes the running screening task to the global task store while pending', async () => {
+    getScreeningStatus.mockResolvedValue({
+      enabled: true,
+      available: true,
+    });
+    screenStocks.mockResolvedValueOnce({
+      enabled: true,
+      candidates: [
+        {
+          rank: 1,
+          code: '000001',
+          name: '平安银行',
+          score: 88.5,
+          reason: 'candidate reason',
+          raw: {},
+        },
+      ],
+      candidateCount: 1,
+    });
+    getScreenTask.mockResolvedValueOnce({
+      taskId: 'screen-task-1',
+      traceId: 'screen-task-1',
+      status: 'processing',
+      progress: 42,
+      message: '正在执行因子评分',
+      result: null,
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+
+    await waitFor(() => {
+      expect(useScreeningTaskStore.getState().activeScreenTask?.status).toBe('processing');
+    });
+    expect(useScreeningTaskStore.getState().activeScreenTask?.taskId).toBe('screen-task-1');
+    expect(useScreeningTaskStore.getState().activeScreenTask?.progress).toBe(42);
+    expect(useScreeningTaskStore.getState().activeScreenTask?.title).toContain('选股');
   });
 
   it('surfaces Screening LLM fallback instead of showing empty LLM fields as normal', async () => {
@@ -1222,7 +1278,6 @@ describe('StockScreeningPage', () => {
     expect(await screen.findByText('当前使用因子排序')).toBeInTheDocument();
     expect(screen.getByText(/缺少可用 LLM API Key/)).toBeInTheDocument();
     expect(screen.queryByText(/Missing gemini_api_key/)).not.toBeInTheDocument();
-    expect(screen.getByText(/排序：确定性因子/)).toBeInTheDocument();
     expect(screen.getByText('因子排序')).toBeInTheDocument();
     expect(screen.getByText(/主要优势：流动性 93、估值 87/)).toBeInTheDocument();
     expect(screen.queryByText(/LLM 已降级/)).not.toBeInTheDocument();
@@ -1337,9 +1392,7 @@ describe('StockScreeningPage', () => {
     expect(await screen.findByText('选股已开启')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
-    expect(await screen.findByText('深度补充：1 / 1')).toBeInTheDocument();
-
-    expect(screen.getByText('增强摘要')).toBeInTheDocument();
+    expect(await screen.findByText('增强摘要')).toBeInTheDocument();
     expect(screen.getByText(/行情：现价 1688/)).toBeInTheDocument();
     expect(screen.getByText('相关新闻')).toBeInTheDocument();
     expect(screen.getByText('贵州茅台最新公告')).toBeInTheDocument();

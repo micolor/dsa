@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Agent Chat 按会话持久化 Skill 选择，支持刷新和会话切换恢复，并区分省略 `skills`、显式空列表与非空选择；无持久化状态的历史会话继续使用运行时默认且不会被静默转为显式选择，复用分析 `context` 中残留的 legacy `skills` / `strategies` 也不会覆盖顶层三态或会话状态，非空但全部无效的 Skill 请求不会被当成显式空列表并清空既有选择
 - [改进] 后端 CI 在不跳过离线测试的前提下按完整测试文件分成三个独立 runner 并行执行，由单一 `backend-gate` 汇总门禁结果；实测文件耗时和首分片静态检查成本共同参与负载平衡，新测试文件自动纳入，现有 pip 安装和测试参数保持不变，避免 xdist 进程内并发的全局状态竞态。
 - [新功能] Agent Chat 正文改为真 token 流式输出：后端新增 `content_delta` SSE 事件，litellm 后端开启 `stream=True` 边生成边推送文本，codex 后端按 `agentMessage` item 帧粒度尽力推送；Web 前端按 ~40ms 节流渐进渲染 Markdown、滚动跟随，`done` 事件仍以完整 `content` 为权威终稿收敛。旧客户端忽略未知事件类型，`done` 契约不变，无破坏。
+- [改进] 选股页面视觉与首页统一：分节容器改为玻璃拟态卡片（`glass-card`），顶部状态与标题统一走 `DashboardPanelHeader`，热点与策略徽章复用 `Badge` 组件，选股结果由 10 列密集表格改为可展开的卡片列表（复用 `ListItemRow`，详情保留完整字段），后端筛选逻辑与数据契约不变。
+- [改进] 任务执行统一收敛到左侧任务图标：将分析任务与选股任务的进度查看合并到 Shell 全局常驻的悬浮任务图标（`GlobalTaskCenter` + `FloatingTaskPanel`），所有页面共用同一入口实时查看进度；选股页移除页面内联的「选股运行中/选股完成」进度区与运行详情，结果候选列表仍为完成态的唯一输出。
 - [测试] 后端 CI 默认覆盖所有非 Web 改动，仅对已证明安全的纯 Web 路径跳过，并将整个 Web public 目录及前端渠道模板、设置帮助视为跨层运行合同；补充纯 Web、共享 Web 资产及 Web/非 Web 混合改动的过滤语义回归，明确 `predicate-quantifier: every` 按单文件匹配全部规则、再以任一匹配文件触发门禁。Docker CI 继续按构建输入过滤。离线测试保留稳定的串行执行与慢用例摘要，并移除重复用例和测试内真实等待。
 
 - [修复] Web 分享图改为用户点击“分享”后才按需生成，不再在报告加载时自动请求

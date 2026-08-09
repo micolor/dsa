@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, X } from 'lucide-react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { SidebarNav } from './SidebarNav';
+import { GlobalTaskCenter } from '../tasks/GlobalTaskCenter';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { ROUTE_TITLES } from './routeTitles';
 
@@ -130,6 +131,9 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
           {children ?? <Outlet />}
         </main>
       </div>
+
+      {/* 全局任务中心：分析 + 选股任务的左侧任务图标，所有路由常驻 */}
+      <GlobalTaskCenter />
     </div>
   );
 };

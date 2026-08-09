@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, ChevronDown, Copy, SlidersHorizontal } from 'lucide-react';
+import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
@@ -1345,11 +1345,11 @@ const ChatPage: React.FC = () => {
                 >
                   <div
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold shadow-sm transition-all',
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm transition-all',
                       msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
                     )}
                   >
-                    {msg.role === 'user' ? 'U' : 'AI'}
+                    {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                   </div>
                   <div
                     className={cn(
@@ -1404,10 +1404,10 @@ const ChatPage: React.FC = () => {
                             className="chat-copy-btn"
                             aria-label="导出此条消息为 Markdown"
                           >
-                            导出
+                            <Download className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                        <div className="chat-prose pr-20 sm:pr-24">
+                        <div className="chat-prose pr-3 sm:pr-4">
                           <Markdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
                           </Markdown>
@@ -1433,8 +1433,8 @@ const ChatPage: React.FC = () => {
 
             {loading && (
               <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
-                  AI
+                <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0">
+                  <Bot className="h-4 w-4" />
                 </div>
                 <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm bg-card/72 px-5 py-4 shadow-soft-card">
                   <div className="flex items-center gap-2.5 text-sm text-secondary-text">
