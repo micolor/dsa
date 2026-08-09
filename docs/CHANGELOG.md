@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 后端 CI 在不跳过离线测试的前提下按完整测试文件分成三个独立 runner 并行执行，由单一 `backend-gate` 汇总门禁结果；实测文件耗时和首分片静态检查成本共同参与负载平衡，新测试文件自动纳入，现有 pip 安装和测试参数保持不变，避免 xdist 进程内并发的全局状态竞态。
 - [新功能] Agent Chat 正文改为真 token 流式输出：后端新增 `content_delta` SSE 事件，litellm 后端开启 `stream=True` 边生成边推送文本，codex 后端按 `agentMessage` item 帧粒度尽力推送；Web 前端按 ~40ms 节流渐进渲染 Markdown、滚动跟随，`done` 事件仍以完整 `content` 为权威终稿收敛。旧客户端忽略未知事件类型，`done` 契约不变，无破坏。
 - [改进] 选股页面视觉与首页统一：分节容器改为玻璃拟态卡片（`glass-card`），顶部状态与标题统一走 `DashboardPanelHeader`，热点与策略徽章复用 `Badge` 组件，选股结果由 10 列密集表格改为可展开的卡片列表（复用 `ListItemRow`，详情保留完整字段），后端筛选逻辑与数据契约不变。
+- [改进] 设置页全面统一到 glass-card 视觉语言：分组卡片、分类导航、加载骨架与 AI 模型 / 智能导入 / 后端状态面板的容器与分区标题统一走 `glass-card` + `DashboardPanelHeader`，与首页 / 选股页一致；字段行与内部小徽标保留浅表面，DOM 结构、`data-testid` 与后端 / API 数据契约不变。
+- [改进] 全站玻璃卡片材质向 macOS 感收敛：共享 `.glass-card` / `.dashboard-card` 的毛玻璃更通透（背景 0.42→0.32）、模糊更自然（`blur(18px) saturate(190%)`→`blur(20px) saturate(160%)`）、阴影改为更轻更柔的多层弥散（接触影 + 环境影 + 顶部内高光）；设置页、选股页、首页等所有使用玻璃卡的页面观感保持一致，小控件阴影 token 不变。
+- [改进] 设置页剩余元素源码级统一到全站共享语言：按钮变体 `settings-primary`/`settings-secondary` 全部替换为共享 `primary`/`secondary`，表面与边框 token（`settings-surface*`/`settings-border*`）替换为 `bg-elevated`/`bg-hover`/`border-border/N`，主色复合类（`settings-accent-text`/`settings-accent-badge`/`settings-nav-item-active`/`settings-drag-active`）改用共享 `hsl(var(--primary))` 任意值表达，设置页源码不再保留两套类系统；`index.css` 的 `--settings-*` 变量与输入框控件保留不动，DOM 结构、`data-testid` 与数据契约不变。
+- [改进] 用量页视觉与全站 glass-card 语言统一：统计卡（`StatCard`）、模型用量卡、调用类型分区与最近调用表格容器统一为玻璃拟态卡片，分区标题走 `DashboardPanelHeader`，刷新按钮改用共享 `Button` 次按钮变体；`Card`/`terminal-card` 与 `btn-secondary` 旧表面对齐到共享语言，DOM 结构、`data-testid` 与数据契约不变。
+- [改进] 告警中心视觉与全站 glass-card 语言统一：新建规则表单、规则列表、触发历史与通知尝试记录四个分区由 `Card`（`terminal-card`）统一为玻璃拟态卡片，分区标题走 `DashboardPanelHeader`，与设置 / 用量 / 首页一致；表单与列表控件本就复用共享 `Button`/`Input`/`Select`，DOM 结构、`data-testid` 与数据契约不变。
 - [改进] 任务执行统一收敛到左侧任务图标：将分析任务与选股任务的进度查看合并到 Shell 全局常驻的悬浮任务图标（`GlobalTaskCenter` + `FloatingTaskPanel`），所有页面共用同一入口实时查看进度；选股页移除页面内联的「选股运行中/选股完成」进度区与运行详情，结果候选列表仍为完成态的唯一输出。
 - [测试] 后端 CI 默认覆盖所有非 Web 改动，仅对已证明安全的纯 Web 路径跳过，并将整个 Web public 目录及前端渠道模板、设置帮助视为跨层运行合同；补充纯 Web、共享 Web 资产及 Web/非 Web 混合改动的过滤语义回归，明确 `predicate-quantifier: every` 按单文件匹配全部规则、再以任一匹配文件触发门禁。Docker CI 继续按构建输入过滤。离线测试保留稳定的串行执行与慢用例摘要，并移除重复用例和测试内真实等待。
+- [改进] 告警中心「新建规则」由左侧常驻表单改为居中弹框：规则列表头部新增「新建规则」按钮，点击打开居中 Dialog（复用设置帮助弹框模式），表单挂载时打开、提交成功自动关闭并刷新列表，Escape / 背板点击 / 关闭按钮均可关闭，创建错误在弹框内显示；左侧固定列移除、规则列表独占宽度，DOM 结构 / 数据契约不变。
 
 - [修复] Web 分享图改为用户点击“分享”后才按需生成，不再在报告加载时自动请求
 - [修复] 将 `SCREENING_ENABLED` 及 Web 选股功能开关归入“基础设置”，选股导航入口继续由该开关控制
