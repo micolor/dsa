@@ -43,7 +43,7 @@ const BackendStatusRow: React.FC<{ title: string; status: GenerationBackendStatu
   }
 
   return (
-    <div className="rounded-xl border settings-border bg-background/35 px-4 py-3">
+    <div className="rounded-xl border border-border/60 bg-background/35 px-4 py-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -180,7 +180,7 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
   }, [maskToken, requestItems]);
 
   return (
-    <div data-testid="generation-backend-status-panel" className="space-y-3 rounded-xl border settings-border bg-card/70 p-4">
+    <div data-testid="generation-backend-status-panel" className="space-y-3 glass-card !border-transparent p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-sm font-semibold text-foreground">{t('settings.generationBackendStatus')}</p>
@@ -189,11 +189,11 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button type="button" variant="settings-secondary" size="sm" disabled={disabled || isLoading} isLoading={isLoading} loadingText={t('settings.generationBackendRefreshing')} onClick={() => void refresh()}>
+          <Button type="button" variant="secondary" size="sm" disabled={disabled || isLoading} isLoading={isLoading} loadingText={t('settings.generationBackendRefreshing')} onClick={() => void refresh()}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             <span className="sr-only">{t('settings.generationBackendRefresh')}</span>
           </Button>
-          <Button type="button" variant="settings-secondary" size="sm" disabled={disabled || isSmoking} isLoading={isSmoking} loadingText={t('settings.generationBackendSmokeTesting')} onClick={() => void runSmoke()}>
+          <Button type="button" variant="secondary" size="sm" disabled={disabled || isSmoking} isLoading={isSmoking} loadingText={t('settings.generationBackendSmokeTesting')} onClick={() => void runSmoke()}>
             <FlaskConical className="h-4 w-4" aria-hidden="true" />
             {t('settings.generationBackendSmokeTest')}
           </Button>

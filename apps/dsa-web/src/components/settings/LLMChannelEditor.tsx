@@ -446,7 +446,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
       ];
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]">
+    <div className="mb-2 overflow-hidden glass-card !border-transparent transition-[background-color,border-color,box-shadow] duration-200 hover:bg-hover">
       <div
         className="flex cursor-pointer select-none items-center gap-2.5 px-4 py-3 transition-colors"
         onClick={() => onToggleExpand(index)}
@@ -532,7 +532,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
       </div>
 
       {expanded ? (
-        <div className="settings-surface-overlay-soft space-y-4 px-4 py-4">
+        <div className="bg-background/60 space-y-4 px-4 py-4">
           <div className="grid gap-2 sm:grid-cols-3">
             <div>
               <HelpLabel
@@ -608,7 +608,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           </div>
 
           {showProviderTemplateDetails ? (
-            <div className="space-y-2 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
+            <div className="space-y-2 rounded-xl border border-border/60 bg-hover p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-medium text-muted-text">配置参考</span>
                 {providerCapabilities.map((capability) => {
@@ -616,7 +616,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                   return (
                     <Tooltip key={capability} content={capabilityMeta.hint}>
                       <span className="inline-flex">
-                        <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface)] text-secondary-text">
+                        <Badge variant="default" className="border-border/60 bg-elevated text-secondary-text">
                           {capabilityMeta.label}
                         </Badge>
                       </span>
@@ -636,7 +636,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       href={source.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="settings-accent-text underline-offset-2 hover:underline"
+                      className="text-[hsl(var(--primary))] underline-offset-2 hover:underline"
                     >
                       {source.label}
                     </a>
@@ -671,11 +671,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           />
           </div>
 
-          <div className="space-y-3 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
+          <div className="space-y-3 rounded-xl border border-border/60 bg-hover p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="settings-secondary"
+                variant="secondary"
                 size="sm"
                 className="px-3 text-[11px] shadow-none"
                 disabled={busy}
@@ -708,7 +708,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                   helpKey="settings.llm_channel.models"
                   examples={['LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro']}
                 />
-                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] p-3">
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-border/60 bg-elevated p-3">
                   {discoveredModels.map((model) => (
                     <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
                       <input
@@ -763,7 +763,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           <div className="flex items-center gap-2 pt-1">
             <Button
               type="button"
-              variant="settings-secondary"
+              variant="secondary"
               size="sm"
               className="px-3 text-[11px] shadow-none"
               disabled={busy}
@@ -797,7 +797,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             ) : null}
           </div>
 
-          <div className="space-y-3 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
+          <div className="space-y-3 rounded-xl border border-border/60 bg-hover p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-1.5">
@@ -816,7 +816,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               </div>
               <Button
                 type="button"
-                variant="settings-secondary"
+                variant="secondary"
                 size="sm"
                 className="px-3 text-[11px] shadow-none"
                 disabled={busy || capabilityBusy || selectedCapabilities.length === 0}
@@ -829,7 +829,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             <div className="flex flex-wrap gap-2">
               {runtimeCapabilityOptions.map((option) => (
                 <Tooltip key={option.value} content={option.hint}>
-                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--settings-border)] bg-[var(--settings-surface)] px-2 py-1 text-[11px] text-secondary-text">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border/60 bg-elevated px-2 py-1 text-[11px] text-secondary-text">
                     <input
                       type="checkbox"
                       checked={selectedCapabilities.includes(option.value)}
@@ -2298,13 +2298,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     <div className="space-y-4">
       <button
         type="button"
-        className="flex w-full items-center justify-between rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] px-5 py-4 text-left shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]"
+        className="flex w-full items-center justify-between rounded-[1.25rem] glass-card !border-transparent px-5 py-4 text-left transition-[background-color,border-color,box-shadow] duration-200 hover:bg-hover"
         onClick={() => setIsCollapsed((previous) => !previous)}
       >
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">AI 模型配置</h3>
-            <Badge variant="info" className="settings-accent-badge">渠道管理</Badge>
+            <Badge variant="info">渠道管理</Badge>
           </div>
           <p className="text-xs text-muted-text">
             添加服务商渠道后可自动获取模型列表并多选，也可继续手动填写。配置会自动同步到 .env 文件。
@@ -2315,16 +2315,16 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
 
       {!isCollapsed ? (
         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+          <div className="rounded-[1.25rem] glass-card !border-transparent p-4">
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-medium text-foreground">快速添加渠道</h4>
                 <p className="mt-1 text-xs text-secondary-text">先选择预设服务商，再一键创建配置草稿。</p>
               </div>
-              <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">{channels.length} 个渠道</Badge>
+              <Badge variant="default" className="border-border/60 bg-hover text-muted-text">{channels.length} 个渠道</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button type="button" variant="settings-primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
+              <Button type="button" variant="primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
                 + 添加渠道
               </Button>
               <Select
@@ -2350,7 +2350,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             </div>
 
             {channels.length === 0 ? (
-              <div className="settings-surface-overlay-muted rounded-[1.35rem] border border-dashed settings-border-strong px-4 py-10 text-center">
+              <div className="bg-background/50 rounded-[1.35rem] border border-dashed border-border/70 px-4 py-10 text-center">
                 <p className="text-sm font-medium text-secondary-text">还没有渠道</p>
                 <p className="mt-1 text-xs text-muted-text">选择服务商预设后点击“添加渠道”即可开始配置。</p>
               </div>
@@ -2379,13 +2379,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           </div>
 
           {managesRuntimeConfig ? (
-            <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+            <div className="rounded-[1.25rem] glass-card !border-transparent p-4">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <span className="settings-accent-text text-xs font-medium uppercase tracking-wider">运行时参数</span>
+                  <span className="text-[hsl(var(--primary))] text-xs font-medium uppercase tracking-wider">运行时参数</span>
                   <p className="mt-1 text-[11px] text-muted-text">主模型、备选模型、Vision 与 Temperature 会直接写入运行时配置。</p>
                 </div>
-                <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">Runtime</Badge>
+                <Badge variant="default" className="border-border/60 bg-hover text-muted-text">Runtime</Badge>
               </div>
               <div className="mb-4">
                 <HelpLabel
@@ -2414,7 +2414,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
               </div>
 
               {availableModels.length === 0 ? (
-                <div className="rounded-xl border border-dashed settings-border-strong settings-surface-overlay-soft px-3 py-2 text-xs text-muted-text">
+                <div className="rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-2 text-xs text-muted-text">
                   先添加至少一个已启用渠道并填写模型，下面的主模型 / 备选模型 / Vision 选项才会出现。
                 </div>
               ) : (
@@ -2472,7 +2472,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                       examples={['LITELLM_FALLBACK_MODELS=deepseek/deepseek-v4-pro,gemini/gemini-3-flash-preview']}
                       compact
                     />
-                    <div className="space-y-2 rounded-xl border settings-border-strong settings-surface-overlay-soft p-3">
+                    <div className="space-y-2 rounded-xl border border-border/70 bg-background/60 p-3">
                       {availableModels.map((model) => (
                         <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
                           <input
@@ -2527,7 +2527,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
-              variant="settings-primary"
+              variant="primary"
               glow
               disabled={busy || !hasChanges}
               onClick={() => void handleSave()}

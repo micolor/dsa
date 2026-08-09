@@ -104,7 +104,7 @@ export function AgentBackendStatusPanel({
   const status = statusResponse;
 
   return (
-    <div data-testid="agent-backend-status-panel" className="space-y-3 rounded-xl border settings-border bg-card/70 p-4">
+    <div data-testid="agent-backend-status-panel" className="space-y-3 glass-card !border-transparent p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-sm font-semibold text-foreground">{t('settings.agentBackendStatus')}</p>
@@ -115,7 +115,7 @@ export function AgentBackendStatusPanel({
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="secondary"
             size="sm"
             disabled={disabled || isLoading || hasArchitectureConflict}
             isLoading={isLoading}
@@ -155,7 +155,7 @@ export function AgentBackendStatusPanel({
       ) : null}
       {error ? <ApiErrorAlert error={error} /> : null}
       {status ? (
-        <div className="rounded-xl border settings-border bg-background/35 px-4 py-3">
+        <div className="rounded-xl border border-border/60 bg-background/35 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <StatusIcon status={status} />
             <span className="text-sm font-semibold text-foreground">

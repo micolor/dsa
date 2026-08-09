@@ -34,11 +34,11 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
 
   return (
     <nav
-      className="h-full rounded-lg border settings-border bg-card/90 p-2 shadow-soft-card backdrop-blur-sm"
+      className="h-full glass-card !border-transparent p-2"
       aria-label={t('settings.categoryNavTitle')}
     >
       <div className="hidden px-2 pb-3 pt-2 lg:block">
-        <p className="settings-accent-text text-xs font-semibold uppercase tracking-[0.24em]">{t('settings.categoryNavTitle')}</p>
+        <p className="text-[hsl(var(--primary))] text-xs font-semibold uppercase tracking-[0.24em]">{t('settings.categoryNavTitle')}</p>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-text">{t('settings.categoryNavDescription')}</p>
       </div>
 
@@ -57,8 +57,8 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
               className={cn(
                 'flex min-w-[9rem] items-center gap-2 rounded-md border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow] duration-200 lg:min-w-0 lg:w-full lg:items-start lg:gap-3 lg:px-3 lg:py-3',
                 isActive
-                  ? 'settings-nav-item-active'
-                  : 'border-transparent bg-transparent hover:border-[var(--settings-border)] hover:bg-[var(--settings-surface-hover)]',
+                  ? 'border-[hsl(var(--primary)/0.36)] bg-[hsl(var(--primary)/0.12)] shadow-[inset_3px_0_0_hsl(var(--primary)/0.7)]'
+                  : 'border-transparent bg-transparent hover:border-border/70 hover:bg-hover',
               )}
               onClick={() => onSelect(category.category)}
               aria-current={isActive ? 'page' : undefined}
@@ -83,8 +83,8 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
                 className={cn(
                   'shrink-0 px-1.5 py-0 text-[11px]',
                   isActive
-                    ? 'settings-accent-badge border-[hsl(var(--primary)/0.32)]'
-                    : 'border-[var(--settings-border)] bg-[var(--settings-surface)] text-muted-text',
+                    ? 'border-[hsl(var(--primary)/0.32)]'
+                    : 'border-border/60 bg-elevated text-muted-text',
                 )}
               >
                 {count}

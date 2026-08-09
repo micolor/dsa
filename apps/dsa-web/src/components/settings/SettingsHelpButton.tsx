@@ -186,7 +186,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
           <button
             ref={buttonRef}
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-muted-text transition-colors hover:border-[var(--settings-border)] hover:bg-[var(--settings-surface-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-muted-text transition-colors hover:border-border/70 hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
             aria-label={helpButtonLabel}
             aria-expanded={open}
             aria-controls={open ? titleId : undefined}
