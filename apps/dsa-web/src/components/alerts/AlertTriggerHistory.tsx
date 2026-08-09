@@ -1,6 +1,7 @@
 import type React from 'react';
 import { Activity } from 'lucide-react';
-import { Badge, Card, EmptyState, Loading } from '../common';
+import { Badge, EmptyState, Loading } from '../common';
+import { DashboardPanelHeader } from '../dashboard';
 import type { AlertTriggerItem } from '../../types/alerts';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
@@ -49,7 +50,13 @@ interface AlertTriggerHistoryProps {
 
 export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ triggers, isLoading = false }) => {
   return (
-    <Card title="触发历史" subtitle="评估记录" variant="bordered" padding="md">
+    <section className="glass-card !border-transparent p-4 md:p-5">
+      <DashboardPanelHeader
+        className="mb-3"
+        eyebrow="评估记录"
+        title="触发历史"
+        titleClassName="text-base font-semibold"
+      />
       {isLoading ? <Loading label="正在加载触发历史" /> : null}
       {!isLoading && triggers.length === 0 ? (
         <EmptyState
@@ -98,6 +105,6 @@ export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ trigge
           </table>
         </div>
       ) : null}
-    </Card>
+    </section>
   );
 };

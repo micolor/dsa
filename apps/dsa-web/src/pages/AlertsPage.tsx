@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BellRing } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BellRing, X } from 'lucide-react';
 import { alertsApi } from '../api/alerts';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -12,7 +13,8 @@ import {
   type AlertTypeFilter,
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
-import { ApiErrorAlert, AppPage, Card, EmptyState, InlineAlert, Loading } from '../components/common';
+import { ApiErrorAlert, AppPage, EmptyState, InlineAlert, Loading } from '../components/common';
+import { DashboardPanelHeader } from '../components/dashboard';
 import type {
   AlertNotificationItem,
   AlertRuleCreateRequest,
@@ -122,6 +124,7 @@ const AlertsPage: React.FC = () => {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<ParsedApiError | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [busyRule, setBusyRule] = useState<AlertRuleBusyState | null>(null);
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
   const rulesRequestIdRef = useRef(0);
@@ -200,6 +203,22 @@ const AlertsPage: React.FC = () => {
     void loadNotifications();
   }, [loadNotifications, loadTriggers, rulesLoaded]);
 
+  useEffect(() => {
+    if (!createOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setCreateOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [createOpen]);
+
   const handleCreateRule = async (payload: AlertRuleCreateRequest) => {
     setCreateLoading(true);
     setCreateError(null);
@@ -260,7 +279,6 @@ const AlertsPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-5">
-      {createError ? <ApiErrorAlert error={createError} onDismiss={() => setCreateError(null)} /> : null}
       {createSuccess ? (
         <InlineAlert
           title="创建成功"
@@ -275,47 +293,51 @@ const AlertsPage: React.FC = () => {
       ) : null}
       {rulesError ? <ApiErrorAlert error={rulesError} onDismiss={() => setRulesError(null)} /> : null}
 
-      <div className="grid items-stretch gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <AlertRuleForm onSubmit={handleCreateRule} isSubmitting={createLoading} />
-        <div className="flex h-full min-h-0 flex-col gap-4">
-          <AlertRuleList
-            className="flex h-full min-h-0 flex-col"
-            rules={rules}
-            total={rulesTotal}
-            page={rulesPage}
-            pageSize={PAGE_SIZE}
-            isLoading={rulesLoading}
-            enabledFilter={enabledFilter}
-            alertTypeFilter={alertTypeFilter}
-            onEnabledFilterChange={(value) => {
-              setEnabledFilter(value);
-              setRulesPage(1);
-            }}
-            onAlertTypeFilterChange={(value) => {
-              setAlertTypeFilter(value);
-              setRulesPage(1);
-            }}
-            onPageChange={setRulesPage}
-            onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
-            onDelete={(rule) => void handleDeleteRule(rule)}
-            onTest={(rule) => void handleTestRule(rule)}
-            busyRule={busyRule}
+      <div className="flex min-h-0 flex-col gap-4">
+        <AlertRuleList
+          className="flex min-h-0 flex-col"
+          rules={rules}
+          total={rulesTotal}
+          page={rulesPage}
+          pageSize={PAGE_SIZE}
+          isLoading={rulesLoading}
+          enabledFilter={enabledFilter}
+          alertTypeFilter={alertTypeFilter}
+          onEnabledFilterChange={(value) => {
+            setEnabledFilter(value);
+            setRulesPage(1);
+          }}
+          onAlertTypeFilterChange={(value) => {
+            setAlertTypeFilter(value);
+            setRulesPage(1);
+          }}
+          onPageChange={setRulesPage}
+          onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
+          onDelete={(rule) => void handleDeleteRule(rule)}
+          onTest={(rule) => void handleTestRule(rule)}
+          onCreate={() => setCreateOpen(true)}
+          busyRule={busyRule}
+        />
+        {testResult ? (
+          <InlineAlert
+            title="测试结果"
+            variant={testVariant(testResult)}
+            message={renderTestResultMessage(testResult)}
           />
-          {testResult ? (
-            <InlineAlert
-              title="测试结果"
-              variant={testVariant(testResult)}
-              message={renderTestResultMessage(testResult)}
-            />
-          ) : null}
-        </div>
+        ) : null}
       </div>
 
       {triggersError ? <ApiErrorAlert error={triggersError} onDismiss={() => setTriggersError(null)} /> : null}
       <AlertTriggerHistory triggers={triggers} isLoading={triggersLoading} />
 
       {notificationsError ? <ApiErrorAlert error={notificationsError} onDismiss={() => setNotificationsError(null)} /> : null}
-      <Card title="通知尝试记录" subtitle="通知结果" variant="bordered" padding="md">
+      <section className="glass-card !border-transparent p-4 md:p-5">
+        <DashboardPanelHeader
+          className="mb-3"
+          eyebrow="通知结果"
+          title="通知尝试记录"
+          titleClassName="text-base font-semibold"
+        />
         {notificationsLoading ? <Loading label="正在加载通知尝试记录" /> : null}
         {!notificationsLoading && notifications.length === 0 ? (
           <EmptyState
@@ -352,7 +374,54 @@ const AlertsPage: React.FC = () => {
             </table>
           </div>
         ) : null}
-      </Card>
+      </section>
+
+      {createOpen ? createPortal(
+        <div
+          className="fixed inset-0 z-[140] flex items-end bg-background/25 backdrop-blur-sm sm:items-center sm:justify-center"
+          onClick={() => setCreateOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="新建告警规则"
+            onClick={(e) => e.stopPropagation()}
+            className="relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong sm:max-w-2xl sm:rounded-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                  告警中心
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-foreground">新建告警规则</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/80 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+                aria-label="关闭"
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-5 py-5">
+              {createError ? (
+                <div className="mb-4">
+                  <ApiErrorAlert error={createError} onDismiss={() => setCreateError(null)} />
+                </div>
+              ) : null}
+              <AlertRuleForm
+                onSubmit={handleCreateRule}
+                isSubmitting={createLoading}
+                bare
+                onSuccess={() => setCreateOpen(false)}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </AppPage>
   );
 };

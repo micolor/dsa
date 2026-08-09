@@ -29,7 +29,8 @@ import {
   ALERT_THRESHOLD_DIRECTION_OPTIONS,
 } from '../../locales/featureText';
 import { validateStockCode } from '../../utils/validation';
-import { Button, Card, Checkbox, Input, Select } from '../common';
+import { Button, Checkbox, Input, Select } from '../common';
+import { DashboardPanelHeader } from '../dashboard';
 
 const SYMBOL_ALERT_TYPE_OPTIONS = [
   { value: 'price_cross', label: '价格突破' },
@@ -104,6 +105,10 @@ const MAX_REQUESTED_DAYS = 365;
 interface AlertRuleFormProps {
   onSubmit: (payload: AlertRuleCreateRequest) => Promise<boolean | void> | boolean | void;
   isSubmitting?: boolean;
+  /** Render only the <form>, without the outer glass-card section / header (used inside a dialog). */
+  bare?: boolean;
+  /** Called after a successful create (after internal field reset). */
+  onSuccess?: () => void;
 }
 
 function isPortfolioScope(scope: AlertTargetScope): boolean {
@@ -124,7 +129,7 @@ function optionsForScope(scope: AlertTargetScope, language: UiLanguage) {
   return scope === 'portfolio_account' ? ALERT_PORTFOLIO_TYPE_OPTIONS[language] : ALERT_SYMBOL_TYPE_OPTIONS[language];
 }
 
-export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false }) => {
+export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false, bare = false, onSuccess }) => {
   const { language } = useUiLanguage();
   const text = ALERT_FORM_TEXT[language];
   const [name, setName] = useState('');
@@ -419,6 +424,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
     setMinDrop('10');
     resetParameters(alertType);
     setEnabled(true);
+    onSuccess?.();
   };
 
   const renderTargetControl = () => {
@@ -468,9 +474,8 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
     );
   };
 
-  return (
-    <Card title={text.cardTitle} subtitle={text.cardSubtitle} variant="bordered" padding="md">
-      <form className="space-y-4" noValidate onSubmit={(event) => void handleSubmit(event)}>
+  const formElement = (
+    <form className="space-y-4" noValidate onSubmit={(event) => void handleSubmit(event)}>
         <div className="grid gap-4 md:grid-cols-2">
           <Input
             label={text.ruleName}
@@ -781,7 +786,22 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
           </Button>
         </div>
         {formError ? <p role="alert" className="text-sm text-danger">{formError}</p> : null}
-      </form>
-    </Card>
+    </form>
+  );
+
+  if (bare) {
+    return formElement;
+  }
+
+  return (
+    <section className="glass-card !border-transparent p-4 md:p-5">
+      <DashboardPanelHeader
+        className="mb-3"
+        eyebrow={text.cardSubtitle}
+        title={text.cardTitle}
+        titleClassName="text-base font-semibold"
+      />
+      {formElement}
+    </section>
   );
 };

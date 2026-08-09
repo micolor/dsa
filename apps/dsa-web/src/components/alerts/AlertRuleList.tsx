@@ -1,9 +1,11 @@
 import type React from 'react';
 import { useState } from 'react';
 import { Bell, Trash2 } from 'lucide-react';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Pagination, Select } from '../common';
+import { Badge, Button, ConfirmDialog, EmptyState, Pagination, Select } from '../common';
+import { DashboardPanelHeader } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../../i18n/uiText';
+import { cn } from '../../utils/cn';
 import {
   ALERT_DIRECTION_LABELS,
   ALERT_ENABLED_FILTER_OPTIONS,
@@ -104,6 +106,7 @@ interface AlertRuleListProps {
   onToggleEnabled: (rule: AlertRuleItem) => void;
   onDelete: (rule: AlertRuleItem) => void;
   onTest: (rule: AlertRuleItem) => void;
+  onCreate?: () => void;
   busyRule?: AlertRuleBusyState | null;
 }
 
@@ -122,6 +125,7 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
   onToggleEnabled,
   onDelete,
   onTest,
+  onCreate,
   busyRule = null,
 }) => {
   const { language } = useUiLanguage();
@@ -134,13 +138,18 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
   );
 
   return (
-    <Card
-      title={text.title}
-      subtitle={formatUiText(text.subtitle, { total })}
-      variant="bordered"
-      padding="md"
-      className={className}
-    >
+    <section className={cn('glass-card !border-transparent p-4 md:p-5', className)}>
+      <DashboardPanelHeader
+        className="mb-3"
+        eyebrow={formatUiText(text.subtitle, { total })}
+        title={text.title}
+        titleClassName="text-base font-semibold"
+        actions={onCreate ? (
+          <Button type="button" variant="primary" size="sm" onClick={onCreate}>
+            新建规则
+          </Button>
+        ) : undefined}
+      />
       <div className="mb-4 grid gap-3 md:grid-cols-2">
         <Select
           label={text.enabledFilter}
@@ -279,6 +288,6 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
         }}
         onCancel={() => setPendingDelete(null)}
       />
-    </Card>
+    </section>
   );
 };
