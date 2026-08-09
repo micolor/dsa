@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, Clock3, Cpu, Database, Gauge, RefreshCw } from 'lucide-react';
 import { usageApi, type UsageDashboard, type UsageModelBreakdown, type UsagePeriod } from '../api/usage';
 import type { ParsedApiError } from '../api/error';
-import { ApiErrorAlert, AppPage, Card, EmptyState, StatCard } from '../components/common';
+import { ApiErrorAlert, AppPage, Button, EmptyState, StatCard } from '../components/common';
+import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey, UiTextParams } from '../i18n/uiText';
 import { cn } from '../utils/cn';
@@ -71,7 +72,7 @@ function buildParsedError(error: unknown, t: Translate): ParsedApiError {
 
 const ModelUsageCard: React.FC<{ model: UsageModelBreakdown; language: UiLanguage; t: Translate }> = ({ model, language, t }) => {
   return (
-    <Card padding="sm" className="rounded-lg">
+    <div className="glass-card !border-transparent p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-base font-semibold text-foreground">{model.model}</h3>
@@ -95,7 +96,7 @@ const ModelUsageCard: React.FC<{ model: UsageModelBreakdown; language: UiLanguag
           <p className="mt-1 font-medium text-foreground">{formatNumber(model.maxTotalTokens, language)}</p>
         </div>
       </div>
-    </Card>
+    </div>
   );
 };
 
@@ -146,16 +147,17 @@ const TokenUsagePage: React.FC = () => {
       <div className="space-y-5">
         <div className="flex justify-end">
           <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-xl border border-border/70 bg-card/70 p-1">
+              <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
                 {PERIOD_OPTIONS.map((option) => (
                   <button
                     key={option}
                     type="button"
+                    aria-pressed={period === option}
                     onClick={() => setPeriod(option)}
                     className={cn(
-                      'rounded-lg px-3 py-1.5 text-sm transition-colors',
+                      'h-8 rounded-lg px-3 text-xs font-medium transition-colors',
                       period === option
-                        ? 'bg-cyan text-background shadow-soft-card'
+                        ? 'bg-primary/15 text-primary shadow-inner'
                         : 'text-secondary-text hover:bg-hover hover:text-foreground'
                     )}
                   >
@@ -163,15 +165,16 @@ const TokenUsagePage: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <button
+              <Button
                 type="button"
-                className="btn-secondary inline-flex items-center justify-center gap-2"
+                variant="secondary"
+                size="sm"
                 onClick={() => void loadDashboard()}
                 disabled={loading}
+                aria-label={t('usage.refresh')}
               >
                 <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
-                <span className="sr-only">{t('usage.refresh')}</span>
-              </button>
+              </Button>
           </div>
         </div>
 
@@ -211,7 +214,13 @@ const TokenUsagePage: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                  <Card title={t('usage.callTypeTitle')} subtitle={t('usage.breakdown')} className="rounded-lg">
+                  <div className="glass-card !border-transparent p-4 md:p-5">
+                    <DashboardPanelHeader
+                      className="mb-3"
+                      eyebrow={t('usage.breakdown')}
+                      title={t('usage.callTypeTitle')}
+                      titleClassName="text-base font-semibold"
+                    />
                     <div className="space-y-4">
                       {dashboard.byCallType.map((item) => (
                         <div key={item.callType}>
@@ -235,7 +244,7 @@ const TokenUsagePage: React.FC = () => {
                         </div>
                       ))}
                     </div>
-                  </Card>
+                  </div>
                 </section>
               </div>
             )}
@@ -248,7 +257,7 @@ const TokenUsagePage: React.FC = () => {
                 </div>
                 <Clock3 className="h-5 w-5 text-secondary-text" />
               </div>
-              <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/75 shadow-soft-card">
+              <div className="glass-card !border-transparent overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-border/70 text-sm">
                     <thead className="bg-surface-2/70 text-left text-xs uppercase tracking-[0.16em] text-secondary-text">
