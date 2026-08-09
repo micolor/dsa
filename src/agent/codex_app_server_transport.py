@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from src.agent.codex_tool_process import MAX_TOOL_RESULT_BYTES, CodexToolProcessRunner
+from src.agent.stream_events import stream_event
 from src.agent.tool_surface import ToolSurface
 from src.agent.tools.execution import ToolAccessContext, redact_diagnostic_value
 
@@ -198,6 +199,8 @@ class CodexAppServerTransport:
         if max_tool_calls <= 0:
             raise ValueError("max_tool_calls must be positive")
         self.max_tool_calls = max_tool_calls
+
+        self._progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
         self.safe_cwd: Optional[Path] = None
         self.process: Optional[subprocess.Popen] = None
@@ -474,6 +477,21 @@ class CodexAppServerTransport:
             )
         if items:
             self.request("thread/inject_items", {"threadId": thread_id, "items": items})
+
+    def set_stream_progress_callback(
+        self,
+        callback: Optional[Callable[[Dict[str, Any]], None]],
+    ) -> None:
+        """Register a callback invoked as answer-item frames arrive.
+
+        Codex's App Server protocol delivers ``agentMessage`` items as complete
+        JSONL frames. Depending on the server version these may arrive
+        progressively during generation or only once at turn end; either way this
+        exposes each frame's text as a ``content_delta`` event for the shared SSE
+        streaming pipeline. Set before calling :meth:`run_turn`.
+        """
+        with self._state_lock:
+            self._progress_callback = callback
 
     def run_turn(
         self,
@@ -795,6 +813,11 @@ class CodexAppServerTransport:
                             self._completed_answer_items.setdefault(
                                 (thread_id, turn_id), []
                             ).append(item)
+                            text = item.get("text")
+                            if text:
+                                callback = self._progress_callback
+                                if callback is not None:
+                                    callback(stream_event("content_delta", delta=str(text)))
                 elif method == "thread/tokenUsage/updated" and isinstance(thread_id, str) and isinstance(turn_id, str):
                     usage = normalize_token_usage_notification(params)
                     if usage is not None:

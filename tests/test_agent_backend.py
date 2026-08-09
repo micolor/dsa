@@ -38,7 +38,7 @@ class _FinalAnswerAdapter:
     def __init__(self) -> None:
         self.calls = []
 
-    def call_with_tools(self, messages, tools, timeout=None):
+    def call_with_tools(self, messages, tools, timeout=None, progress_callback=None):
         self.calls.append((messages, tools, timeout))
         return LLMResponse(content="answer", provider="deepseek", model="deepseek/chat")
 

@@ -140,6 +140,10 @@ class CodexAgentBackend(AgentBackend):
                 cancel_event=request.cancel_event,
                 max_tool_calls=request.max_steps,
             ) as client:
+                # Optional streaming enhancement; guarded so custom transport
+                # factories that predate content_delta keep working unchanged.
+                if hasattr(client, "set_stream_progress_callback"):
+                    client.set_stream_progress_callback(request.progress_callback)
                 client.request_timeout = remaining_timeout()
                 tool_names = [
                     item["name"]

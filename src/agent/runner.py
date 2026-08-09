@@ -454,6 +454,7 @@ def run_agent_loop(
             messages,
             tool_decls,
             timeout=remaining_timeout,
+            progress_callback=progress_callback,
         )
         provider_used = response.provider
         total_tokens += (response.usage or {}).get("total_tokens", 0)

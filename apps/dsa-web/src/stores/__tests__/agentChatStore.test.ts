@@ -321,6 +321,51 @@ describe('agentChatStore.startStream', () => {
     expect(state.chatError).toBeNull();
   });
 
+  it('streams content_delta into one assistant message and converges to done.content', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        accepted('request-stream'),
+        'data: {"type":"content_delta","delta":"第一段"}',
+        'data: {"type":"content_delta","delta":"第二段"}',
+        'data: {"type":"done","success":true,"content":"权威终稿","backend":"litellm"}',
+      ]),
+    );
+
+    await useAgentChatStore.getState().startStream({
+      message: '问股',
+      session_id: 'session-test',
+      request_id: 'request-stream',
+    });
+
+    const state = useAgentChatStore.getState();
+    // user + exactly one assistant placeholder (no duplicate append)
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({ role: 'assistant', backend: 'litellm' });
+    // done.content is authoritative over whatever streamed so far
+    expect(state.messages[1].content).toBe('权威终稿');
+  });
+
+  it('keeps streamed text when the stream fails after content_delta', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        accepted('request-stream-fail'),
+        'data: {"type":"content_delta","delta":"已经生成的部分"}',
+        'data: {"type":"error","message":"分析出错"}',
+      ]),
+    );
+
+    await useAgentChatStore.getState().startStream({
+      message: '问股',
+      session_id: 'session-test',
+      request_id: 'request-stream-fail',
+    });
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1].role).toBe('assistant');
+    expect(state.messages[1].content).toBe('已经生成的部分');
+  });
+
   it('sends the store session id when the caller omits session_id', async () => {
     useAgentChatStore.setState({ sessionId: 'session-from-store' });
     vi.mocked(agentApi.chatStream).mockResolvedValue(

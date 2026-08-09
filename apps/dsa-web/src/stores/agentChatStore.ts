@@ -28,6 +28,7 @@ export interface ProgressStep {
   reason?: string;
   message?: string;
   content?: string;
+  delta?: string;
   meta?: Record<string, unknown>;
   backend?: string;
   error_code?: string;
@@ -363,6 +364,44 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       let receivedDoneEvent = false;
       let acceptedEvent: StreamAcceptedEvent | null = null;
       const currentProgressSteps: ProgressStep[] = [];
+      // Streaming text accumulation. content_delta events append here and the
+      // assistant message is updated on a ~40ms throttle to avoid re-rendering
+      // the full Markdown on every token.
+      let streamingBuffer = '';
+      let streamingMessageAppended = false;
+      let lastStreamFlush = 0;
+      const STREAM_FLUSH_INTERVAL_MS = 40;
+      const appendStreamingMessage = () => {
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: '',
+              skills: payload.skills,
+              skill: payload.skills?.[0],
+              skillNames,
+              skillName,
+              backend: finalBackend,
+            },
+          ],
+        }));
+        streamingMessageAppended = true;
+      };
+      const flushStreaming = () => {
+        if (!streamingMessageAppended) return;
+        const content = streamingBuffer;
+        set((s) => {
+          const messages = [...s.messages];
+          const last = messages.length - 1;
+          if (last >= 0 && messages[last].role === 'assistant') {
+            messages[last] = { ...messages[last], content };
+            return { messages };
+          }
+          return {};
+        });
+      };
       const protocolError = (message: string) => createParsedApiError({
         title: '请求未被接受',
         message: 'Agent 没有确认接收本次问题，请保留当前内容后重试。',
@@ -407,6 +446,21 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
         if (!acceptedEvent) {
           throw protocolError(`Agent stream emitted ${event.type || 'an unknown event'} before accepted.`);
+        }
+        if (event.type === 'content_delta') {
+          const delta = event.delta ?? '';
+          if (!delta) return;
+          if (!streamingMessageAppended) {
+            appendStreamingMessage();
+            lastStreamFlush = 0;
+          }
+          streamingBuffer += delta;
+          const now = Date.now();
+          if (now - lastStreamFlush >= STREAM_FLUSH_INTERVAL_MS) {
+            lastStreamFlush = now;
+            flushStreaming();
+          }
+          return;
         }
         if (event.type === 'done') {
           set({ stopError: false });
@@ -488,22 +542,42 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const shouldAppend = ownsStream() && !ac.signal.aborted && finalContent !== null;
 
       if (shouldAppend) {
-        set((s) => ({
-          messages: [
-            ...s.messages,
-            {
-              id: (Date.now() + 1).toString(),
-              role: 'assistant',
-              content: finalContent || '（无内容）',
-              skills: payload.skills,
-              skill: payload.skills?.[0],
-              skillNames,
-              skillName,
-              thinkingSteps: [...currentProgressSteps],
-              backend: finalBackend,
-            },
-          ],
-        }));
+        const committedContent = finalContent || streamingBuffer || '（无内容）';
+        if (streamingMessageAppended) {
+          // A placeholder was already appended while streaming: converge it to the
+          // authoritative done.content (falls back to whatever streamed so far).
+          set((s) => {
+            const messages = [...s.messages];
+            const last = messages.length - 1;
+            if (last >= 0 && messages[last].role === 'assistant') {
+              messages[last] = {
+                ...messages[last],
+                content: committedContent,
+                thinkingSteps: [...currentProgressSteps],
+                backend: finalBackend,
+              };
+              return { messages };
+            }
+            return {};
+          });
+        } else {
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: committedContent,
+                skills: payload.skills,
+                skill: payload.skills?.[0],
+                skillNames,
+                skillName,
+                thinkingSteps: [...currentProgressSteps],
+                backend: finalBackend,
+              },
+            ],
+          }));
+        }
       }
 
       if (ownsStream() && !ac.signal.aborted && currentRoute !== '/chat') {

@@ -11,10 +11,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from types import SimpleNamespace
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import litellm
 from litellm import Router
+from src.agent.stream_events import stream_event
 
 from src.config import (
     extra_litellm_params,
@@ -550,6 +552,8 @@ class LLMToolAdapter:
         tools: List[dict],
         provider: Optional[str] = None,
         timeout: Optional[float] = None,
+        *,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> LLMResponse:
         """Send messages + tool declarations to LLM, return normalized response.
 
@@ -558,11 +562,20 @@ class LLMToolAdapter:
                       [{"role": "system"/"user"/"assistant"/"tool", "content": ...}, ...]
             tools: OpenAI-format tool declarations; litellm converts to each provider's format.
             provider: Ignored (kept for backward compatibility).
+            progress_callback: Optional callback invoked with ``content_delta`` stream
+                events as the LLM generates assistant text. When provided, the primary
+                model call runs in streaming mode; failures fall back to non-streaming.
 
         Returns:
             LLMResponse with either content (final answer) or tool_calls.
         """
-        return self.call_completion(messages, tools=tools, provider=provider, timeout=timeout)
+        return self.call_completion(
+            messages,
+            tools=tools,
+            provider=provider,
+            timeout=timeout,
+            progress_callback=progress_callback,
+        )
 
     def call_text(
         self,
@@ -592,6 +605,7 @@ class LLMToolAdapter:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> LLMResponse:
         """Shared completion path for both tool and text-only calls."""
         config = self._config
@@ -633,6 +647,7 @@ class LLMToolAdapter:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     timeout=remaining_timeout,
+                    progress_callback=progress_callback,
                 )
             except Exception as e:
                 if isinstance(e, _resolve_litellm_exception("RateLimitError")):
@@ -684,6 +699,7 @@ class LLMToolAdapter:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> LLMResponse:
         """Call a specific litellm model with OpenAI-format messages and tools."""
         openai_messages = self._convert_messages(messages, target_model=model)
@@ -751,41 +767,183 @@ class LLMToolAdapter:
         register_fallback_model_pricing(
             resolve_fallback_litellm_wire_models(model, recovery_model_list)
         )
-        if use_channel_router and self._router and model in _router_model_names:
-            # Channel / YAML path: Router manages all models in its model_list
-            response = call_litellm_with_param_recovery(
-                lambda kwargs: self._router.completion(**kwargs),
-                model=model,
-                call_kwargs=call_kwargs,
-                model_list=recovery_model_list,
-                logger=logger,
-            )
-        elif self._router and model == agent_primary_model and not use_channel_router:
-            # Legacy path: Router for primary model multi-key
-            response = call_litellm_with_param_recovery(
-                lambda kwargs: self._router.completion(**kwargs),
-                model=model,
-                call_kwargs=call_kwargs,
-                model_list=recovery_model_list,
-                logger=logger,
-            )
-        else:
-            # Legacy/direct-env path: direct call (also handles direct-env
-            # providers like groq/ or bedrock/ that are not in the Router
-            # model_list even when channel mode is active)
-            response = call_litellm_with_param_recovery(
-                lambda kwargs: litellm.completion(**kwargs),
-                model=model,
-                call_kwargs=call_kwargs,
-                model_list=recovery_model_list,
-                logger=logger,
-            )
+        # Resolve the underlying completion callable (Router or direct litellm),
+        # preserving the original channel / legacy / direct routing precedence.
+        completion_callable = self._resolve_completion_callable(
+            model=model,
+            use_channel_router=use_channel_router,
+            router_model_names=_router_model_names,
+            agent_primary_model=agent_primary_model,
+        )
+
+        if progress_callback is not None:
+            # Streaming path: emit content_delta as text is generated. If anything
+            # goes wrong while consuming the stream (e.g. provider rejects a
+            # generation parameter), fall back to the non-streaming param-recovery
+            # call below so tool-call correctness and provider blocks are preserved.
+            try:
+                return self._call_litellm_stream(
+                    completion_callable=completion_callable,
+                    call_kwargs=call_kwargs,
+                    model=model,
+                    openai_messages=openai_messages,
+                    model_list=recovery_model_list,
+                    progress_callback=progress_callback,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Agent LLM streaming failed for %s (%s); falling back to non-streaming",
+                    model,
+                    exc,
+                )
+
+        response = call_litellm_with_param_recovery(
+            completion_callable,
+            model=model,
+            call_kwargs=call_kwargs,
+            model_list=recovery_model_list,
+            logger=logger,
+        )
 
         return self._parse_litellm_response(
             response,
             model,
             openai_messages,
             model_list=recovery_model_list,
+        )
+
+    def _resolve_completion_callable(
+        self,
+        *,
+        model: str,
+        use_channel_router: bool,
+        router_model_names: set,
+        agent_primary_model: str,
+    ) -> Callable[[Dict[str, Any]], Any]:
+        """Return the completion callable for the model's routing tier.
+
+        Mirrors the original three-branch precedence so the streaming and
+        non-streaming paths always target the same backend:
+        - Channel / YAML path: Router manages all models in its model_list.
+        - Legacy path: Router for primary model multi-key.
+        - Direct-env path: direct call (also handles direct-env providers like
+          groq/ or bedrock/ that are not in the Router model_list even when
+          channel mode is active).
+        """
+        if use_channel_router and self._router and model in router_model_names:
+            # Channel / YAML path: Router manages all models in its model_list
+            return lambda kwargs: self._router.completion(**kwargs)
+        if self._router and model == agent_primary_model and not use_channel_router:
+            # Legacy path: Router for primary model multi-key
+            return lambda kwargs: self._router.completion(**kwargs)
+        # Legacy/direct-env path: direct call
+        return lambda kwargs: litellm.completion(**kwargs)
+
+    def _call_litellm_stream(
+        self,
+        *,
+        completion_callable: Callable[[Dict[str, Any]], Any],
+        call_kwargs: Dict[str, Any],
+        model: str,
+        openai_messages: List[Dict[str, Any]],
+        model_list: Optional[List[Dict[str, Any]]],
+        progress_callback: Callable[[Dict[str, Any]], None],
+    ) -> LLMResponse:
+        """Consume a streaming litellm completion, emitting content_delta events.
+
+        Streams assistant text to ``progress_callback`` as it is generated, while
+        reassembling tool calls (arguments arrive as deltas) and reasoning content
+        into a synthetic response that the shared parser understands. The caller
+        must wrap this in a fallback to the non-streaming path on failure.
+        """
+        stream_kwargs = dict(call_kwargs)
+        stream_kwargs["stream"] = True
+
+        text_parts: List[str] = []
+        reasoning_parts: List[str] = []
+        # tool_call index -> assembled fields (arguments accumulate as deltas)
+        tool_deltas: Dict[int, Dict[str, Any]] = {}
+        usage_payload: Any = None
+
+        stream = completion_callable(stream_kwargs)
+        for chunk in stream:
+            if getattr(chunk, "usage", None) is not None:
+                usage_payload = chunk.usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                continue
+
+            text = getattr(delta, "content", None)
+            if text:
+                text_parts.append(text)
+                progress_callback(stream_event("content_delta", delta=text))
+
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                reasoning_parts.append(reasoning)
+
+            stream_tool_calls = getattr(delta, "tool_calls", None)
+            if not stream_tool_calls:
+                continue
+            for stc in stream_tool_calls:
+                index = int(getattr(stc, "index", 0))
+                entry = tool_deltas.setdefault(index, {
+                    "id": "",
+                    "name": "",
+                    "arguments": "",
+                    "thought_signature": None,
+                    "provider_specific_fields": {},
+                })
+                if getattr(stc, "id", None):
+                    entry["id"] = stc.id
+                fn = getattr(stc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        entry["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        entry["arguments"] += fn.arguments
+                psf = getattr(stc, "provider_specific_fields", None)
+                if psf:
+                    entry["provider_specific_fields"].update(
+                        _provider_specific_fields_from(psf)
+                    )
+                sig = getattr(stc, "thought_signature", None)
+                if sig:
+                    entry["thought_signature"] = sig
+
+        content = "".join(text_parts)
+        reasoning = "".join(reasoning_parts) or None
+
+        tool_calls = []
+        for index in sorted(tool_deltas):
+            entry = tool_deltas[index]
+            tc = SimpleNamespace(
+                id=entry["id"],
+                function=SimpleNamespace(
+                    name=entry["name"],
+                    arguments=entry["arguments"],
+                    provider_specific_fields=entry["provider_specific_fields"] or None,
+                ),
+                provider_specific_fields=entry["provider_specific_fields"] or None,
+            )
+            if entry["thought_signature"] is not None:
+                tc.thought_signature = entry["thought_signature"]
+            tool_calls.append(tc)
+
+        message = SimpleNamespace(
+            content=content or None,
+            reasoning_content=reasoning,
+            tool_calls=tool_calls or None,
+        )
+        synthetic = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage_payload)
+        return self._parse_litellm_response(
+            synthetic,
+            model,
+            openai_messages,
+            model_list=model_list,
         )
 
     def _get_temperature(self) -> float:
