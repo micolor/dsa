@@ -373,6 +373,13 @@ export function parseApiError(error: unknown): ParsedApiError {
     });
   }
 
+  const noConfiguredLlmHints = [
+    'llm provider not provided',
+    'provider not provided',
+    'no api key provided',
+    'api key not provided',
+    'no authentication credentials',
+  ];
   const noConfiguredLlm = (
     includesAny(matchText, ['all llm models failed']) && includesAny(matchText, ['last error: none'])
   ) || includesAny(matchText, [
@@ -380,6 +387,7 @@ export function parseApiError(error: unknown): ParsedApiError {
     'no effective primary model configured',
     'litellm_model not configured',
     'ai analysis will be unavailable',
+    ...noConfiguredLlmHints,
   ]);
   if (noConfiguredLlm) {
     return createParsedApiError({

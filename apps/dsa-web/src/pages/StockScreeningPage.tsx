@@ -1219,9 +1219,7 @@ const StockScreeningPage: React.FC = () => {
         ) : null}
 
         {hotspotsExpanded && hotspotError ? (
-          <p className="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-            {hotspotError}
-          </p>
+          <InlineAlert variant="warning" message={hotspotError} className="mb-3" />
         ) : null}
 
         {!hotspotsExpanded ? null : hotspots.length === 0 ? (
@@ -1329,9 +1327,7 @@ const StockScreeningPage: React.FC = () => {
             </div>
 
             {hotspotDetailError ? (
-              <p className="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                {hotspotDetailError}
-              </p>
+              <InlineAlert variant="warning" message={hotspotDetailError} className="mb-3" />
             ) : null}
 
             {hotspotDetail && hasHotspotDetailDegradation(hotspotDetail) ? (

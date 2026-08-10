@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
-import { ApiErrorAlert, Badge, EmptyState } from '../components/common';
+import { ApiErrorAlert, Badge, EmptyState, InlineAlert } from '../components/common';
 import { EquityCurveChart } from '../components/paper/EquityCurveChart';
 import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
@@ -130,17 +130,20 @@ export const PaperTradingPage: React.FC = () => {
       </div>
 
       {notice ? (
-        <div className="flex items-center justify-between rounded-2xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
-          <span>{notice}</span>
-          <button
-            type="button"
-            onClick={() => setNotice(null)}
-            className="ml-3 text-current"
-            aria-label={text.retry}
-          >
-            ×
-          </button>
-        </div>
+        <InlineAlert
+          variant="success"
+          message={notice}
+          action={(
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="shrink-0 text-xs opacity-80 transition-opacity hover:opacity-100"
+              aria-label={text.retry}
+            >
+              ×
+            </button>
+          )}
+        />
       ) : null}
       {error ? <ApiErrorAlert error={error} /> : null}
 

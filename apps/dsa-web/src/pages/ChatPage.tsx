@@ -6,7 +6,7 @@ import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User } from
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip } from '../components/common';
+import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
@@ -1062,6 +1062,7 @@ const ChatPage: React.FC = () => {
     : '通用分析';
 
   return (
+    <>
     <div
       data-testid="chat-workspace"
       className="flex h-[calc(100vh-4rem)] w-full min-w-0 flex-col overflow-hidden px-3 pb-4 sm:h-[calc(100vh-4.5rem)] md:px-4"
@@ -1128,12 +1129,12 @@ const ChatPage: React.FC = () => {
                       try {
                         const content = formatSessionAsMarkdown(messages);
                         await agentApi.sendChat(content);
-                        showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
+                        showSendFeedback({ type: 'success', message: t('chat.sentToChannel') }, 3000);
                       } catch (err) {
                         const parsed = getParsedApiError(err);
                         showSendFeedback({
                           type: 'error',
-                          message: parsed.message || '发送失败',
+                          message: parsed.message || t('chat.sendFailed'),
                         }, 5000);
                       } finally {
                         setSending(false);
@@ -1238,12 +1239,11 @@ const ChatPage: React.FC = () => {
               className="mb-4 rounded-xl px-3 py-2 text-xs shadow-none"
             />
           ) : null}
-          {/* Floating toast overlays (do not affect layout) */}
+          {/* Intro guide toast (page-local guidance, stays at top) */}
           <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 px-4">
             {introToastVisible ? (
               <InlineAlert
                 variant="info"
-                style={{ backgroundColor: 'hsl(var(--primary) / 0.4)', backdropFilter: 'blur(12px)' }}
                 title={t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
                 message="输入股票代码或名称，选择技能后即可开始分析。"
                 action={(
@@ -1256,31 +1256,7 @@ const ChatPage: React.FC = () => {
                     ✕
                   </button>
                 )}
-                className="pointer-events-auto w-full max-w-md rounded-xl px-3 py-2 text-xs shadow-soft-card"
-              />
-            ) : null}
-            {sendToast ? (
-              <InlineAlert
-                variant={sendToast.type === 'success' ? 'success' : 'danger'}
-                style={{
-                  backgroundColor: sendToast.type === 'success'
-                    ? 'hsl(var(--success) / 0.4)'
-                    : 'hsl(var(--danger) / 0.4)',
-                  backdropFilter: 'blur(12px)',
-                }}
-                title={sendToast.type === 'success' ? '发送成功' : '发送失败'}
-                message={sendToast.message}
-                action={(
-                  <button
-                    type="button"
-                    onClick={dismissSendToast}
-                    className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
-                    aria-label="关闭提示"
-                  >
-                    ✕
-                  </button>
-                )}
-                className="pointer-events-auto w-full max-w-md rounded-xl px-3 py-2 text-xs shadow-soft-card"
+                className="pointer-events-auto"
               />
             ) : null}
           </div>
@@ -1724,6 +1700,27 @@ const ChatPage: React.FC = () => {
         </div>
       </div>
     </div>
+    <ToastViewport>
+      {sendToast ? (
+        <InlineAlert
+          variant={sendToast.type === 'success' ? 'success' : 'danger'}
+          title={sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')}
+          message={sendToast.message}
+          action={(
+            <button
+              type="button"
+              onClick={dismissSendToast}
+              className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
+              aria-label="关闭提示"
+            >
+              ✕
+            </button>
+          )}
+          className="pointer-events-auto"
+        />
+      ) : null}
+    </ToastViewport>
+    </>
   );
 };
 

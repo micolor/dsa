@@ -67,6 +67,9 @@ reports/
 .DS_Store
 Thumbs.db
 
+# git-bash 崩溃转储
+*.stackdump
+
 # 测试
 .pytest_cache/
 .coverage

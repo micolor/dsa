@@ -11,6 +11,7 @@ A股自选股智能分析系统 - 搜索服务模块
 4. 搜索结果缓存和格式化
 """
 
+import json
 import logging
 import multiprocessing
 import re
@@ -22,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Dict, Any, Optional, Tuple
 from itertools import cycle
-from urllib.parse import parse_qsl, unquote, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlparse
 import requests
 from newspaper import Article, Config
 from tenacity import (
@@ -2241,6 +2242,14 @@ class SearchService:
         "{name} {code} 涨跌 成交量",
     ]
 
+    # 东方财富免费搜索兜底（国内可达，无需 Key）
+    _EASTMONEY_SEARCH_API_URL = "https://search-api-web.eastmoney.com/search/jsonp"
+    _EASTMONEY_SEARCH_TIMEOUT_SECONDS = 8
+    _EASTMONEY_UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 daily-stock-analysis/1.0"
+    )
+
     # 增强搜索关键词模板（港股/美股 英文）
     ENHANCED_SEARCH_KEYWORDS_EN = [
         "{name} stock price today",
@@ -4261,6 +4270,21 @@ class SearchService:
                 self._put_cache(cache_key, best_ranked_response)
                 return best_ranked_response
 
+            # 免费兜底：所有搜索引擎都无结果时，使用东方财富免费个股新闻（无需 Key，国内可达）
+            free_response = self._search_eastmoney_free(
+                stock_code,
+                stock_name,
+                max_results,
+            )
+            if free_response is not None and free_response.success and free_response.results:
+                logger.info(
+                    "%s: 所有搜索引擎无结果，使用东方财富免费资讯兜底 %s 条",
+                    stock_code,
+                    len(free_response.results),
+                )
+                self._put_cache(cache_key, free_response)
+                return free_response
+
             if had_provider_success:
                 return SearchResponse(
                     query=query,
@@ -4281,7 +4305,92 @@ class SearchService:
         finally:
             if cache_owner and cache_event is not None:
                 self._release_cache_fill(cache_key, cache_event)
-    
+
+    @staticmethod
+    def _strip_html_tags(text: str) -> str:
+        """去除东财搜索结果中的 HTML 标签（如 <em> 高亮）。"""
+        if not text:
+            return ""
+        return re.sub(r"<[^>]+>", "", text).strip()
+
+    def _search_eastmoney_free(
+        self,
+        stock_code: str,
+        stock_name: str,
+        max_results: int,
+    ) -> Optional["SearchResponse"]:
+        """
+        所有搜索引擎无结果时的免费兜底：东方财富搜索 API。
+
+        按"股票名 + 代码"搜索相关新闻，国内网络可达、无需 Key。
+        任何失败都返回 None，绝不抛异常破坏主流程。
+        """
+        try:
+            payload = {
+                "uid": "",
+                "keyword": f"{stock_name} {stock_code}",
+                "type": ["cmsArticleWebOld"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "cmsArticleWebOld": {
+                        "searchScope": "default",
+                        "sort": "default",
+                        "pageIndex": 1,
+                        "pageSize": max(5, int(max_results)),
+                    }
+                },
+            }
+            url = "{}?cb=x&param={}".format(
+                self._EASTMONEY_SEARCH_API_URL,
+                quote(json.dumps(payload, ensure_ascii=False)),
+            )
+            response = requests.get(
+                url,
+                timeout=self._EASTMONEY_SEARCH_TIMEOUT_SECONDS,
+                headers={"User-Agent": self._EASTMONEY_UA},
+            )
+            if response.status_code != 200:
+                logger.warning("东方财富免费搜索兜底失败: HTTP %s", response.status_code)
+                return None
+            text = (response.text or "").strip()
+            if text.startswith("x(") and text.endswith(")"):
+                text = text[text.index("(") + 1: text.rindex(")")]
+            parsed = json.loads(text)
+            articles = ((parsed.get("result") or {}).get("cmsArticleWebOld")) or []
+            results: List[SearchResult] = []
+            for article in articles[: max(1, int(max_results))]:
+                if not isinstance(article, dict):
+                    continue
+                title = self._strip_html_tags(article.get("title") or "")
+                url = (article.get("url") or "").strip()
+                if not title or not url:
+                    continue
+                source = (article.get("mediaName") or "").strip() or "东方财富"
+                results.append(
+                    SearchResult(
+                        title=title,
+                        snippet=self._strip_html_tags(article.get("content") or "")[:300],
+                        url=url,
+                        source=source,
+                        published_date=(article.get("date") or "").strip()[:10] or None,
+                    )
+                )
+            if not results:
+                logger.info("东方财富免费搜索兜底未命中新闻")
+                return None
+            logger.info("东方财富免费搜索兜底命中 %s 条新闻", len(results))
+            return SearchResponse(
+                query=f"{stock_name} {stock_code}",
+                results=results,
+                provider="东方财富",
+                success=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - 兜底绝不能影响主流程
+            logger.warning("东方财富免费搜索兜底失败: %s", exc)
+            return None
+
     def search_stock_events(
         self,
         stock_code: str,
@@ -4508,7 +4617,8 @@ class SearchService:
         
         # 轮流使用不同的搜索引擎
         provider_index = 0
-        
+        fallback_used = False
+
         for dim in search_dimensions:
             if search_count >= max_searches:
                 break
@@ -4547,6 +4657,23 @@ class SearchService:
                     max_results=provider_max_results,
                     days=request_days,
                 )
+
+            # 免费兜底：provider 无结果时，用东财免费个股新闻填充（每次情报搜索只兜底一次）
+            if not (response.success and response.results) and not fallback_used:
+                free_response = self._search_eastmoney_free(
+                    stock_code,
+                    stock_name,
+                    target_per_dimension,
+                )
+                if free_response is not None and free_response.success and free_response.results:
+                    logger.info(
+                        "[情报搜索] %s: 使用东方财富免费资讯兜底 %s 条",
+                        dim['desc'],
+                        len(free_response.results),
+                    )
+                    response = free_response
+                    fallback_used = True
+
             if dim['strict_freshness']:
                 filtered_response = self._filter_news_response(
                     response,

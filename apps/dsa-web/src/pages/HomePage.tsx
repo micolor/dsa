@@ -1430,7 +1430,7 @@ const HomePage: React.FC = () => {
                     onClick={() => setStrategyMenuOpen((open) => !open)}
                     onKeyDown={handleStrategyButtonKeyDown}
                     disabled={isAnalyzing}
-                    className="home-surface-button flex h-10 max-w-[8.5rem] items-center gap-1.5 rounded-xl px-3 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[11rem]"
+                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-card/55 px-4 text-sm text-foreground shadow-soft-card backdrop-blur-md transition-all duration-200 hover:bg-card/70 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedStrategy?.name || t('home.strategy')}</span>
@@ -1506,24 +1506,18 @@ const HomePage: React.FC = () => {
                 <BarChart3 className="h-4 w-4" aria-hidden="true" />
                 {t('home.marketReview')}
               </Button>
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                size="md"
+                isLoading={isAnalyzing}
+                loadingText={t('home.analyzing')}
                 onClick={() => handleSubmitAnalysis()}
-                disabled={!query || isAnalyzing}
-                className="btn-primary flex h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap md:flex-none"
+                disabled={!query}
+                className="flex-1 whitespace-nowrap md:flex-none"
               >
-                {isAnalyzing ? (
-                  <>
-                    <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    {t('home.analyzing')}
-                  </>
-                ) : (
-                  t('home.analyze')
-                )}
-              </button>
+                {t('home.analyze')}
+              </Button>
             </div>
           </div>
         </header>

@@ -325,7 +325,7 @@
   --elevated: 230 22% 12%;
   --hover: 231 20% 16%;
   --secondary-text: 228 16% 72%;
-  --muted-text: 228 10% 48%;
+  --muted-text: 228 10% 56%;
 
   --color-cyan: hsl(var(--primary));
   --color-cyan-dim: hsl(var(--primary) / 0.8);
@@ -333,9 +333,9 @@
   --color-purple: 247 84% 72%;
   --color-purple-dim: 247 84% 62%;
   --color-purple-glow: hsl(247 84% 72% / 0.3);
-  --color-success: 152 69% 40%;
-  --color-warning: 37 92% 50%;
-  --color-danger: 0 90% 55%;
+  --color-success: 152 69% 58%;
+  --color-warning: 37 92% 64%;
+  --color-danger: 0 90% 66%;
   --color-danger-alert-text: 349 100% 75%; /* Bright/light pink for dark mode */
   --color-danger-alert-border: 349 100% 63%;
   --color-danger-alert-bg: 349 100% 63%;
@@ -586,6 +586,15 @@
       radial-gradient(46rem 36rem at 80% 8%, hsl(247 84% 60% / 0.13), transparent 58%),
       hsl(var(--background));
     color: hsl(var(--foreground));
+  }
+
+  /* 可点击元素统一显示手型光标 */
+  button:not(:disabled),
+  a[href],
+  [role='button'],
+  [role='link'],
+  summary {
+    cursor: pointer;
   }
 }
 
@@ -1905,19 +1914,21 @@ a {
   background: hsl(var(--elevated) / 0.92);
 }
 
-.home-markdown-prose :where(th, td) {
+.home-markdown-prose th,
+.home-markdown-prose td {
   border: 1px solid var(--home-prose-border-strong);
-  padding: 4px 6px;
+  padding: 0.625rem 0.875rem;
 }
 
-.home-markdown-prose :where(table) {
+.home-markdown-prose table {
   display: block;
   width: 100%;
   overflow-x: auto;
   white-space: nowrap;
+  margin: 0.75rem 0;
 }
 
-.home-markdown-prose :where(th) {
+.home-markdown-prose th {
   background: hsl(var(--elevated) / 0.92);
   color: hsl(var(--foreground));
 }

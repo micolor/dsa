@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
 import { systemConfigApi, SystemConfigConflictError, SystemConfigValidationError } from '../api/systemConfig';
 import type {
@@ -80,6 +81,7 @@ export function useSystemConfig() {
   const [activeCategory, setActiveCategory] = useState<string>('base');
   const [validationIssues, setValidationIssues] = useState<ConfigValidationIssue[]>([]);
   const [toast, setToast] = useState<ToastState>(null);
+  const { t } = useUiLanguage();
 
   // Request state
   const [isLoading, setIsLoading] = useState(false);
@@ -301,12 +303,12 @@ export function useSystemConfig() {
     const resolvedChangedItems = explicitItems.length > 0 ? explicitItems : getChangedItems();
 
     if (!explicitItems.length && !hasDirty) {
-      setToast({ type: 'success', message: '当前没有可保存的修改。' });
+      setToast({ type: 'success', message: t('settings.noChangesToSave') });
       return { success: true, message: '当前没有可保存的修改' };
     }
 
     if (!resolvedChangedItems.length) {
-      setToast({ type: 'success', message: '当前没有可保存的修改。' });
+      setToast({ type: 'success', message: t('settings.noChangesToSave') });
       return { success: true, message: '当前没有可保存的修改' };
     }
 
@@ -345,9 +347,9 @@ export function useSystemConfig() {
       applyServerPayload(refreshed.items, refreshed.configVersion, refreshed.maskToken);
 
       const warningText = updateResult.warnings?.length
-        ? `；警告：${updateResult.warnings.join('；')}`
+        ? `${t('settings.configUpdatedWarningPrefix')}${updateResult.warnings.join('；')}`
         : '';
-      setToast({ type: 'success', message: `配置已更新${warningText}` });
+      setToast({ type: 'success', message: `${t('settings.configUpdated')}${warningText}` });
       return { success: true };
     } catch (error: unknown) {
       if (error instanceof SystemConfigValidationError) {
@@ -377,6 +379,7 @@ export function useSystemConfig() {
     getChangedItems,
     hasDirty,
     maskToken,
+    t,
   ]);
 
   const retry = useCallback(async () => {

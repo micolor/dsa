@@ -7,7 +7,7 @@ import { createParsedApiError, getParsedApiError, type ParsedApiError } from '..
 import { analysisApi } from '../api/analysis';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, ConfirmDialog, EmptyState } from '../components/common';
+import { ApiErrorAlert, Button, ConfirmDialog, EmptyState, InlineAlert, ToastViewport } from '../components/common';
 import {
   AgentBackendStatusPanel,
   AuthSettingsCard,
@@ -1864,18 +1864,11 @@ const SettingsPage: React.FC = () => {
       </div>
 
       {toast ? (
-        <div className="fixed bottom-5 right-5 z-50 w-[320px] max-w-[calc(100vw-24px)]">
+        <ToastViewport>
           {toast.type === 'success'
-            ? (
-                <SettingsAlert
-                  title={t('settings.actionSuccess')}
-                  message={toast.message}
-                  variant="success"
-                  presentation="toast"
-                />
-              )
-            : <ApiErrorAlert error={toast.error} />}
-        </div>
+            ? <InlineAlert variant="success" title={t('settings.actionSuccess')} message={toast.message} className="pointer-events-auto" />
+            : <ApiErrorAlert error={toast.error} className="pointer-events-auto" />}
+        </ToastViewport>
       ) : null}
       <ConfirmDialog
         isOpen={showImportConfirm}
