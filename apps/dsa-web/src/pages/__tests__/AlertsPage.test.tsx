@@ -112,8 +112,13 @@ describe('AlertsPage', () => {
     render(<AlertsPage />);
 
     expect(await screen.findByText('茅台价格突破')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '触发历史' }));
     expect(await screen.findByText('600519 price above 1800')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '通知尝试记录' }));
     expect(await screen.findByText('暂无通知尝试记录')).toBeInTheDocument();
+
     expect(listRules).toHaveBeenCalledWith({
       enabled: undefined,
       alertType: undefined,

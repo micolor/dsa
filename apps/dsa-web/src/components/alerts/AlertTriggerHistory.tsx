@@ -50,7 +50,7 @@ interface AlertTriggerHistoryProps {
 
 export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ triggers, isLoading = false }) => {
   return (
-    <section className="glass-card !border-transparent p-4 md:p-5">
+    <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
       <DashboardPanelHeader
         className="mb-3"
         eyebrow="评估记录"
@@ -63,6 +63,7 @@ export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ trigge
           icon={<Activity className="h-6 w-6" />}
           title="暂无触发历史"
           description="后台评估会记录 triggered、skipped、degraded 和 failed 状态；正常未触发不会写入历史。"
+          className="flex-1 flex flex-col items-center justify-center"
         />
       ) : null}
       {!isLoading && triggers.length > 0 ? (

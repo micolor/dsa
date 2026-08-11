@@ -99,6 +99,14 @@ function formatNotificationStatus(notification: AlertNotificationItem): string {
   return '失败';
 }
 
+type AlertsTabKey = 'rules' | 'history' | 'notifications';
+
+const ALERTS_TABS: Array<{ key: AlertsTabKey; label: string }> = [
+  { key: 'rules', label: '告警规则' },
+  { key: 'history', label: '触发历史' },
+  { key: 'notifications', label: '通知尝试记录' },
+];
+
 const AlertsPage: React.FC = () => {
   useEffect(() => {
     document.title = '告警中心 - DSA';
@@ -127,6 +135,7 @@ const AlertsPage: React.FC = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [busyRule, setBusyRule] = useState<AlertRuleBusyState | null>(null);
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
+  const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
   const rulesRequestIdRef = useRef(0);
 
   const loadRules = useCallback(async (pageOverride?: number) => {
@@ -291,90 +300,121 @@ const AlertsPage: React.FC = () => {
           )}
         />
       ) : null}
-      {rulesError ? <ApiErrorAlert error={rulesError} onDismiss={() => setRulesError(null)} /> : null}
+      <div className="flex min-h-full flex-col gap-4">
+        <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
+          {ALERTS_TABS.map((tab) => {
+            const selected = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                aria-pressed={selected}
+                className={`h-8 rounded-lg px-2 text-xs font-medium transition-colors ${
+                  selected ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                }`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="flex min-h-0 flex-col gap-4">
-        <AlertRuleList
-          className="flex min-h-0 flex-col"
-          rules={rules}
-          total={rulesTotal}
-          page={rulesPage}
-          pageSize={PAGE_SIZE}
-          isLoading={rulesLoading}
-          enabledFilter={enabledFilter}
-          alertTypeFilter={alertTypeFilter}
-          onEnabledFilterChange={(value) => {
-            setEnabledFilter(value);
-            setRulesPage(1);
-          }}
-          onAlertTypeFilterChange={(value) => {
-            setAlertTypeFilter(value);
-            setRulesPage(1);
-          }}
-          onPageChange={setRulesPage}
-          onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
-          onDelete={(rule) => void handleDeleteRule(rule)}
-          onTest={(rule) => void handleTestRule(rule)}
-          onCreate={() => setCreateOpen(true)}
-          busyRule={busyRule}
-        />
-        {testResult ? (
-          <InlineAlert
-            title="测试结果"
-            variant={testVariant(testResult)}
-            message={renderTestResultMessage(testResult)}
-          />
+        {activeTab === 'rules' ? (
+          <>
+            {rulesError ? <ApiErrorAlert error={rulesError} onDismiss={() => setRulesError(null)} /> : null}
+            <AlertRuleList
+              className="flex min-h-0 flex-1 flex-col"
+              rules={rules}
+              total={rulesTotal}
+              page={rulesPage}
+              pageSize={PAGE_SIZE}
+              isLoading={rulesLoading}
+              enabledFilter={enabledFilter}
+              alertTypeFilter={alertTypeFilter}
+              onEnabledFilterChange={(value) => {
+                setEnabledFilter(value);
+                setRulesPage(1);
+              }}
+              onAlertTypeFilterChange={(value) => {
+                setAlertTypeFilter(value);
+                setRulesPage(1);
+              }}
+              onPageChange={setRulesPage}
+              onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
+              onDelete={(rule) => void handleDeleteRule(rule)}
+              onTest={(rule) => void handleTestRule(rule)}
+              onCreate={() => setCreateOpen(true)}
+              busyRule={busyRule}
+            />
+            {testResult ? (
+              <InlineAlert
+                title="测试结果"
+                variant={testVariant(testResult)}
+                message={renderTestResultMessage(testResult)}
+              />
+            ) : null}
+          </>
+        ) : null}
+
+        {activeTab === 'history' ? (
+          <>
+            {triggersError ? <ApiErrorAlert error={triggersError} onDismiss={() => setTriggersError(null)} /> : null}
+            <AlertTriggerHistory triggers={triggers} isLoading={triggersLoading} />
+          </>
+        ) : null}
+
+        {activeTab === 'notifications' ? (
+          <>
+            {notificationsError ? <ApiErrorAlert error={notificationsError} onDismiss={() => setNotificationsError(null)} /> : null}
+            <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
+              <DashboardPanelHeader
+                className="mb-3"
+                eyebrow="通知结果"
+                title="通知尝试记录"
+                titleClassName="text-base font-semibold"
+              />
+              {notificationsLoading ? <Loading label="正在加载通知尝试记录" /> : null}
+              {!notificationsLoading && notifications.length === 0 ? (
+                <EmptyState
+                  icon={<BellRing className="h-6 w-6" />}
+                  title="暂无通知尝试记录"
+                  description="当前没有可展示的通知尝试明细；告警触发仍会按已配置通知渠道发送。"
+                  className="flex-1 flex flex-col items-center justify-center"
+                />
+              ) : null}
+              {!notificationsLoading && notifications.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left text-sm">
+                    <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">渠道</th>
+                        <th className="px-3 py-2 font-medium">状态</th>
+                        <th className="px-3 py-2 font-medium">错误码</th>
+                        <th className="px-3 py-2 font-medium">耗时</th>
+                        <th className="px-3 py-2 font-medium">时间</th>
+                        <th className="px-3 py-2 font-medium">诊断</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {notifications.map((notification) => (
+                        <tr key={notification.id}>
+                          <td className="px-3 py-3">{formatNotificationChannel(notification.channel)}</td>
+                          <td className="px-3 py-3">{formatNotificationStatus(notification)}</td>
+                          <td className="px-3 py-3">{notification.errorCode ?? '--'}</td>
+                          <td className="px-3 py-3">{notification.latencyMs == null ? '--' : `${notification.latencyMs}ms`}</td>
+                          <td className="px-3 py-3">{formatDateTime(notification.createdAt)}</td>
+                          <td className="px-3 py-3">{notification.diagnostics ?? '--'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
+          </>
         ) : null}
       </div>
-
-      {triggersError ? <ApiErrorAlert error={triggersError} onDismiss={() => setTriggersError(null)} /> : null}
-      <AlertTriggerHistory triggers={triggers} isLoading={triggersLoading} />
-
-      {notificationsError ? <ApiErrorAlert error={notificationsError} onDismiss={() => setNotificationsError(null)} /> : null}
-      <section className="glass-card !border-transparent p-4 md:p-5">
-        <DashboardPanelHeader
-          className="mb-3"
-          eyebrow="通知结果"
-          title="通知尝试记录"
-          titleClassName="text-base font-semibold"
-        />
-        {notificationsLoading ? <Loading label="正在加载通知尝试记录" /> : null}
-        {!notificationsLoading && notifications.length === 0 ? (
-          <EmptyState
-            icon={<BellRing className="h-6 w-6" />}
-            title="暂无通知尝试记录"
-            description="当前没有可展示的通知尝试明细；告警触发仍会按已配置通知渠道发送。"
-          />
-        ) : null}
-        {!notificationsLoading && notifications.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-left text-sm">
-              <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
-                <tr>
-                  <th className="px-3 py-2 font-medium">渠道</th>
-                  <th className="px-3 py-2 font-medium">状态</th>
-                  <th className="px-3 py-2 font-medium">错误码</th>
-                  <th className="px-3 py-2 font-medium">耗时</th>
-                  <th className="px-3 py-2 font-medium">时间</th>
-                  <th className="px-3 py-2 font-medium">诊断</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {notifications.map((notification) => (
-                  <tr key={notification.id}>
-                    <td className="px-3 py-3">{formatNotificationChannel(notification.channel)}</td>
-                    <td className="px-3 py-3">{formatNotificationStatus(notification)}</td>
-                    <td className="px-3 py-3">{notification.errorCode ?? '--'}</td>
-                    <td className="px-3 py-3">{notification.latencyMs == null ? '--' : `${notification.latencyMs}ms`}</td>
-                    <td className="px-3 py-3">{formatDateTime(notification.createdAt)}</td>
-                    <td className="px-3 py-3">{notification.diagnostics ?? '--'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </section>
 
       {createOpen ? createPortal(
         <div
