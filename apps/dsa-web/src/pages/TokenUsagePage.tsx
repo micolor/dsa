@@ -72,7 +72,7 @@ function buildParsedError(error: unknown, t: Translate): ParsedApiError {
 
 const ModelUsageCard: React.FC<{ model: UsageModelBreakdown; language: UiLanguage; t: Translate }> = ({ model, language, t }) => {
   return (
-    <div className="glass-card !border-transparent p-4">
+    <div className="rounded-xl border border-border/60 bg-card/40 p-3.5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-base font-semibold text-foreground">{model.model}</h3>
@@ -202,14 +202,19 @@ const TokenUsagePage: React.FC = () => {
             ) : (
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
                 <section className="space-y-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-foreground">{t('usage.modelUsage')}</h2>
-                    <p className="mt-1 text-sm text-secondary-text">{t('usage.modelUsageDescription')}</p>
-                  </div>
-                  <div className="grid gap-4">
-                    {dashboard.byModel.map((model) => (
-                      <ModelUsageCard key={model.model} model={model} language={language} t={t} />
-                    ))}
+                  <div className="glass-card !border-transparent p-4 md:p-5">
+                    <DashboardPanelHeader
+                      className="mb-2"
+                      eyebrow={t('usage.modelUsageEyebrow')}
+                      title={t('usage.modelUsage')}
+                      titleClassName="text-base font-semibold"
+                    />
+                    <p className="mb-2 text-sm text-secondary-text">{t('usage.modelUsageDescription')}</p>
+                    <div className="space-y-3">
+                      {dashboard.byModel.map((model) => (
+                        <ModelUsageCard key={model.model} model={model} language={language} t={t} />
+                      ))}
+                    </div>
                   </div>
                 </section>
 
@@ -217,7 +222,7 @@ const TokenUsagePage: React.FC = () => {
                   <div className="glass-card !border-transparent p-4 md:p-5">
                     <DashboardPanelHeader
                       className="mb-3"
-                      eyebrow={t('usage.breakdown')}
+                      eyebrow={t('usage.callTypeEyebrow')}
                       title={t('usage.callTypeTitle')}
                       titleClassName="text-base font-semibold"
                     />
@@ -250,14 +255,17 @@ const TokenUsagePage: React.FC = () => {
             )}
 
             <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">{t('usage.recentCalls')}</h2>
-                  <p className="mt-1 text-sm text-secondary-text">{t('usage.recentCallsDescription')}</p>
-                </div>
-                <Clock3 className="h-5 w-5 text-secondary-text" />
-              </div>
               <div className="glass-card !border-transparent overflow-hidden">
+                <div className="p-4 md:p-5">
+                  <DashboardPanelHeader
+                    className="mb-2"
+                    eyebrow={t('usage.recentCallsEyebrow')}
+                    title={t('usage.recentCalls')}
+                    titleClassName="text-base font-semibold"
+                    actions={<Clock3 className="h-5 w-5 text-secondary-text" aria-hidden="true" />}
+                  />
+                  <p className="mb-2 text-sm text-secondary-text">{t('usage.recentCallsDescription')}</p>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-border/70 text-sm">
                     <thead className="bg-surface-2/70 text-left text-xs uppercase tracking-[0.16em] text-secondary-text">
