@@ -1,13 +1,25 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pie, PieChart, ResponsiveContainer, Tooltip, Legend, Cell } from 'recharts';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
+import { stocksApi } from '../api/stocks';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, ConfirmDialog, EmptyState, InlineAlert } from '../components/common';
+import {
+  ApiErrorAlert,
+  Badge,
+  Button,
+  ConfirmDialog,
+  Dialog,
+  EmptyState,
+  InlineAlert,
+  StatCard,
+} from '../components/common';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
+import { DashboardPanelHeader } from '../components/dashboard';
+import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText } from '../i18n/uiText';
 import { PORTFOLIO_TEXT } from '../locales/featureText';
@@ -21,6 +33,7 @@ import {
   formatPct,
   formatPositionMoney,
   formatPositionPrice,
+  formatPriceDecimal,
   formatSideLabel,
   formatSignedPct,
   getCsvCommitVariant,
@@ -247,6 +260,12 @@ const PortfolioPage: React.FC = () => {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [pendingAccountDelete, setPendingAccountDelete] = useState<PendingAccountDelete | null>(null);
   const [accountDeleteLoading, setAccountDeleteLoading] = useState(false);
+  const [tradeModalOpen, setTradeModalOpen] = useState(false);
+  const [cashModalOpen, setCashModalOpen] = useState(false);
+  const [corpModalOpen, setCorpModalOpen] = useState(false);
+  const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [eventDialogOpen, setEventDialogOpen] = useState(false);
+  const tradeFormRef = useRef<HTMLFormElement>(null);
 
   const [tradeForm, setTradeForm] = useState({
     symbol: '',
@@ -283,6 +302,7 @@ const PortfolioPage: React.FC = () => {
   const writableAccountId = writableAccount?.id;
   const writeBlocked = !writableAccountId;
   const canDeleteSelectedAccount = Boolean(writableAccountId) && !isLoading && !fxRefreshing && !accountDeleteLoading;
+  const accountNameOf = (accountId: number): string => accounts.find((a) => a.id === accountId)?.name ?? '';
   const totalEventPages = Math.max(1, Math.ceil(eventTotal / DEFAULT_PAGE_SIZE));
   const currentEventCount = eventType === 'trade'
     ? tradeEvents.length
@@ -593,6 +613,14 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  const handleFocusPosition = (row: FlatPosition) => {
+    // Trade is the primary event type that carries a symbol; cash has no symbol
+    // attribution. Keep the current account scope (queryAccountId) intact.
+    setEventType('trade');
+    setEventSymbol(row.symbol);
+    setEventDialogOpen(true);
+  };
+
   const sectorPieData = useMemo(() => {
     const sectors = risk?.sectorConcentration?.topSectors || [];
     return sectors
@@ -620,6 +648,21 @@ const PortfolioPage: React.FC = () => {
   const concentrationPieData = sectorPieData.length > 0 ? sectorPieData : positionFallbackPieData;
   const concentrationMode = sectorPieData.length > 0 ? 'sector' : 'position';
 
+  const handleTradeStockSelect = async (code: string) => {
+    // Prefill the symbol; then best-effort fetch the current price as a default (user can edit).
+    setTradeForm((prev) => ({ ...prev, symbol: code, price: '' }));
+    try {
+      const quote = await stocksApi.getQuote(code);
+      if (quote.currentPrice > 0) {
+        setTradeForm((prev) =>
+          prev.symbol === code ? { ...prev, price: String(quote.currentPrice) } : prev,
+        );
+      }
+    } catch {
+      // Price lookup is best-effort; leave price blank for manual entry.
+    }
+  };
+
   const handleTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!writableAccountId) {
@@ -642,6 +685,7 @@ const PortfolioPage: React.FC = () => {
       });
       await refreshPortfolioData();
       setTradeForm((prev) => ({ ...prev, symbol: '', tradeUid: '', note: '' }));
+      setTradeModalOpen(false);
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -665,6 +709,7 @@ const PortfolioPage: React.FC = () => {
       });
       await refreshPortfolioData();
       setCashForm((prev) => ({ ...prev, note: '' }));
+      setCashModalOpen(false);
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -689,6 +734,7 @@ const PortfolioPage: React.FC = () => {
       });
       await refreshPortfolioData();
       setCorpForm((prev) => ({ ...prev, symbol: '', note: '' }));
+      setCorpModalOpen(false);
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -722,6 +768,7 @@ const PortfolioPage: React.FC = () => {
       if (!csvDryRun) {
         await refreshPortfolioData();
       }
+      setCsvModalOpen(false);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
@@ -730,10 +777,6 @@ const PortfolioPage: React.FC = () => {
   };
 
   const openDeleteDialog = (item: PendingDelete) => {
-    if (!writableAccountId) {
-      setWriteWarning('请先在右上角选择具体账户，再进行删除修正。');
-      return;
-    }
     setPendingDelete(item);
   };
 
@@ -770,11 +813,6 @@ const PortfolioPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete || deleteLoading) return;
-    if (!writableAccountId) {
-      setWriteWarning('请先在右上角选择具体账户，再进行删除修正。');
-      setPendingDelete(null);
-      return;
-    }
 
     const nextPage = currentEventCount === 1 && eventPage > 1 ? eventPage - 1 : eventPage;
     try {
@@ -959,78 +997,83 @@ const PortfolioPage: React.FC = () => {
     : null;
 
   return (
-    <div className="portfolio-page flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
-      <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
-      <section className="space-y-3">
+    <div className="portfolio-page flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden sm:h-[calc(100vh-4.5rem)]">
+      <header className="relative z-30 flex flex-shrink-0 items-center overflow-visible px-3 pb-3 md:px-4 md:pb-4">
         {hasAccounts ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_280px] gap-2 items-end">
-              <div>
-                <p className="text-xs text-secondary mb-1">{text.accountView}</p>
-                <select
-                  value={String(selectedAccount)}
-                  onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className={PORTFOLIO_SELECT_CLASS}
-                >
-                  <option value="all">{text.allAccounts}</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name} (#{account.id})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <p className="text-xs text-secondary mb-1">{text.costMethod}</p>
-                <select
-                  value={costMethod}
-                  onChange={(e) => setCostMethod(e.target.value as PortfolioCostMethod)}
-                  className={PORTFOLIO_SELECT_CLASS}
-                >
-                  <option value="fifo">{text.fifo}</option>
-                  <option value="avg">{text.avg}</option>
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn-secondary text-sm flex-1"
-                  onClick={() => {
-                    setShowCreateAccount((prev) => !prev);
-                    setAccountCreateError(null);
-                    setAccountCreateSuccess(null);
-                  }}
-                >
-                  {showCreateAccount ? text.collapseCreate : text.createAccount}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleRefresh()}
-                  disabled={isLoading || fxRefreshing}
-                  className="btn-secondary text-sm flex-1 inline-flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                  <span className="sr-only">{isLoading ? text.refreshing : text.refreshData}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openAccountDeleteDialog}
-                  disabled={!canDeleteSelectedAccount}
-                  className="btn-secondary text-sm flex-1 border-red-400/40 text-red-100 hover:bg-red-500/15 disabled:border-white/10 disabled:text-secondary"
-                >
-                  {accountDeleteLoading ? text.deletingAccount : text.deleteAccount}
-                </button>
-              </div>
+          <div className="grid w-full grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_minmax(0,1fr)] items-end gap-2">
+            <div>
+              <p className="text-xs text-muted-text mb-1">{text.accountView}</p>
+              <select
+                value={String(selectedAccount)}
+                onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className={PORTFOLIO_SELECT_CLASS}
+              >
+                <option value="all">{text.allAccounts}</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} (#{account.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="text-xs text-muted-text mb-1">{text.costMethod}</p>
+              <select
+                value={costMethod}
+                onChange={(e) => setCostMethod(e.target.value as PortfolioCostMethod)}
+                className={PORTFOLIO_SELECT_CLASS}
+              >
+                <option value="fifo">{text.fifo}</option>
+                <option value="avg">{text.avg}</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={showCreateAccount ? 'secondary' : 'primary'}
+                size="lg"
+                className="flex-1 whitespace-nowrap"
+                onClick={() => {
+                  setShowCreateAccount((prev) => !prev);
+                  setAccountCreateError(null);
+                  setAccountCreateSuccess(null);
+                }}
+              >
+                {showCreateAccount ? text.collapseCreate : text.createAccount}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                className="flex-1 whitespace-nowrap"
+                onClick={() => void handleRefresh()}
+                disabled={isLoading || fxRefreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                <span className="sr-only">{isLoading ? text.refreshing : text.refreshData}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="danger-subtle"
+                size="lg"
+                className="flex-1 whitespace-nowrap"
+                onClick={openAccountDeleteDialog}
+                disabled={!canDeleteSelectedAccount}
+              >
+                {accountDeleteLoading ? text.deletingAccount : text.deleteAccount}
+              </Button>
             </div>
           </div>
         ) : (
           <InlineAlert
             variant="warning"
-            className="inline-block rounded-lg px-3 py-2 text-xs shadow-none"
+            className="flex-1 rounded-lg px-3 py-2 text-xs shadow-none"
             message={text.noAccounts}
           />
         )}
-      </section>
+      </header>
+
+      <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-3 pb-4 md:px-4">
 
       {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
       {riskWarning ? (
@@ -1056,25 +1099,23 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       {(showCreateAccount || !hasAccounts) ? (
-        <Card padding="md">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-foreground">新建账户</h2>
-            {hasAccounts ? (
-              <button
-                type="button"
-                className="btn-secondary text-xs px-3 py-1"
-                onClick={() => {
-                  setShowCreateAccount(false);
-                  setAccountCreateError(null);
-                  setAccountCreateSuccess(null);
-                }}
-              >
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader
+            className="mb-1"
+            title="新建账户"
+            titleClassName="text-base font-semibold"
+            actions={hasAccounts ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => {
+                setShowCreateAccount(false);
+                setAccountCreateError(null);
+                setAccountCreateSuccess(null);
+              }}>
                 收起
-              </button>
+              </Button>
             ) : (
-              <span className="text-xs text-secondary">创建后自动切换到该账户</span>
+              <span className="text-xs text-secondary-text">创建后自动切换到该账户</span>
             )}
-          </div>
+          />
           {accountCreateError ? (
             <InlineAlert
               variant="danger"
@@ -1122,11 +1163,11 @@ const PortfolioPage: React.FC = () => {
               <option value="kr">市场：韩股（kr）</option>
               <option value="tw">市场：台股（tw）</option>
             </select>
-            <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
+            <Button type="submit" variant="primary" size="lg" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}
-            </button>
+            </Button>
           </form>
-        </Card>
+        </div>
       ) : null}
 
       {snapshotQualityMessage ? (
@@ -1139,30 +1180,23 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">{text.totalEquity}</p>
-          <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalEquity, snapshot?.currency || 'CNY')}</p>
-        </Card>
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">{text.totalMarketValue}</p>
-          <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalMarketValue, snapshot?.currency || 'CNY')}</p>
-        </Card>
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">{text.totalCash}</p>
-          <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalCash, snapshot?.currency || 'CNY')}</p>
-        </Card>
-        <Card variant="gradient" padding="md">
+        <StatCard label={text.totalEquity} value={formatMoney(snapshot?.totalEquity, snapshot?.currency || 'CNY')} />
+        <StatCard label={text.totalMarketValue} value={formatMoney(snapshot?.totalMarketValue, snapshot?.currency || 'CNY')} />
+        <StatCard label={text.totalCash} value={formatMoney(snapshot?.totalCash, snapshot?.currency || 'CNY')} />
+        <div className="glass-card !border-transparent p-4">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-xs text-secondary">{text.fxStatus}</p>
-            <button
+            <p className="text-xs uppercase tracking-[0.22em] text-secondary-text">{text.fxStatus}</p>
+            <Button
               type="button"
-              className="btn-secondary !px-2.5 !py-1 shrink-0 inline-flex items-center justify-center gap-2"
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
               onClick={() => void handleRefreshFx()}
               disabled={!hasAccounts || isLoading || fxRefreshing}
             >
               <RefreshCw className={`h-3.5 w-3.5 ${fxRefreshing ? 'animate-spin' : ''}`} />
               <span className="sr-only">{fxRefreshing ? text.refreshing : text.refreshFx}</span>
-            </button>
+            </Button>
           </div>
           <div className="mt-2">{snapshot?.fxStale ? <Badge variant="warning">{text.stale}</Badge> : <Badge variant="success">{text.latest}</Badge>}</div>
           {fxRefreshFeedback ? (
@@ -1173,15 +1207,27 @@ const PortfolioPage: React.FC = () => {
               className="mt-3 rounded-xl px-3 py-2 text-xs shadow-none"
             />
           ) : null}
-        </Card>
+        </div>
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <Card className="xl:col-span-2" padding="md">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-foreground">{text.positionsTitle}</h2>
-            <span className="text-xs text-secondary">{formatUiText(text.countItems, { count: positionRows.length })}</span>
-          </div>
+        <div className="glass-card !border-transparent p-4 md:p-5 xl:col-span-2">
+          <DashboardPanelHeader
+            className="mb-3"
+            title={text.positionsTitle}
+            titleClassName="text-base font-semibold"
+            actions={(
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-secondary-text">{formatUiText(text.countItems, { count: positionRows.length })}</span>
+                <span className="h-5 w-px bg-border/60 self-center" aria-hidden="true" />
+                <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setTradeModalOpen(true)}>录入交易</Button>
+                <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCashModalOpen(true)}>录入资金</Button>
+                <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCorpModalOpen(true)}>公司行为</Button>
+                <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCsvModalOpen(true)}>导入CSV</Button>
+                <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={() => setEventDialogOpen(true)}>事件记录</Button>
+              </div>
+            )}
+          />
           {portfolioSignalsWarning ? (
             <InlineAlert
               variant="warning"
@@ -1199,7 +1245,7 @@ const PortfolioPage: React.FC = () => {
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-[860px] w-full text-sm">
-                <thead className="text-xs text-secondary border-b border-white/10">
+                <thead className="text-xs text-muted-text border-b border-border/60">
                   <tr>
                     <th className="text-left py-2 pr-2">{text.account}</th>
                     <th className="text-left py-2 pr-2">{text.code}</th>
@@ -1209,7 +1255,7 @@ const PortfolioPage: React.FC = () => {
                     <th className="text-right py-2 pr-2">{text.marketValue}</th>
                     <th className="text-right py-2 pr-3">{text.unrealizedPnl}</th>
                     <th className="text-right py-2 pr-3">{text.returnPct}</th>
-                    <th className="min-w-[9rem] text-right py-2 pr-3">{t('decisionSignals.portfolioColumn')}</th>
+                    <th className="min-w-[8rem] text-right py-2 pr-3">{t('decisionSignals.portfolioColumn')}</th>
                     <th className="w-20 text-right py-2">{text.action}</th>
                   </tr>
                 </thead>
@@ -1219,14 +1265,18 @@ const PortfolioPage: React.FC = () => {
                     const analyzing = positionAnalysisLoadingKey === rowKey;
                     const signal = signalByPositionKey.get(rowKey);
                     return (
-                    <tr key={rowKey} className="border-b border-white/5">
-                      <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
+                    <tr
+                      key={rowKey}
+                      className="cursor-pointer border-b border-border/40 transition-colors hover:bg-elevated/40"
+                      onClick={() => handleFocusPosition(row)}
+                    >
+                      <td className="py-2 pr-2 text-secondary-text">{row.accountName}</td>
                       <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
-                      <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
-                      <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
+                      <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.quantity, 2)}</td>
+                      <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.avgCost, 4)}</td>
                       <td className="py-2 pr-2 text-right">
                         <div>{formatPositionPrice(row)}</div>
-                        <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`}>
+                        <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary-text' : 'text-warning'}`}>
                           {getPositionPriceLabel(row)}
                         </div>
                       </td>
@@ -1237,7 +1287,7 @@ const PortfolioPage: React.FC = () => {
                             ? row.unrealizedPnlBase >= 0
                               ? 'text-success'
                               : 'text-danger'
-                            : 'text-secondary'
+                            : 'text-secondary-text'
                         }`}
                       >
                         {formatPositionMoney(row.unrealizedPnlBase, row)}
@@ -1248,7 +1298,7 @@ const PortfolioPage: React.FC = () => {
                             ? row.unrealizedPnlPct >= 0
                               ? 'text-success'
                               : 'text-danger'
-                            : 'text-secondary'
+                            : 'text-secondary-text'
                         }`}
                       >
                         {formatSignedPct(row.unrealizedPnlPct)}
@@ -1257,14 +1307,18 @@ const PortfolioPage: React.FC = () => {
                         <PortfolioSignalSummary item={signal} loading={portfolioSignalsLoading} />
                       </td>
                       <td className="py-2 text-right">
-                        <button
+                        <Button
                           type="button"
-                          onClick={() => void handleAnalyzePosition(row)}
+                          variant="secondary"
+                          size="xsm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleAnalyzePosition(row);
+                          }}
                           disabled={analyzing}
-                          className="btn-secondary px-2 py-1 text-xs disabled:cursor-wait disabled:opacity-60"
                         >
                           {analyzing ? text.submitting : text.analyze}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                     );
@@ -1273,12 +1327,14 @@ const PortfolioPage: React.FC = () => {
               </table>
             </div>
           )}
-        </Card>
+        </div>
 
-        <Card padding="md">
-          <h2 className="text-sm font-semibold text-foreground mb-3">
-            {concentrationMode === 'sector' ? text.sectorConcentration : text.positionConcentrationFallback}
-          </h2>
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader
+            className="mb-3"
+            title={concentrationMode === 'sector' ? text.sectorConcentration : text.positionConcentrationFallback}
+            titleClassName="text-base font-semibold"
+          />
           {concentrationPieData.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -1300,50 +1356,42 @@ const PortfolioPage: React.FC = () => {
               className="border-none bg-transparent px-4 py-10 shadow-none"
             />
           )}
-          <div className="mt-3 text-xs text-secondary space-y-1">
+          <div className="mt-3 text-xs text-secondary-text space-y-1">
             <div>{text.displayScope}: {concentrationMode === 'sector' ? text.sectorDimension : text.positionDimensionFallback}</div>
             <div>{text.sectorAlert}: {risk?.sectorConcentration?.alert ? text.yes : text.no}</div>
             <div>{text.topWeight}: {formatPct(risk?.sectorConcentration?.topWeightPct ?? risk?.concentration?.topWeightPct)}</div>
           </div>
-        </Card>
+        </div>
       </section>
 
-      {writeBlocked && hasAccounts ? (
-        <InlineAlert
-          variant="warning"
-          className="rounded-lg px-3 py-2 text-xs shadow-none"
-          message={text.writeBlocked}
-        />
-      ) : null}
-
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">{text.drawdownMonitor}</h3>
-          <div className="text-xs text-secondary space-y-1">
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
+          <div className="text-xs text-secondary-text space-y-1">
             <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
             <div>{text.currentDrawdown}: {formatPct(risk?.drawdown?.currentDrawdownPct)}</div>
             <div>{text.alert}: {risk?.drawdown?.alert ? text.yes : text.no}</div>
           </div>
-        </Card>
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">{text.stopLossWarning}</h3>
-          <div className="text-xs text-secondary space-y-1">
+        </div>
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader className="mb-2" title={text.stopLossWarning} titleClassName="text-sm font-semibold" />
+          <div className="text-xs text-secondary-text space-y-1">
             <div>{text.triggeredCount}: {risk?.stopLoss?.triggeredCount ?? 0}</div>
             <div>{text.nearCount}: {risk?.stopLoss?.nearCount ?? 0}</div>
             <div>{text.alert}: {risk?.stopLoss?.nearAlert ? text.yes : text.no}</div>
           </div>
-        </Card>
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">{text.scope}</h3>
-          <div className="text-xs text-secondary space-y-1">
+        </div>
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader className="mb-2" title={text.scope} titleClassName="text-sm font-semibold" />
+          <div className="text-xs text-secondary-text space-y-1">
             <div>{text.accountCount}: {snapshot?.accountCount ?? 0}</div>
             <div>{text.currency}: {snapshot?.currency || 'CNY'}</div>
             <div>{text.costMethodShort}: {(snapshot?.costMethod || costMethod).toUpperCase()}</div>
           </div>
-        </Card>
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">{text.aiRiskSignals}</h3>
-          <div className="text-xs text-secondary space-y-1">
+        </div>
+        <div className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader className="mb-2" title={text.aiRiskSignals} titleClassName="text-sm font-semibold" />
+          <div className="text-xs text-secondary-text space-y-1">
             {risk?.decisionSignalRisk?.available === false ? (
               <div className="text-warning">{text.aiRiskUnavailable}</div>
             ) : (
@@ -1366,255 +1414,222 @@ const PortfolioPage: React.FC = () => {
               </>
             )}
           </div>
-        </Card>
+        </div>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">手工录入：交易</h3>
-          <form className="space-y-2" onSubmit={handleTradeSubmit}>
-            <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码（例如 600519）" value={tradeForm.symbol}
-              onChange={(e) => setTradeForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
-              <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
-                <option value="buy">买入</option>
-                <option value="sell">卖出</option>
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="数量（必填）" value={tradeForm.quantity}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="成交价（必填）" value={tradeForm.price}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="手续费（可选）" value={tradeForm.fee}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, fee: e.target.value }))} />
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="税费（可选）" value={tradeForm.tax}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
-            </div>
-            <p className="text-xs text-secondary">手续费和税费可留空，系统将按 0 处理。</p>
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交交易</button>
-          </form>
-        </Card>
 
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">手工录入：资金流水</h3>
-          <form className="space-y-2" onSubmit={handleCashSubmit}>
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
-                onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-              <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
-                onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
-                <option value="in">流入</option>
-                <option value="out">流出</option>
-              </select>
-            </div>
-            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="金额"
-              value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
-            <input className={PORTFOLIO_INPUT_CLASS} placeholder={`币种（可选，默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
-              onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value }))} />
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交资金流水</button>
-          </form>
-        </Card>
-
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">手工录入：公司行为</h3>
-          <form className="space-y-2" onSubmit={handleCorporateSubmit}>
-            <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码" value={corpForm.symbol}
-              onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
-                onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
-              <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
-                onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
-                <option value="cash_dividend">现金分红</option>
-                <option value="split_adjustment">拆并股调整</option>
-              </select>
-            </div>
-            {corpForm.actionType === 'cash_dividend' ? (
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="每股分红"
-                value={corpForm.cashDividendPerShare}
-                onChange={(e) => setCorpForm((prev) => ({ ...prev, cashDividendPerShare: e.target.value, splitRatio: '' }))} required />
-            ) : (
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="拆并股比例"
-                value={corpForm.splitRatio}
-                onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
-            )}
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交企业行为</button>
-          </form>
-        </Card>
-      </section>
-
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
-          <div className="space-y-2">
-            {brokerLoadWarning ? (
-              <InlineAlert
-                variant="warning"
-                className="rounded-lg px-2 py-1 text-xs shadow-none"
-                message={brokerLoadWarning}
-              />
-            ) : null}
-            <div className="grid grid-cols-2 gap-2">
-              <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
-                {brokers.length > 0 ? (
-                  brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
-                ) : (
-                  <option value="huatai">huatai（华泰）</option>
-                )}
-              </select>
-              <label className={PORTFOLIO_FILE_PICKER_CLASS}>
-                选择 CSV
-                <input type="file" accept=".csv" className="hidden"
-                  onChange={(e) => setCsvFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
-              </label>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-secondary">
-              <input id="csv-dry-run" type="checkbox" checked={csvDryRun} onChange={(e) => setCsvDryRun(e.target.checked)} />
-              <label htmlFor="csv-dry-run">仅预演（不写入）</label>
-            </div>
-            <div className="flex gap-2">
-              <button type="button" className="btn-secondary flex-1" disabled={!csvFile || csvParsing} onClick={() => void handleParseCsv()}>
-                {csvParsing ? '解析中...' : '解析文件'}
-              </button>
-              <button type="button" className="btn-secondary flex-1"
-                disabled={!csvFile || !writableAccountId || csvCommitting} onClick={() => void handleCommitCsv()}>
-                {csvCommitting ? '提交中...' : '提交导入'}
-              </button>
-            </div>
-            {csvParseResult ? (
-              <InlineAlert
-                variant={getCsvParseVariant(csvParseResult)}
-                title="CSV 解析结果"
-                message={`有效 ${csvParseResult.recordCount} 条，跳过 ${csvParseResult.skippedCount} 条，错误 ${csvParseResult.errorCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-            {csvCommitResult ? (
-              <InlineAlert
-                variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
-                title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
-                message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-          </div>
-        </Card>
-
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">事件记录</h3>
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <select className={PORTFOLIO_SELECT_CLASS} value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
+      <Dialog
+        isOpen={eventDialogOpen}
+        onClose={() => setEventDialogOpen(false)}
+        title="事件记录"
+        ariaLabel="事件记录"
+        widthClassName="sm:max-w-4xl"
+        maxHeightClassName="max-h-[92vh]"
+      >
+        <div className="space-y-3">
+            {/* Toolbar: type toggle + inline focus chip + primary filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className={`${PORTFOLIO_SELECT_CLASS} w-32`}
+                value={eventType}
+                onChange={(e) => setEventType(e.target.value as EventType)}
+                aria-label="事件类型"
+              >
                 <option value="trade">交易流水</option>
                 <option value="cash">资金流水</option>
                 <option value="corporate">公司行为</option>
               </select>
-              <button type="button" className="btn-secondary text-sm inline-flex items-center justify-center gap-2" onClick={() => void loadEvents()} disabled={eventLoading}>
-                <RefreshCw className={`h-4 w-4 ${eventLoading ? 'animate-spin' : ''}`} />
-                <span className="sr-only">{eventLoading ? '加载中...' : '刷新流水'}</span>
-              </button>
+
+              {eventSymbol && (eventType === 'trade' || eventType === 'corporate') ? (
+                <Badge variant="info" className="gap-1 pr-1">
+                  只看 {eventSymbol}
+                  <button
+                    type="button"
+                    aria-label="清除股票筛选"
+                    className="ml-1 rounded-full p-0.5 hover:bg-white/10"
+                    onClick={() => setEventSymbol('')}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </Badge>
+              ) : null}
+
+              <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+                {(eventType === 'trade' || eventType === 'corporate') ? (
+                  <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} placeholder="股票代码" value={eventSymbol}
+                    onChange={(e) => setEventSymbol(e.target.value)} aria-label="股票代码筛选" />
+                ) : null}
+                <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} type="date" value={eventDateFrom}
+                  onChange={(e) => setEventDateFrom(e.target.value)} aria-label="起始日期" />
+                <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} type="date" value={eventDateTo}
+                  onChange={(e) => setEventDateTo(e.target.value)} aria-label="结束日期" />
+                {eventType === 'trade' ? (
+                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventSide}
+                    onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)} aria-label="买卖方向">
+                    <option value="">全部方向</option>
+                    <option value="buy">买入</option>
+                    <option value="sell">卖出</option>
+                  </select>
+                ) : null}
+                {eventType === 'cash' ? (
+                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventDirection}
+                    onChange={(e) => setEventDirection(e.target.value as '' | PortfolioCashDirection)} aria-label="资金方向">
+                    <option value="">全部方向</option>
+                    <option value="in">流入</option>
+                    <option value="out">流出</option>
+                  </select>
+                ) : null}
+                {eventType === 'corporate' ? (
+                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventActionType}
+                    onChange={(e) => setEventActionType(e.target.value as '' | PortfolioCorporateActionType)} aria-label="公司行为类型">
+                    <option value="">全部公司行为</option>
+                    <option value="cash_dividend">现金分红</option>
+                    <option value="split_adjustment">拆并股调整</option>
+                  </select>
+                ) : null}
+                <Button type="button" variant="secondary" size="sm" onClick={() => void loadEvents()} disabled={eventLoading}>
+                  <RefreshCw className={`h-4 w-4 ${eventLoading ? 'animate-spin' : ''}`} />
+                  <span className="sr-only">{eventLoading ? '加载中...' : '刷新流水'}</span>
+                </Button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={eventDateFrom} onChange={(e) => setEventDateFrom(e.target.value)} />
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={eventDateTo} onChange={(e) => setEventDateTo(e.target.value)} />
-            </div>
-            {(eventType === 'trade' || eventType === 'corporate') ? (
-              <input className={PORTFOLIO_INPUT_CLASS} placeholder="按股票代码筛选" value={eventSymbol}
-                onChange={(e) => setEventSymbol(e.target.value)} />
-            ) : null}
-            {eventType === 'trade' ? (
-              <select className={PORTFOLIO_SELECT_CLASS} value={eventSide} onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)}>
-                <option value="">全部买卖方向</option>
-                <option value="buy">买入</option>
-                <option value="sell">卖出</option>
-              </select>
-            ) : null}
-            {eventType === 'cash' ? (
-              <select className={PORTFOLIO_SELECT_CLASS} value={eventDirection}
-                onChange={(e) => setEventDirection(e.target.value as '' | PortfolioCashDirection)}>
-                <option value="">全部资金方向</option>
-                <option value="in">流入</option>
-                <option value="out">流出</option>
-              </select>
-            ) : null}
-            {eventType === 'corporate' ? (
-              <select className={PORTFOLIO_SELECT_CLASS} value={eventActionType}
-                onChange={(e) => setEventActionType(e.target.value as '' | PortfolioCorporateActionType)}>
-                <option value="">全部公司行为</option>
-                <option value="cash_dividend">现金分红</option>
-                <option value="split_adjustment">拆并股调整</option>
-              </select>
-            ) : null}
-            <div className="text-[11px] text-secondary">
-              {writeBlocked ? '删除修正仅在单账户视图可用。请先选择具体账户后再删除错误流水。' : '如有错误流水，可直接删除后重新录入。'}
-            </div>
-            <div className="max-h-64 overflow-auto rounded-lg border border-white/10 p-2">
-              {eventType === 'trade' && tradeEvents.map((item) => (
-                <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
-                  <div className="min-w-0">
-                    {item.tradeDate} {formatSideLabel(item.side)} {item.symbol} 数量={item.quantity} 价格={item.price}
-                  </div>
-                  {!writeBlocked ? (
-                    <button
-                      type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
-                      onClick={() => openDeleteDialog({
-                        eventType: 'trade',
-                        id: item.id,
-                        message: `确认删除 ${item.tradeDate} 的${formatSideLabel(item.side)}流水 ${item.symbol}（数量 ${item.quantity}，价格 ${item.price}）吗？`,
-                      })}
-                    >
-                      删除
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-              {eventType === 'cash' && cashEvents.map((item) => (
-                <div key={`c-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
-                  <div className="min-w-0">
-                    {item.eventDate} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency}
-                  </div>
-                  {!writeBlocked ? (
-                    <button
-                      type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
-                      onClick={() => openDeleteDialog({
-                        eventType: 'cash',
-                        id: item.id,
-                        message: `确认删除 ${item.eventDate} 的资金流水（${formatCashDirectionLabel(item.direction)} ${item.amount} ${item.currency}）吗？`,
-                      })}
-                    >
-                      删除
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-              {eventType === 'corporate' && corporateEvents.map((item) => (
-                <div key={`ca-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
-                  <div className="min-w-0">
-                    {item.effectiveDate} {formatCorporateActionLabel(item.actionType)} {item.symbol}
-                  </div>
-                  {!writeBlocked ? (
-                    <button
-                      type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
-                      onClick={() => openDeleteDialog({
-                        eventType: 'corporate',
-                        id: item.id,
-                        message: `确认删除 ${item.effectiveDate} 的公司行为 ${formatCorporateActionLabel(item.actionType)}（${item.symbol}）吗？`,
-                      })}
-                    >
-                      删除
-                    </button>
-                  ) : null}
-                </div>
-              ))}
+
+            <div className="overflow-x-auto rounded-lg border border-border/60">
+              {eventType === 'trade' ? (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-text border-b border-border/60">
+                    <tr>
+                      <th className="text-left py-2 pl-3 pr-2">账号</th>
+                      <th className="text-left py-2 pr-2">日期</th>
+                      <th className="text-left py-2 pr-2">方向</th>
+                      <th className="text-left py-2 pr-2">代码</th>
+                      <th className="text-right py-2 pr-2">数量</th>
+                      <th className="text-right py-2 pr-2">价格</th>
+                      <th className="text-right py-2 pr-2">手续费</th>
+                      <th className="text-right py-2 pr-2">税费</th>
+                      <th className="w-20 text-right py-2 pr-3">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tradeEvents.map((item) => (
+                      <tr key={`t-${item.id}`} className="border-b border-border/40 text-xs text-secondary-text">
+                        <td className="py-2 pl-3 pr-2 whitespace-nowrap">{accountNameOf(item.accountId)}</td>
+                        <td className="py-2 pr-2 whitespace-nowrap">{item.tradeDate}</td>
+                        <td className="py-2 pr-2">{formatSideLabel(item.side)}</td>
+                        <td className="py-2 pr-2 font-mono">{item.symbol}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.quantity, 2)}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.price, 4)}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.fee, 2)}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.tax, 2)}</td>
+                        <td className="py-2 pr-3 text-right">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xsm"
+                            className="shrink-0"
+                            onClick={() => openDeleteDialog({
+                              eventType: 'trade',
+                              id: item.id,
+                              message: `确认删除 ${item.tradeDate} 的${formatSideLabel(item.side)}流水 ${item.symbol}（数量 ${item.quantity}，价格 ${item.price}）吗？`,
+                            })}
+                          >
+                            删除
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+
+              {eventType === 'cash' ? (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-text border-b border-border/60">
+                    <tr>
+                      <th className="text-left py-2 pl-3 pr-2">账号</th>
+                      <th className="text-left py-2 pr-2">日期</th>
+                      <th className="text-left py-2 pr-2">方向</th>
+                      <th className="text-right py-2 pr-2">金额</th>
+                      <th className="text-left py-2 pr-2">币种</th>
+                      <th className="w-20 text-right py-2 pr-3">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashEvents.map((item) => (
+                      <tr key={`c-${item.id}`} className="border-b border-border/40 text-xs text-secondary-text">
+                        <td className="py-2 pl-3 pr-2 whitespace-nowrap">{accountNameOf(item.accountId)}</td>
+                        <td className="py-2 pr-2 whitespace-nowrap">{item.eventDate}</td>
+                        <td className="py-2 pr-2">{formatCashDirectionLabel(item.direction)}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.amount, 2)}</td>
+                        <td className="py-2 pr-2">{item.currency}</td>
+                        <td className="py-2 pr-3 text-right">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xsm"
+                            className="shrink-0"
+                            onClick={() => openDeleteDialog({
+                              eventType: 'cash',
+                              id: item.id,
+                              message: `确认删除 ${item.eventDate} 的资金流水（${formatCashDirectionLabel(item.direction)} ${item.amount} ${item.currency}）吗？`,
+                            })}
+                          >
+                            删除
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+
+              {eventType === 'corporate' ? (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-text border-b border-border/60">
+                    <tr>
+                      <th className="text-left py-2 pl-3 pr-2">账号</th>
+                      <th className="text-left py-2 pr-2">日期</th>
+                      <th className="text-left py-2 pr-2">类型</th>
+                      <th className="text-left py-2 pr-2">代码</th>
+                      <th className="text-right py-2 pr-2">每股分红</th>
+                      <th className="text-right py-2 pr-2">拆分比</th>
+                      <th className="w-20 text-right py-2 pr-3">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {corporateEvents.map((item) => (
+                      <tr key={`ca-${item.id}`} className="border-b border-border/40 text-xs text-secondary-text">
+                        <td className="py-2 pl-3 pr-2 whitespace-nowrap">{accountNameOf(item.accountId)}</td>
+                        <td className="py-2 pr-2 whitespace-nowrap">{item.effectiveDate}</td>
+                        <td className="py-2 pr-2">{formatCorporateActionLabel(item.actionType)}</td>
+                        <td className="py-2 pr-2 font-mono">{item.symbol}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">
+                          {item.cashDividendPerShare != null ? formatPriceDecimal(item.cashDividendPerShare, 4) : '--'}
+                        </td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap">
+                          {item.splitRatio != null ? formatPriceDecimal(item.splitRatio, 4) : '--'}
+                        </td>
+                        <td className="py-2 pr-3 text-right">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xsm"
+                            className="shrink-0"
+                            onClick={() => openDeleteDialog({
+                              eventType: 'corporate',
+                              id: item.id,
+                              message: `确认删除 ${item.effectiveDate} 的公司行为 ${formatCorporateActionLabel(item.actionType)}（${item.symbol}）吗？`,
+                            })}
+                          >
+                            删除
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+
               {!eventLoading
                 && ((eventType === 'trade' && tradeEvents.length === 0)
                   || (eventType === 'cash' && cashEvents.length === 0)
@@ -1626,22 +1641,21 @@ const PortfolioPage: React.FC = () => {
                     />
                   ) : null}
             </div>
-            <div className="flex items-center justify-between text-xs text-secondary">
+            <div className="flex items-center justify-between text-xs text-secondary-text">
               <span>第 {eventPage} / {totalEventPages} 页</span>
               <div className="flex gap-2">
-                <button type="button" className="btn-secondary text-xs px-3 py-1" disabled={eventPage <= 1}
+                <Button type="button" variant="outline" size="sm" disabled={eventPage <= 1}
                   onClick={() => setEventPage((prev) => Math.max(1, prev - 1))}>
                   上一页
-                </button>
-                <button type="button" className="btn-secondary text-xs px-3 py-1" disabled={eventPage >= totalEventPages}
+                </Button>
+                <Button type="button" variant="outline" size="sm" disabled={eventPage >= totalEventPages}
                   onClick={() => setEventPage((prev) => Math.min(totalEventPages, prev + 1))}>
                   下一页
-                </button>
+                </Button>
               </div>
             </div>
           </div>
-        </Card>
-      </section>
+        </Dialog>
       </div>
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
@@ -1677,6 +1691,167 @@ const PortfolioPage: React.FC = () => {
           }
         }}
       />
+      <Dialog
+        isOpen={tradeModalOpen}
+        onClose={() => setTradeModalOpen(false)}
+        title="录入交易"
+        ariaLabel="录入交易"
+        widthClassName="sm:max-w-xl"
+      >
+        {writeBlocked ? <p className="mb-3 text-xs text-secondary-text">请先在右上角选择具体账户后再提交。</p> : null}
+        <form ref={tradeFormRef} className="space-y-2" onSubmit={handleTradeSubmit}>
+          <StockAutocomplete
+            value={tradeForm.symbol}
+            onChange={(v) => setTradeForm((prev) => ({ ...prev, symbol: v }))}
+            onSubmit={handleTradeStockSelect}
+            onEnterSubmit={() => tradeFormRef.current?.requestSubmit()}
+            keepClosedAfterSelect
+            placeholder="股票代码或名称（例如 600519 / 贵州茅台）"
+            ariaLabel="股票代码或名称"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
+            <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
+              <option value="buy">买入</option>
+              <option value="sell">卖出</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="数量（必填）" value={tradeForm.quantity}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="成交价（必填）" value={tradeForm.price}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="手续费（可选）" value={tradeForm.fee}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, fee: e.target.value }))} />
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="税费（可选）" value={tradeForm.tax}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
+          </div>
+          <p className="text-xs text-secondary-text">手续费和税费可留空，系统将按 0 处理。</p>
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交交易</Button>
+        </form>
+      </Dialog>
+      <Dialog
+        isOpen={cashModalOpen}
+        onClose={() => setCashModalOpen(false)}
+        title="录入资金流水"
+        ariaLabel="录入资金流水"
+        widthClassName="sm:max-w-xl"
+      >
+        {writeBlocked ? <p className="mb-3 text-xs text-secondary-text">请先在右上角选择具体账户后再提交。</p> : null}
+        <form className="space-y-2" onSubmit={handleCashSubmit}>
+          <div className="grid grid-cols-2 gap-2">
+            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
+              onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+            <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
+              onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
+              <option value="in">流入</option>
+              <option value="out">流出</option>
+            </select>
+          </div>
+          <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="金额"
+            value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+          <input className={PORTFOLIO_INPUT_CLASS} placeholder={`币种（可选，默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
+            onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value }))} />
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交资金流水</Button>
+        </form>
+      </Dialog>
+      <Dialog
+        isOpen={corpModalOpen}
+        onClose={() => setCorpModalOpen(false)}
+        title="录入公司行为"
+        ariaLabel="录入公司行为"
+        widthClassName="sm:max-w-xl"
+      >
+        {writeBlocked ? <p className="mb-3 text-xs text-secondary-text">请先在右上角选择具体账户后再提交。</p> : null}
+        <form className="space-y-2" onSubmit={handleCorporateSubmit}>
+          <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码" value={corpForm.symbol}
+            onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
+          <div className="grid grid-cols-2 gap-2">
+            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
+              onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
+            <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
+              onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
+              <option value="cash_dividend">现金分红</option>
+              <option value="split_adjustment">拆并股调整</option>
+            </select>
+          </div>
+          {corpForm.actionType === 'cash_dividend' ? (
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="每股分红"
+              value={corpForm.cashDividendPerShare}
+              onChange={(e) => setCorpForm((prev) => ({ ...prev, cashDividendPerShare: e.target.value, splitRatio: '' }))} required />
+          ) : (
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="拆并股比例"
+              value={corpForm.splitRatio}
+              onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
+          )}
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交企业行为</Button>
+        </form>
+      </Dialog>
+      <Dialog
+        isOpen={csvModalOpen}
+        onClose={() => setCsvModalOpen(false)}
+        title="导入 CSV"
+        ariaLabel="导入 CSV"
+        widthClassName="sm:max-w-xl"
+      >
+        <div className="space-y-2">
+          {brokerLoadWarning ? (
+            <InlineAlert
+              variant="warning"
+              className="rounded-lg px-2 py-1 text-xs shadow-none"
+              message={brokerLoadWarning}
+            />
+          ) : null}
+          {writeBlocked ? <p className="text-xs text-secondary-text">请先在右上角选择具体账户后再提交导入。</p> : null}
+          <div className="grid grid-cols-2 gap-2">
+            <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
+              {brokers.length > 0 ? (
+                brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
+              ) : (
+                <option value="huatai">huatai（华泰）</option>
+              )}
+            </select>
+            <label className={PORTFOLIO_FILE_PICKER_CLASS}>
+              选择 CSV
+              <input type="file" accept=".csv" className="hidden"
+                onChange={(e) => setCsvFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+            </label>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-secondary-text">
+            <input id="csv-dry-run" type="checkbox" checked={csvDryRun} onChange={(e) => setCsvDryRun(e.target.checked)} />
+            <label htmlFor="csv-dry-run">仅预演（不写入）</label>
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" size="lg" className="flex-1" disabled={!csvFile || csvParsing} onClick={() => void handleParseCsv()}>
+              {csvParsing ? '解析中...' : '解析文件'}
+            </Button>
+            <Button type="button" variant="secondary" size="lg" className="flex-1"
+              disabled={!csvFile || !writableAccountId || csvCommitting} onClick={() => void handleCommitCsv()}>
+              {csvCommitting ? '提交中...' : '提交导入'}
+            </Button>
+          </div>
+          {csvParseResult ? (
+            <InlineAlert
+              variant={getCsvParseVariant(csvParseResult)}
+              title="CSV 解析结果"
+              message={`有效 ${csvParseResult.recordCount} 条，跳过 ${csvParseResult.skippedCount} 条，错误 ${csvParseResult.errorCount} 条。`}
+              className="rounded-lg px-3 py-2 text-xs shadow-none"
+            />
+          ) : null}
+          {csvCommitResult ? (
+            <InlineAlert
+              variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
+              title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
+              message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
+              className="rounded-lg px-3 py-2 text-xs shadow-none"
+            />
+          ) : null}
+        </div>
+      </Dialog>
     </div>
   );
 };

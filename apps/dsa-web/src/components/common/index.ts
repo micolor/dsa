@@ -14,6 +14,7 @@ export { Input } from './Input';
 export * from './EyeToggleIcon';
 export * from './Loading';
 export * from './Drawer';
+export * from './Dialog';
 export * from './ScrollArea';
 export * from './ApiErrorAlert';
 export * from './Collapsible';

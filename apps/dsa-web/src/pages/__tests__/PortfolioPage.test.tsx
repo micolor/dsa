@@ -30,6 +30,7 @@ const {
   analyzePosition,
   listDecisionSignals,
   getLatestDecisionSignals,
+  getQuote,
 } = vi.hoisted(() => ({
   getAccounts: vi.fn(),
   getSnapshot: vi.fn(),
@@ -52,6 +53,7 @@ const {
   analyzePosition: vi.fn(),
   listDecisionSignals: vi.fn(),
   getLatestDecisionSignals: vi.fn(),
+  getQuote: vi.fn(),
 }));
 
 vi.mock('../../api/decisionSignals', () => ({
@@ -83,6 +85,49 @@ vi.mock('../../api/portfolio', () => ({
     deleteAccount,
     analyzePosition,
   },
+}));
+
+vi.mock('../../api/stocks', () => ({
+  stocksApi: { getQuote },
+}));
+
+// StockAutocomplete is unit-tested separately; mock it here as a controlled input
+// that resolves a selected stock via onSubmit (canonical code) on Enter.
+vi.mock('../../components/StockAutocomplete', () => ({
+  StockAutocomplete: ({
+    value,
+    onChange,
+    onSubmit,
+    onEnterSubmit,
+    ariaLabel,
+    placeholder,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    onSubmit: (code: string) => void;
+    onEnterSubmit?: () => void;
+    ariaLabel?: string;
+    placeholder?: string;
+  }) => (
+    <input
+      data-testid="trade-symbol"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          // Mirror the real component: a canonical code (contains '.') means the
+          // value is already resolved and no suggestion is highlighted, so Enter
+          // submits the surrounding form (onEnterSubmit). Otherwise Enter selects
+          // a highlighted suggestion (onSubmit with the canonical code).
+          if (value.includes('.') && onEnterSubmit) onEnterSubmit();
+          else onSubmit('600519.SH');
+        }
+      }}
+    />
+  ),
 }));
 
 vi.mock('recharts', () => ({
@@ -309,6 +354,11 @@ describe('PortfolioPage FX refresh', () => {
     listCashLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
     listCorporateActions.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
     createTrade.mockResolvedValue({ id: 1 });
+    getQuote.mockResolvedValue({
+      stockCode: '600519.SH',
+      stockName: '贵州茅台',
+      currentPrice: 1800.5,
+    });
     deleteTrade.mockResolvedValue({ deleted: 1 });
     createCashLedger.mockResolvedValue({ id: 1 });
     deleteCashLedger.mockResolvedValue({ deleted: 1 });
@@ -559,7 +609,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     expect(await screen.findByText('HK00700')).toBeInTheDocument();
-    expect(screen.getByText('420.0000')).toBeInTheDocument();
+    expect(screen.getByText('420')).toBeInTheDocument();
     expect(screen.getByText('HKD 4,200.00')).toBeInTheDocument();
     expect(screen.getByText('+5.00%')).toBeInTheDocument();
     expect(screen.getByText('收盘价 · 2026-03-18')).toBeInTheDocument();
@@ -574,7 +624,7 @@ describe('PortfolioPage FX refresh', () => {
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
     expect(hkRowCells.at(-3)).toHaveClass('text-success');
-    expect(aaplRowCells.at(-3)).toHaveClass('text-secondary');
+    expect(aaplRowCells.at(-3)).toHaveClass('text-secondary-text');
   });
 
   it('loads latest active signals for holdings without scanning paginated signal lists', async () => {
@@ -1107,5 +1157,108 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => expect(getAccounts).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByText('Main (#1)')).not.toBeInTheDocument());
     expect(screen.getByRole('option', { name: 'Alt (#2)' })).toBeInTheDocument();
+  });
+
+  it('录入交易时选中股票自动带出代码与当前价格作为默认', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    const accountSelect = screen.getAllByRole('combobox')[0];
+    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    await screen.findByRole('dialog', { name: '录入交易' });
+
+    const symbolInput = screen.getByTestId('trade-symbol');
+    fireEvent.change(symbolInput, { target: { value: '茅台' } });
+    fireEvent.keyDown(symbolInput, { key: 'Enter' });
+
+    await waitFor(() => expect(getQuote).toHaveBeenCalledWith('600519.SH'));
+    await waitFor(() => expect(symbolInput).toHaveValue('600519.SH'));
+
+    const priceInput = screen.getByPlaceholderText('成交价（必填）');
+    await waitFor(() => expect((priceInput as HTMLInputElement).value).toBe('1800.5'));
+  });
+
+  it('选中股票但行情获取失败时保留空价格，不阻塞录入', async () => {
+    getQuote.mockRejectedValueOnce(new Error('network'));
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    const accountSelect = screen.getAllByRole('combobox')[0];
+    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    await screen.findByRole('dialog', { name: '录入交易' });
+
+    const symbolInput = screen.getByTestId('trade-symbol');
+    fireEvent.change(symbolInput, { target: { value: '600519' } });
+    fireEvent.keyDown(symbolInput, { key: 'Enter' });
+
+    await waitFor(() => expect(getQuote).toHaveBeenCalledWith('600519.SH'));
+    await waitFor(() => expect(symbolInput).toHaveValue('600519.SH'));
+    expect((screen.getByPlaceholderText('成交价（必填）') as HTMLInputElement).value).toBe('');
+  });
+
+  it('录入交易时在已填表单里按回车可直接提交（不再被选股吞掉）', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    const accountSelect = screen.getAllByRole('combobox')[0];
+    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    const symbolInput = screen.getByTestId('trade-symbol');
+    fireEvent.change(symbolInput, { target: { value: '600519.SH' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('成交价（必填）'), { target: { value: '1800.5' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('数量（必填）'), { target: { value: '100' } });
+    fireEvent.change(dialog.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: '2026-08-11' } });
+
+    fireEvent.keyDown(symbolInput, { key: 'Enter' });
+
+    await waitFor(() => expect(createTrade).toHaveBeenCalled());
+    expect(createTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 1, symbol: '600519.SH', quantity: 100, price: 1800.5 }),
+    );
+  });
+
+  it('点击持仓行可在事件记录聚焦该股票的交易事件', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [makePosition({ symbol: 'HK00700' })] }));
+
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    fireEvent.click(screen.getByText('HK00700').closest('tr') as HTMLTableRowElement);
+
+    // Auto-switches to trade type + applies the symbol filter.
+    await waitFor(() => {
+      expect(listTrades).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: 'HK00700' }));
+    });
+    // Position focus chip with a clear button is shown.
+    expect(screen.getByRole('button', { name: '清除股票筛选' })).toBeInTheDocument();
+  });
+
+  it('点击「只看 XX」的清除按钮恢复全部事件', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [makePosition({ symbol: 'HK00700' })] }));
+
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    fireEvent.click(screen.getByText('HK00700').closest('tr') as HTMLTableRowElement);
+    await waitFor(() => {
+      expect(listTrades).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: 'HK00700' }));
+    });
+
+    const callsAfterFocus = listTrades.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '清除股票筛选' }));
+
+    await waitFor(() => expect(listTrades).toHaveBeenCalledTimes(callsAfterFocus + 1));
+    expect(listTrades).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: undefined }));
+    expect(screen.queryByRole('button', { name: '清除股票筛选' })).not.toBeInTheDocument();
   });
 });
