@@ -23,12 +23,12 @@ import type {
   BacktestPhaseFilter,
 } from '../types/backtest';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
+import { SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { getMarketPhaseSummaryLabel } from '../utils/marketPhase';
 
-const BACKTEST_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+const BACKTEST_INPUT_CLASS = `${SELECT_INPUT_CLASS} w-full`;
 const BACKTEST_COMPACT_INPUT_CLASS =
-  'input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 py-2 text-xs transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 py-2 text-xs transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 select-input-chevron';
 type BacktestText = (typeof BACKTEST_TEXT)[UiLanguage];
 
 // ============ Helpers ============

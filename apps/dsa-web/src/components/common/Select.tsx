@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { cn } from '../../utils/cn';
+import { SELECT_INPUT_CLASS } from '../../utils/formClasses';
 
 interface SelectOption {
   value: string;
@@ -50,9 +51,8 @@ export const Select: React.FC<SelectProps> = ({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           className={cn(
-            'input-surface input-focus-glow h-11 w-full appearance-none rounded-xl border bg-transparent px-4 py-2.5 pr-10 text-sm text-foreground',
+            `${SELECT_INPUT_CLASS} w-full appearance-none py-2.5 pr-10 text-foreground`,
             '[color-scheme:light] dark:[color-scheme:dark]',
-            'transition-all duration-200 focus:outline-none',
             disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
           )}
         >

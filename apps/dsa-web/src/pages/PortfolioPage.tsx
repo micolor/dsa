@@ -53,6 +53,7 @@ import type {
 import { areStockCodesEquivalent, normalizeStockCode } from '../utils/stockCode';
 import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
+import { SELECT_CHEVRON_CLASS } from '../utils/formClasses';
 
 const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
 const DEFAULT_PAGE_SIZE = 20;
@@ -115,7 +116,7 @@ type FxRefreshContext = {
 
 const PORTFOLIO_INPUT_CLASS =
   'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
+const PORTFOLIO_SELECT_CLASS = `${SELECT_CHEVRON_CLASS} w-full`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 

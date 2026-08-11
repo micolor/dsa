@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, BarChart3, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { Activity, BarChart3, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import {
   decisionSignalsApi,
   getDecisionSignalReassessBlockedError,
@@ -45,6 +45,7 @@ import type {
 } from '../types/decisionSignals';
 import type { Market, StockIndexItem } from '../types/stockIndex';
 import { cn } from '../utils/cn';
+import { SELECT_CHEVRON_CLASS, SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { buildDecisionActionLabelMap } from '../utils/decisionAction';
 import {
   getDecisionSignalMarketLabel,
@@ -366,6 +367,22 @@ function buildNextTimelineFilters(
   return { filters: currentFilters, marketSource };
 }
 
+function buildActiveFilterChips(
+  filters: ListFilters,
+  actionLabels: Record<string, string>,
+  t: (key: UiTextKey) => string,
+): Array<{ key: keyof ListFilters; label: string }> {
+  const chips: Array<{ key: keyof ListFilters; label: string }> = [];
+  if (filters.market) chips.push({ key: 'market', label: `${t('decisionSignals.market')}：${getDecisionSignalMarketLabel(filters.market, t)}` });
+  if (filters.stockCode) chips.push({ key: 'stockCode', label: `${t('decisionSignals.stockCode')}：${filters.stockCode}` });
+  if (filters.action) chips.push({ key: 'action', label: `${t('decisionSignals.action')}：${actionLabels[filters.action] ?? filters.action}` });
+  if (filters.marketPhase) chips.push({ key: 'marketPhase', label: `${t('decisionSignals.marketPhase')}：${getDecisionSignalMarketPhaseLabel(filters.marketPhase, t)}` });
+  if (filters.sourceType) chips.push({ key: 'sourceType', label: `${t('decisionSignals.source')}：${getDecisionSignalSourceTypeLabel(filters.sourceType, t)}` });
+  if (filters.sourceReportId) chips.push({ key: 'sourceReportId', label: `${t('decisionSignals.sourceReportId')}：#${filters.sourceReportId}` });
+  if (filters.status) chips.push({ key: 'status', label: `${t('decisionSignals.status')}：${t(STATUS_LABEL_KEYS[filters.status])}` });
+  return chips;
+}
+
 function draftMatchesStockContext(draft: string, context: StockContext | null): context is StockContext {
   if (!context) return false;
   const normalizedDraft = draft.trim().toUpperCase();
@@ -667,6 +684,18 @@ const DecisionSignalsPage: React.FC = () => {
     setPage(1);
   };
 
+  const resetFilters = useCallback(() => {
+    setFilters(getInitialFilters());
+    setAppliedFilters(getInitialFilters());
+    setPage(1);
+  }, []);
+
+  const removeFilter = useCallback((key: keyof ListFilters) => {
+    setFilters((current) => ({ ...current, [key]: '' }));
+    setAppliedFilters((current) => ({ ...current, [key]: '' }));
+    setPage(1);
+  }, []);
+
   const resetLatestView = useCallback(() => {
     latestRequestIdRef.current += 1;
     setLatestItems([]);
@@ -839,6 +868,8 @@ const DecisionSignalsPage: React.FC = () => {
     reassessSourceReportId,
   ]);
 
+  const latestSectionRef = useRef<HTMLDivElement | null>(null);
+
   const applyStockContext = useCallback((nextContext: StockContext) => {
     const nextTimeline = buildNextTimelineFilters(
       timelineFilters,
@@ -852,6 +883,9 @@ const DecisionSignalsPage: React.FC = () => {
     setTimelineFilters(nextTimeline.filters);
     void loadLatestForContext(nextContext);
     void loadTimelineForContext(nextContext, nextTimeline.filters);
+    requestAnimationFrame(() => {
+      latestSectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    });
   }, [activeStockContext, loadLatestForContext, loadTimelineForContext, timelineFilters]);
 
   const handleStockSubmit = useCallback((
@@ -1007,7 +1041,7 @@ const DecisionSignalsPage: React.FC = () => {
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <select
-              className="input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={reassessProfile}
               onChange={(event) => setReassessProfile(event.target.value as DecisionProfile)}
               aria-label={t('decisionSignals.reassessProfile')}
@@ -1177,6 +1211,7 @@ const DecisionSignalsPage: React.FC = () => {
     ].filter(Boolean).join(' / ')
     : null;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const activeFilterChips = buildActiveFilterChips(appliedFilters, actionLabels, t);
 
   return (
     <AppPage>
@@ -1192,7 +1227,7 @@ const DecisionSignalsPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
-            <span className="sr-only">{t('decisionSignals.refresh')}</span>
+            <span>{t('decisionSignals.refresh')}</span>
           </button>
         </div>
 
@@ -1266,10 +1301,10 @@ const DecisionSignalsPage: React.FC = () => {
           ) : null}
         </Card>
 
-        <Card padding="md">
+        <Card title={t('decisionSignals.filter')} padding="md">
           <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-7" onSubmit={handleApplyFilters}>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={filters.market}
               onChange={(event) => setFilters((current) => ({ ...current, market: event.target.value as ListFilters['market'] }))}
               aria-label={t('decisionSignals.market')}
@@ -1280,14 +1315,14 @@ const DecisionSignalsPage: React.FC = () => {
               ))}
             </select>
             <input
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_INPUT_CLASS}
               value={filters.stockCode}
               onChange={(event) => setFilters((current) => ({ ...current, stockCode: event.target.value }))}
               placeholder={t('decisionSignals.stockCode')}
               aria-label={t('decisionSignals.stockCode')}
             />
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={filters.action}
               onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value as ListFilters['action'] }))}
               aria-label={t('decisionSignals.action')}
@@ -1298,7 +1333,7 @@ const DecisionSignalsPage: React.FC = () => {
               ))}
             </select>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={filters.marketPhase}
               onChange={(event) => setFilters((current) => ({ ...current, marketPhase: event.target.value as ListFilters['marketPhase'] }))}
               aria-label={t('decisionSignals.marketPhase')}
@@ -1309,7 +1344,7 @@ const DecisionSignalsPage: React.FC = () => {
               ))}
             </select>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={filters.sourceType}
               onChange={(event) => setFilters((current) => ({ ...current, sourceType: event.target.value as ListFilters['sourceType'] }))}
               aria-label={t('decisionSignals.source')}
@@ -1320,7 +1355,7 @@ const DecisionSignalsPage: React.FC = () => {
               ))}
             </select>
             <input
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_INPUT_CLASS}
               value={filters.sourceReportId}
               onChange={(event) => setFilters((current) => ({ ...current, sourceReportId: event.target.value }))}
               placeholder={t('decisionSignals.sourceReportId')}
@@ -1331,7 +1366,7 @@ const DecisionSignalsPage: React.FC = () => {
               type="number"
             />
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={filters.status}
               onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as ListFilters['status'] }))}
               aria-label={t('decisionSignals.status')}
@@ -1342,6 +1377,13 @@ const DecisionSignalsPage: React.FC = () => {
             <button type="submit" className="btn-primary inline-flex h-11 items-center justify-center gap-2">
               <Search className="h-4 w-4" />
               {t('decisionSignals.filter')}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+              onClick={resetFilters}
+            >
+              {t('decisionSignals.resetFilter')}
             </button>
           </form>
         </Card>
@@ -1400,6 +1442,7 @@ const DecisionSignalsPage: React.FC = () => {
           )}
         </Card>
 
+        <div ref={latestSectionRef}>
         <Card title={t('decisionSignals.latestTitle')} subtitle={t('decisionSignals.latestDescription')} padding="md">
           {!activeStockContext ? (
             <EmptyState
@@ -1432,11 +1475,12 @@ const DecisionSignalsPage: React.FC = () => {
             </div>
           ) : null}
         </Card>
+        </div>
 
         <Card title={t('decisionSignals.timelineTitle')} subtitle={t('decisionSignals.timelineDescription')} padding="md">
           <form className="grid gap-3 md:grid-cols-5" onSubmit={handleTimelineSearch}>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={timelineFilters.market}
               onChange={(event) => {
                 const market = event.target.value as TimelineFilters['market'];
@@ -1451,7 +1495,7 @@ const DecisionSignalsPage: React.FC = () => {
               ))}
             </select>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={timelineFilters.range}
               onChange={(event) => setTimelineFilters((current) => ({ ...current, range: event.target.value as TimelineRange }))}
               aria-label={t('decisionSignals.timelineRange')}
@@ -1461,7 +1505,7 @@ const DecisionSignalsPage: React.FC = () => {
               <option value="180d">{t('decisionSignals.timelineRange.180d')}</option>
             </select>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={timelineFilters.status}
               onChange={(event) => setTimelineFilters((current) => ({ ...current, status: event.target.value as TimelineStatusFilter }))}
               aria-label={t('decisionSignals.timelineStatus')}
@@ -1470,7 +1514,7 @@ const DecisionSignalsPage: React.FC = () => {
               <option value="active">{t('decisionSignals.timelineStatus.active')}</option>
             </select>
             <select
-              className="input-surface input-focus-glow h-11 rounded-xl border bg-transparent px-3 text-sm"
+              className={SELECT_CHEVRON_CLASS}
               value={timelineFilters.decisionProfile}
               onChange={(event) => setTimelineFilters((current) => ({
                 ...current,
@@ -1529,6 +1573,27 @@ const DecisionSignalsPage: React.FC = () => {
           {loading ? <span className="text-xs text-secondary-text">{t('common.loading')}...</span> : null}
         </div>
 
+        {activeFilterChips.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeFilterChips.map((chip) => (
+              <span key={chip.key} className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-elevated/40 px-2.5 py-1 text-xs text-secondary-text">
+                {chip.label}
+                <button
+                  type="button"
+                  onClick={() => removeFilter(chip.key)}
+                  className="text-secondary-text transition-colors hover:text-danger"
+                  aria-label={`${t('decisionSignals.resetFilter')} ${chip.label}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <button type="button" onClick={resetFilters} className="text-xs text-secondary-text underline hover:text-foreground">
+              {t('decisionSignals.resetFilter')}
+            </button>
+          </div>
+        ) : null}
+
         {!loading && items.length === 0 ? (
           <EmptyState
             title={t('decisionSignals.emptyTitle')}
@@ -1555,7 +1620,7 @@ const DecisionSignalsPage: React.FC = () => {
         isOpen={Boolean(selected)}
         onClose={() => setSelected(null)}
         title={t('decisionSignals.detailTitle')}
-        width="max-w-3xl"
+        width="max-w-4xl"
       >
         {selected ? (
           <div className="space-y-4">

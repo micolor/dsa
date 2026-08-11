@@ -1,5 +1,4 @@
 import type React from 'react';
-import { PanelRightOpen } from 'lucide-react';
 import { Badge, Card, JsonViewer } from '../common';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey } from '../../i18n/uiText';
@@ -114,6 +113,25 @@ function formatJsonish(value: unknown): string | null {
   }
 }
 
+function parseJsonStringArray(value: string): string[] | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[')) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string')) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function formatJsonArrayValue(value: string): string {
+  const items = parseJsonStringArray(value);
+  return items ? items.join('；') : value;
+}
+
 function asJsonViewerData(value: unknown): Record<string, unknown> | unknown[] | null {
   if (Array.isArray(value)) return value;
   if (value && typeof value === 'object') return value as Record<string, unknown>;
@@ -191,12 +209,26 @@ type SignalTextBlockProps = {
 const SignalTextBlock: React.FC<SignalTextBlockProps> = ({ label, value, tone = 'default', clamp = true }) => {
   const normalized = value?.trim();
   if (!normalized) return null;
+  const listItems = parseJsonStringArray(normalized);
   return (
     <div className={cn('rounded-xl border px-3 py-2.5', textToneClass[tone])}>
       <p className="text-[11px] font-medium text-current/80">{label}</p>
-      <p className={cn('mt-1 text-sm leading-5 text-current', clamp ? 'line-clamp-2' : 'whitespace-pre-wrap')}>
-        {normalized}
-      </p>
+      {listItems ? (
+        <div className={cn('mt-1.5', clamp ? 'max-h-[7.5rem] overflow-hidden' : '')}>
+          <ul className="space-y-1.5 text-sm leading-5 text-current">
+            {listItems.map((entry, index) => (
+              <li key={index} className="flex gap-2">
+                <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-current/60" aria-hidden="true" />
+                <span className="min-w-0">{entry}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className={cn('mt-1 text-sm leading-5 text-current', clamp ? 'line-clamp-2' : 'whitespace-pre-wrap')}>
+          {normalized}
+        </p>
+      )}
     </div>
   );
 };
@@ -286,20 +318,15 @@ export const DecisionSignalCard: React.FC<DecisionSignalCardProps> = ({ item, on
   }
 
   return (
-    <div className={className}>
+    <button
+      type="button"
+      onClick={() => onSelect?.(item)}
+      aria-label={t('decisionSignals.viewDetailsFor', { stock: item.stockName || item.stockCode })}
+      title={t('common.details')}
+      className={cn(className, 'cursor-pointer')}
+    >
       {content}
-      <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          onClick={() => onSelect?.(item)}
-          className="btn-secondary inline-flex items-center gap-1.5 !px-3 !py-1.5 !text-xs"
-          aria-label={t('decisionSignals.viewDetailsFor', { stock: item.stockName || item.stockCode })}
-        >
-          <PanelRightOpen className="h-3.5 w-3.5" />
-          {t('common.details')}
-        </button>
-      </div>
-    </div>
+    </button>
   );
 };
 
@@ -501,8 +528,8 @@ export const PortfolioSignalSummary: React.FC<PortfolioSignalSummaryProps> = ({ 
         <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
         {item.horizon ? <span className="text-[11px] text-secondary-text">{getDecisionSignalHorizonLabel(item.horizon, t)}</span> : null}
       </div>
-      {item.riskSummary ? <p className="mt-1 line-clamp-2 text-[11px] text-warning">{item.riskSummary}</p> : null}
-      {item.watchConditions ? <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">{item.watchConditions}</p> : null}
+      {item.riskSummary ? <p className="mt-1 line-clamp-2 text-[11px] text-warning">{formatJsonArrayValue(item.riskSummary)}</p> : null}
+      {item.watchConditions ? <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">{formatJsonArrayValue(item.watchConditions)}</p> : null}
     </div>
   );
 };

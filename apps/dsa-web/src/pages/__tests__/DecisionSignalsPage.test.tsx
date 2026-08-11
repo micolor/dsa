@@ -440,7 +440,7 @@ describe('DecisionSignalsPage', () => {
     expect(await screen.findByText('信号表现统计')).toBeInTheDocument();
     expect(screen.getByText('50%')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看 贵州茅台 AI 建议详情' })).toBeInTheDocument();
-    expect(screen.getByText('贵州茅台').closest('button')).toBeNull();
+    expect(screen.getByRole('button', { name: '查看 贵州茅台 AI 建议详情' })).toHaveTextContent('贵州茅台');
     expect(screen.getByText('放量下跌风险')).toBeInTheDocument();
     expect(screen.getByText(formattedCreatedAt)).toBeInTheDocument();
     expect(screen.getByText('当前统计为全局已复盘 outcome 口径，不等于当前可见信号数量，也不随当前股票过滤。')).toBeInTheDocument();
@@ -1190,7 +1190,8 @@ describe('DecisionSignalsPage', () => {
 
     expect(await screen.findByText('最近分析')).toBeInTheDocument();
     const candidateButtons = screen.getAllByRole('button').filter((button) => (
-      button.textContent?.includes('600519') || button.textContent?.includes('AAPL')
+      button.className.includes('rounded-full') &&
+      (button.textContent?.includes('600519') || button.textContent?.includes('AAPL'))
     ));
 
     expect(candidateButtons.filter((button) => button.textContent?.includes('600519'))).toHaveLength(2);

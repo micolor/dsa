@@ -23,7 +23,24 @@ export interface IndexLoadResult {
  *
  * @returns Index load result
  */
-export async function loadStockIndex(): Promise<IndexLoadResult> {
+let stockIndexPromise: Promise<IndexLoadResult> | null = null;
+let stockIndexCacheHour = -1;
+
+export function loadStockIndex(): Promise<IndexLoadResult> {
+  const hour = Math.floor(Date.now() / 3600000);
+  if (stockIndexPromise === null || stockIndexCacheHour !== hour) {
+    stockIndexCacheHour = hour;
+    stockIndexPromise = fetchStockIndexInternal().then((result) => {
+      if (result.error) {
+        stockIndexPromise = null;
+      }
+      return result;
+    });
+  }
+  return stockIndexPromise;
+}
+
+async function fetchStockIndexInternal(): Promise<IndexLoadResult> {
   try {
     // Add time parameter to bypass cache (in case the backend doesn't handle ETag/Cache-Control)
     const response = await fetch(`/stocks.index.json?_t=${Math.floor(Date.now() / 3600000)}`);

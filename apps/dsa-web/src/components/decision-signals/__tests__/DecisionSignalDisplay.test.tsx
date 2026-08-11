@@ -48,11 +48,11 @@ function renderCard(onSelect?: (item: DecisionSignalItem) => void) {
 }
 
 describe('DecisionSignalCard', () => {
-  it('uses a dedicated details button for interactive cards', () => {
+  it('makes the whole card clickable to open details for interactive cards', () => {
     const onSelect = vi.fn();
     renderCard(onSelect);
 
-    expect(screen.getByText('贵州茅台').closest('button')).toBeNull();
+    expect(screen.getByRole('button', { name: '查看 贵州茅台 AI 建议详情' })).toHaveTextContent('贵州茅台');
     expect(screen.getByText('72%')).toBeInTheDocument();
     expect(screen.getByText('风格: 进取')).toBeInTheDocument();
     expect(screen.getByText('1600 - 1620')).toBeInTheDocument();
