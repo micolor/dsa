@@ -68,6 +68,7 @@ describe('HistoryList', () => {
     );
 
     expect(screen.getByText('已选 1')).toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('买入 82')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /贵州茅台/i }));
@@ -93,6 +94,7 @@ describe('HistoryList', () => {
       />,
     );
 
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('回避 35')).toBeInTheDocument();
     expect(screen.queryByText('买入 35')).not.toBeInTheDocument();
   });
@@ -113,6 +115,7 @@ describe('HistoryList', () => {
       />,
     );
 
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('回避 28')).toBeInTheDocument();
     expect(screen.queryByText('买入 28')).not.toBeInTheDocument();
   });
@@ -133,6 +136,7 @@ describe('HistoryList', () => {
       />,
     );
 
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('持有 48')).toBeInTheDocument();
     expect(screen.queryByText('情绪 48')).not.toBeInTheDocument();
   });
@@ -153,6 +157,7 @@ describe('HistoryList', () => {
       />,
     );
 
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('情绪 28')).toBeInTheDocument();
     expect(screen.queryByText('buy 28')).not.toBeInTheDocument();
   });
@@ -191,8 +196,12 @@ describe('HistoryList', () => {
       />,
     );
 
+    const rows = screen.getAllByRole('button', { name: /600519 历史记录/ });
+    fireEvent.mouseEnter(rows[0]);
     expect(screen.getByText('情绪 28')).toBeInTheDocument();
+    fireEvent.mouseEnter(rows[1]);
     expect(screen.getByText('情绪 31')).toBeInTheDocument();
+    fireEvent.mouseEnter(rows[2]);
     expect(screen.getByText('情绪 33')).toBeInTheDocument();
     expect(screen.queryByText('回避 28')).not.toBeInTheDocument();
     expect(screen.queryByText('持有 31')).not.toBeInTheDocument();
@@ -224,7 +233,10 @@ describe('HistoryList', () => {
       />,
     );
 
+    const rows = screen.getAllByRole('button', { name: /600519 历史记录/ });
+    fireEvent.mouseEnter(rows[0]);
     expect(screen.getByText('情绪 32')).toBeInTheDocument();
+    fireEvent.mouseEnter(rows[1]);
     expect(screen.getByText('情绪 34')).toBeInTheDocument();
     expect(screen.queryByText('买入 32')).not.toBeInTheDocument();
     expect(screen.queryByText('卖出 34')).not.toBeInTheDocument();
@@ -246,6 +258,7 @@ describe('HistoryList', () => {
       />,
     );
 
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519 历史记录/ }));
     expect(screen.getByText('情绪 28')).toBeInTheDocument();
     expect(screen.queryByText('回避 28')).not.toBeInTheDocument();
     expect(screen.queryByText('预警 28')).not.toBeInTheDocument();

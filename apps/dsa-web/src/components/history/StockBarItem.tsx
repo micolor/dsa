@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Badge, ListItemRow } from '../common';
+import { Badge, ListItemRow, Tooltip } from '../common';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
@@ -37,6 +37,11 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
     t('history.sentiment'),
     actionLabels,
   );
+  const isWatch = item.action === 'watch' || (operationLabel != null && operationLabel === actionLabels.watch);
+  const sentimentSummary =
+    sentimentColor && operationLabel != null && sentimentScore !== null
+      ? `${operationLabel} ${sentimentScore}`
+      : undefined;
   const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, language)
     ?.replace('市场阶段: ', '')
     .replace('市场阶段：', '')
@@ -71,7 +76,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
         >
           {t('stockBar.market')}
         </Badge>
-      ) : sentimentColor ? (
+      ) : sentimentColor && isWatch ? (
         <Badge
           variant="default"
           size="sm"
@@ -121,26 +126,28 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   );
 
   return (
-    <ListItemRow
-      wrapperClassName="home-history-item w-full min-w-0 flex-1"
-      buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
-        isViewing ? 'home-history-item-selected' : ''
-      }`}
-      ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
-      onClick={() => onClick(item.id)}
-      leading={leading}
-      title={(
-        <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
-          {truncateStockName(stockName)}
-        </span>
-      )}
-      trailing={trailing}
-      onDelete={onDelete ? () => onDelete(item.stockCode) : undefined}
-      deleteAriaLabel={t('history.deleteRecord', { name: item.stockName || item.stockCode })}
-      deleteDisabled={isDeleting}
-      meta={meta}
-      metaTestId="history-card-meta"
-      actionsTestId="history-card-actions"
-    />
+    <Tooltip content={isWatch ? undefined : sentimentSummary} className="block w-full">
+      <ListItemRow
+        wrapperClassName="home-history-item w-full min-w-0 flex-1"
+        buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
+          isViewing ? 'home-history-item-selected' : ''
+        }`}
+        ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
+        onClick={() => onClick(item.id)}
+        leading={leading}
+        title={(
+          <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
+            {truncateStockName(stockName)}
+          </span>
+        )}
+        trailing={trailing}
+        onDelete={onDelete ? () => onDelete(item.stockCode) : undefined}
+        deleteAriaLabel={t('history.deleteRecord', { name: item.stockName || item.stockCode })}
+        deleteDisabled={isDeleting}
+        meta={meta}
+        metaTestId="history-card-meta"
+        actionsTestId="history-card-actions"
+      />
+    </Tooltip>
   );
 };

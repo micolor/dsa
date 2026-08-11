@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Badge, ListItemRow } from '../common';
+import { Badge, ListItemRow, Tooltip } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
@@ -36,6 +36,11 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
     t('history.sentiment'),
     actionLabels,
   );
+  const isWatch = item.action === 'watch' || (operationLabel != null && operationLabel === actionLabels.watch);
+  const sentimentSummary =
+    sentimentColor && operationLabel != null && item.sentimentScore !== undefined
+      ? `${operationLabel} ${item.sentimentScore}`
+      : undefined;
   const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, language)
     ?.replace('市场阶段: ', '')
     .replace('市场阶段：', '')
@@ -72,45 +77,47 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
           className="mac-checkbox cursor-pointer"
         />
       </div>
-      <ListItemRow
-        wrapperClassName="home-history-item w-full min-w-0 flex-1"
-        buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
-          isViewing ? 'home-history-item-selected' : ''
-        }`}
-        ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
-        onClick={() => onClick(item.id)}
-        leading={sentimentColor ? (
-          <div
-            className="w-1 h-8 rounded-full flex-shrink-0"
-            style={{
-              backgroundColor: sentimentColor,
-              boxShadow: `0 0 10px ${sentimentColor}40`,
-            }}
-          />
-        ) : undefined}
-        title={(
-          <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
-            {truncateStockName(stockName)}
-          </span>
-        )}
-        trailing={sentimentColor ? (
-          <Badge
-            variant="default"
-            size="sm"
-            className="home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200"
-            style={{
-              color: sentimentColor,
-              borderColor: `${sentimentColor}30`,
-              backgroundColor: `${sentimentColor}10`,
-            }}
-          >
-            {operationLabel} {item.sentimentScore}
-          </Badge>
-        ) : undefined}
-        meta={meta}
-        metaTestId="history-card-meta"
-        actionsTestId="history-card-actions"
-      />
+      <Tooltip content={isWatch ? undefined : sentimentSummary} className="block min-w-0 flex-1">
+        <ListItemRow
+          wrapperClassName="home-history-item w-full min-w-0 flex-1"
+          buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
+            isViewing ? 'home-history-item-selected' : ''
+          }`}
+          ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
+          onClick={() => onClick(item.id)}
+          leading={sentimentColor ? (
+            <div
+              className="w-1 h-8 rounded-full flex-shrink-0"
+              style={{
+                backgroundColor: sentimentColor,
+                boxShadow: `0 0 10px ${sentimentColor}40`,
+              }}
+            />
+          ) : undefined}
+          title={(
+            <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
+              {truncateStockName(stockName)}
+            </span>
+          )}
+          trailing={sentimentColor && isWatch ? (
+            <Badge
+              variant="default"
+              size="sm"
+              className="home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200"
+              style={{
+                color: sentimentColor,
+                borderColor: `${sentimentColor}30`,
+                backgroundColor: `${sentimentColor}10`,
+              }}
+            >
+              {operationLabel} {item.sentimentScore}
+            </Badge>
+          ) : undefined}
+          meta={meta}
+          metaTestId="history-card-meta"
+          actionsTestId="history-card-actions"
+        />
+      </Tooltip>
     </div>
   );
 };

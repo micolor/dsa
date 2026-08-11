@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StockBarItemComponent } from '../StockBarItem';
 import type { StockBarItem } from '../../../types/analysis';
@@ -61,8 +61,11 @@ describe('StockBarItemComponent', () => {
     );
 
     const actions = screen.getByTestId('history-card-actions');
-    expect(within(actions).getByText('回避 35')).toBeInTheDocument();
+    const row = screen.getByRole('button', { name: /600519/ });
+    expect(within(actions).queryByText('回避 35')).not.toBeInTheDocument();
     expect(within(actions).queryByText('买入 35')).not.toBeInTheDocument();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByText('回避 35')).toBeInTheDocument();
   });
 
   it('uses the unified legacy fallback for negated buy advice without structured action', () => {
@@ -81,8 +84,11 @@ describe('StockBarItemComponent', () => {
     );
 
     const actions = screen.getByTestId('history-card-actions');
-    expect(within(actions).getByText('回避 28')).toBeInTheDocument();
+    const row = screen.getByRole('button', { name: /600519/ });
+    expect(within(actions).queryByText('回避 28')).not.toBeInTheDocument();
     expect(within(actions).queryByText('买入 28')).not.toBeInTheDocument();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByText('回避 28')).toBeInTheDocument();
   });
 
   it('uses the unified legacy fallback for backend-aligned hold advice without structured action', () => {
@@ -101,7 +107,10 @@ describe('StockBarItemComponent', () => {
     );
 
     const actions = screen.getByTestId('history-card-actions');
-    expect(within(actions).getByText('持有 48')).toBeInTheDocument();
+    const row = screen.getByRole('button', { name: /600519/ });
+    expect(within(actions).queryByText('持有 48')).not.toBeInTheDocument();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByText('持有 48')).toBeInTheDocument();
   });
 
   it('does not render ambiguous English legacy advice as a buy action', () => {
@@ -120,8 +129,11 @@ describe('StockBarItemComponent', () => {
     );
 
     const actions = screen.getByTestId('history-card-actions');
+    const row = screen.getByRole('button', { name: /600519/ });
     expect(within(actions).queryByText('buy 28')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/28/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/28/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByText('情绪 28')).toBeInTheDocument();
   });
 
   it('does not render financial compound English advice as an action badge', () => {
@@ -141,7 +153,9 @@ describe('StockBarItemComponent', () => {
 
     let actions = screen.getByTestId('history-card-actions');
     expect(within(actions).queryByText('持有 28')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/28/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/28/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519/ }));
+    expect(screen.getByText('情绪 28')).toBeInTheDocument();
 
     rerender(
       <StockBarItemComponent
@@ -159,7 +173,9 @@ describe('StockBarItemComponent', () => {
 
     actions = screen.getByTestId('history-card-actions');
     expect(within(actions).queryByText('卖出 31')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/31/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/31/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519/ }));
+    expect(screen.getByText('情绪 31')).toBeInTheDocument();
   });
 
   it('does not render Chinese financial context legacy advice as an action badge', () => {
@@ -179,7 +195,9 @@ describe('StockBarItemComponent', () => {
 
     let actions = screen.getByTestId('history-card-actions');
     expect(within(actions).queryByText('买入 32')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/32/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/32/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519/ }));
+    expect(screen.getByText('情绪 32')).toBeInTheDocument();
 
     rerender(
       <StockBarItemComponent
@@ -197,7 +215,9 @@ describe('StockBarItemComponent', () => {
 
     actions = screen.getByTestId('history-card-actions');
     expect(within(actions).queryByText('卖出 34')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/34/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/34/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /600519/ }));
+    expect(screen.getByText('情绪 34')).toBeInTheDocument();
   });
 
   it('does not render multi-guard legacy advice as an action badge', () => {
@@ -216,8 +236,11 @@ describe('StockBarItemComponent', () => {
     );
 
     const actions = screen.getByTestId('history-card-actions');
+    const row = screen.getByRole('button', { name: /600519/ });
     expect(within(actions).queryByText('回避 28')).not.toBeInTheDocument();
     expect(within(actions).queryByText('预警 28')).not.toBeInTheDocument();
-    expect(within(actions).getByText(/28/)).toBeInTheDocument();
+    expect(within(actions).queryByText(/28/)).not.toBeInTheDocument();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByText('情绪 28')).toBeInTheDocument();
   });
 });
