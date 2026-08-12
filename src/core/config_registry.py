@@ -3475,10 +3475,10 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_sensitive": False,
         "is_required": False,
         "is_editable": True,
-        "default_value": "green_up",
+        "default_value": "red_up",
         "options": [
-            {"label": "Green Up / Red Down", "value": "green_up"},
             {"label": "Red Up / Green Down", "value": "red_up"},
+            {"label": "Green Up / Red Down", "value": "green_up"},
         ],
         "validation": {"enum": ["green_up", "red_up"]},
         "display_order": 49,

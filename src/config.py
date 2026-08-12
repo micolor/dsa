@@ -1196,7 +1196,7 @@ class Config:
     daily_market_context_enabled: bool = True   # 是否将大盘环境摘要用于个股分析 Prompt 与保守护栏
     # 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、jp(日股)、kr(韩股)、both(全部市场)
     market_review_region: str = "cn"
-    market_review_color_scheme: str = "green_up"
+    market_review_color_scheme: str = "red_up"
     # 交易日检查：默认启用，非交易日跳过执行；设为 false 或 --force-run 可强制执行（Issue #373）
     trading_day_check_enabled: bool = True
 
@@ -2157,7 +2157,7 @@ class Config:
                 os.getenv('MARKET_REVIEW_REGION', 'cn')
             ),
             market_review_color_scheme=cls._parse_market_review_color_scheme(
-                os.getenv('MARKET_REVIEW_COLOR_SCHEME', 'green_up')
+                os.getenv('MARKET_REVIEW_COLOR_SCHEME', 'red_up')
             ),
             trading_day_check_enabled=os.getenv('TRADING_DAY_CHECK_ENABLED', 'true').lower() != 'false',
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
@@ -2892,11 +2892,11 @@ class Config:
     def _parse_market_review_color_scheme(cls, value: str) -> str:
         """Parse market-review index change color scheme."""
         import logging
-        v = (value or 'green_up').strip().lower().replace('-', '_')
+        v = (value or 'red_up').strip().lower().replace('-', '_')
         if v in ('green_up', 'red_up'):
             return v
         logging.getLogger(__name__).warning(
-            "MARKET_REVIEW_COLOR_SCHEME 配置值 '%s' 无效，已回退为默认值 'green_up'（合法值：green_up / red_up）",
+            "MARKET_REVIEW_COLOR_SCHEME 配置值 '%s' 无效，已回退为默认值 'red_up'（合法值：green_up / red_up）",
             value,
         )
         return 'green_up'

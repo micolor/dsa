@@ -623,7 +623,7 @@ describe('PortfolioPage FX refresh', () => {
 
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
-    expect(hkRowCells.at(-3)).toHaveClass('text-success');
+    expect(hkRowCells.at(-3)).toHaveClass('text-danger');
     expect(aaplRowCells.at(-3)).toHaveClass('text-secondary-text');
   });
 

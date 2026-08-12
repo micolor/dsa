@@ -28,6 +28,7 @@ export const backtestApi = {
     const response = await apiClient.post<Record<string, unknown>>(
       '/api/v1/backtest/run',
       requestData,
+      { timeout: 300000 },
     );
     return toCamelCase<BacktestRunResponse>(response.data);
   },

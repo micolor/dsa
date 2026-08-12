@@ -131,6 +131,7 @@ function StockAutocompleteInner({
     highlightPrevious,
     highlightNext,
     close,
+    suppressNextOpen,
     // reset,
     isComposing,
     setIsComposing,
@@ -225,6 +226,9 @@ function StockAutocompleteInner({
           if (keepClosedAfterSelect) suppressReopenRef.current = true;
           onChange(selected.displayCode);
           closeSuggestions();
+          if (keepClosedAfterSelect) {
+            suppressNextOpen();
+          }
           onSubmit(selected.canonicalCode, selected.nameZh, 'autocomplete', {
             market: selected.market,
             displayCode: selected.displayCode,
@@ -325,6 +329,9 @@ function StockAutocompleteInner({
             onChange(s.displayCode);
             // Close dropdown list
             closeSuggestions();
+            if (keepClosedAfterSelect) {
+              suppressNextOpen();
+            }
             // Submit analysis
             onSubmit(s.canonicalCode, s.nameZh, 'autocomplete', {
               market: s.market,

@@ -43,7 +43,7 @@ export function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
 
-export function formatPriceDecimal(value: number, maxDecimals = 4): string {
+export function formatPriceDecimal(value: number | undefined | null, maxDecimals = 4): string {
   if (value == null || Number.isNaN(value)) return '--';
   const fixed = value.toFixed(maxDecimals);
   // Trim trailing zeros (and a dangling decimal point) so integer prices/costs
