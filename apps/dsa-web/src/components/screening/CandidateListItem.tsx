@@ -36,10 +36,10 @@ const getScoreColor = (score: number | string | null | undefined): string => {
   return 'hsl(37 92% 50%)';
 };
 
-/** 涨跌幅按 app 惯例着色：正→success（绿），负→danger（红），零→次级文本。 */
+/** 涨跌幅着色：正→danger（红），负→success（绿），零→次级文本。 */
 const getChangeClass = (value: number): string => {
-  if (value > 0) return 'text-success';
-  if (value < 0) return 'text-danger';
+  if (value > 0) return 'text-danger';
+  if (value < 0) return 'text-success';
   return 'text-secondary-text';
 };
 

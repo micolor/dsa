@@ -5,6 +5,7 @@ import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { ApiErrorAlert, Card, Badge, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
+import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
 import {
@@ -23,12 +24,10 @@ import type {
   BacktestPhaseFilter,
 } from '../types/backtest';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
-import { SELECT_INPUT_CLASS } from '../utils/formClasses';
+import { SELECT_CHEVRON_CLASS, SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { getMarketPhaseSummaryLabel } from '../utils/marketPhase';
 
-const BACKTEST_INPUT_CLASS = `${SELECT_INPUT_CLASS} w-full`;
-const BACKTEST_COMPACT_INPUT_CLASS =
-  'input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 py-2 text-xs transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 select-input-chevron';
+const BACKTEST_COMPACT_INPUT_CLASS = `${SELECT_INPUT_CLASS} !h-10 text-center`;
 type BacktestText = (typeof BACKTEST_TEXT)[UiLanguage];
 
 // ============ Helpers ============
@@ -108,9 +107,9 @@ function actualMovementBadge(movement: string | null | undefined, language: UiLa
   const labels = BACKTEST_MOVEMENT_LABELS[language];
   switch (movement) {
     case 'up':
-      return <Badge variant="success">{labels.up}</Badge>;
+      return <Badge variant="danger">{labels.up}</Badge>;
     case 'down':
-      return <Badge variant="danger">{labels.down}</Badge>;
+      return <Badge variant="success">{labels.down}</Badge>;
     case 'flat':
       return <Badge variant="warning">{labels.flat}</Badge>;
     default:
@@ -175,10 +174,7 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string; la
   const text = BACKTEST_TEXT[language];
   const phaseText = phaseBreakdownText(metrics, language);
   return (
-    <Card variant="gradient" padding="md" className="animate-fade-in">
-      <div className="mb-3">
-        <span className="label-uppercase">{title}</span>
-      </div>
+    <Card variant="gradient" padding="md" title={title} className="animate-fade-in">
       <MetricRow label={text.directionAccuracy} value={pct(metrics.directionAccuracyPct)} accent />
       <MetricRow label={text.winRate} value={pct(metrics.winRatePct)} accent />
       <MetricRow label={text.avgSimulatedReturn} value={pct(metrics.avgSimulatedReturnPct)} />
@@ -467,14 +463,13 @@ const BacktestPage: React.FC = () => {
       <header className="flex-shrink-0 border-b border-border/40 px-3 py-3 sm:px-4">
         <div className="flex max-w-5xl flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-[1_1_220px]">
-            <input
-              type="text"
+            <StockAutocomplete
               value={codeFilter}
-              onChange={(e) => setCodeFilter(e.target.value.toUpperCase())}
-              onKeyDown={handleKeyDown}
+              onChange={(v) => setCodeFilter(v.toUpperCase())}
+              onSubmit={() => handleFilter()}
               placeholder={text.codePlaceholder}
+              ariaLabel={text.codePlaceholder}
               disabled={isRunning}
-              className={`${BACKTEST_INPUT_CLASS}${codeFilter ? ' pr-10' : ''}`}
             />
             {codeFilter ? (
               <button
@@ -491,7 +486,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleFilter}
             disabled={isLoadingResults}
-            className="btn-secondary flex items-center gap-1.5 whitespace-nowrap"
+            className="btn-secondary flex !h-10 items-center gap-1.5 whitespace-nowrap"
           >
             {isLoadingResults ? (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -517,7 +512,7 @@ const BacktestPage: React.FC = () => {
               value={phaseFilter}
               onChange={(e) => setPhaseFilter(e.target.value as BacktestPhaseFilter)}
               disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-28`}
+              className={`${SELECT_CHEVRON_CLASS} !h-10 w-28`}
             >
               {phaseFilterOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -553,7 +548,7 @@ const BacktestPage: React.FC = () => {
             onClick={handleShowNextDay}
             aria-pressed={isNextDayValidation}
             disabled={isLoadingResults || isLoadingPerf}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
             }`}
           >
@@ -564,7 +559,7 @@ const BacktestPage: React.FC = () => {
             onClick={() => setForceRerun(!forceRerun)}
             aria-pressed={forceRerun}
             disabled={isRunning}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               forceRerun ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
             }`}
           >
@@ -574,7 +569,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleRun}
             disabled={isRunning}
-            className="btn-primary flex items-center gap-1.5 whitespace-nowrap"
+            className="btn-primary flex !h-10 items-center gap-1.5 whitespace-nowrap !px-4"
           >
             {isRunning ? (
               <>
@@ -605,25 +600,25 @@ const BacktestPage: React.FC = () => {
       </header>
 
       {/* Main content */}
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
-        {/* Performance summary */}
-        <div className="grid shrink-0 gap-3 lg:grid-cols-2">
+      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 lg:flex-row">
+        {/* Left sidebar - Performance */}
+        <aside className="flex max-h-[38vh] flex-col gap-3 overflow-y-auto lg:max-h-none lg:w-72 lg:flex-shrink-0">
           {isLoadingPerf ? (
             <Loading className="py-8" />
-          ) : overallPerf ? (
+          ) : overallPerf && overallPerf.completedCount > 0 ? (
             <PerformanceCard metrics={overallPerf} title={text.overallPerformance} language={language} />
           ) : (
             <EmptyState
               title={text.noMetricsTitle}
               description={text.noMetricsDescription}
-              className="h-full min-h-[12rem] border-dashed bg-card/45 shadow-none"
+              className="flex h-full min-h-[12rem] flex-col items-center justify-center border-dashed bg-card/45 shadow-none"
             />
           )}
 
           {stockPerf && (
             <PerformanceCard metrics={stockPerf} title={`${stockPerf.code || codeFilter}`} language={language} />
           )}
-        </div>
+        </aside>
 
         {/* Results table */}
         <section className="min-h-0 flex-1 overflow-y-auto">
@@ -636,7 +631,7 @@ const BacktestPage: React.FC = () => {
             <EmptyState
               title={text.noResultsTitle}
               description={text.noResultsDescription}
-              className="border-none bg-transparent py-6 shadow-none"
+              className="flex h-full min-h-[16rem] flex-col items-center justify-center border-dashed bg-card/45 shadow-none"
               icon={(
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -644,11 +639,10 @@ const BacktestPage: React.FC = () => {
               )}
             />
           ) : (
-            <div className="animate-fade-in">
+            <Card title={isNextDayValidation ? text.nextDayValidation : text.resultSet} padding="md" className="animate-fade-in">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="label-uppercase">{isNextDayValidation ? text.nextDayValidation : text.resultSet}</span>
-                  <p className="mt-0.5 truncate text-xs text-secondary-text">
+                  <p className="truncate text-xs text-secondary-text">
                     {codeFilter.trim() ? formatUiText(text.filteredStock, { code: codeFilter.trim() }) : text.allStocks}
                     {evalDays ? ` · ${formatUiText(text.dayWindow, { days: evalDays })}` : ''}
                     {phaseFilter !== 'all' ? ` · ${phaseFilterOptions.find((item) => item.value === phaseFilter)?.label ?? phaseFilter}` : ''}
@@ -733,7 +727,7 @@ const BacktestPage: React.FC = () => {
                               {actualMovementBadge(row.actualMovement, language)}
                               <span className={
                                 row.actualReturnPct != null
-                                  ? row.actualReturnPct > 0 ? 'text-success' : row.actualReturnPct < 0 ? 'text-danger' : 'text-secondary-text'
+                                  ? row.actualReturnPct > 0 ? 'text-danger' : row.actualReturnPct < 0 ? 'text-success' : 'text-secondary-text'
                                   : 'text-muted-text'
                               }>
                                 {pct(row.actualReturnPct)}
@@ -770,7 +764,7 @@ const BacktestPage: React.FC = () => {
               <p className="text-xs text-muted-text text-center mt-2">
                 {formatUiText(text.totalPage, { total: totalResults, page: currentPage, pages: Math.max(totalPages, 1) })}
               </p>
-            </div>
+            </Card>
           )}
         </section>
       </main>
