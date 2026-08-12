@@ -174,7 +174,7 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string; la
   const text = BACKTEST_TEXT[language];
   const phaseText = phaseBreakdownText(metrics, language);
   return (
-    <Card variant="gradient" padding="md" title={title} className="animate-fade-in">
+    <Card padding="md" title={title} className="animate-fade-in">
       <MetricRow label={text.directionAccuracy} value={pct(metrics.directionAccuracyPct)} accent />
       <MetricRow label={text.winRate} value={pct(metrics.winRatePct)} accent />
       <MetricRow label={text.avgSimulatedReturn} value={pct(metrics.avgSimulatedReturnPct)} />
