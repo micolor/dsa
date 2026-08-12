@@ -30,6 +30,10 @@ export interface StockAutocompleteProps {
     source?: 'manual' | 'autocomplete',
     metadata?: { market?: Market; displayCode?: string },
   ) => void;
+  /** When provided, pressing Enter with no suggestion selected triggers this instead of onSubmit (e.g. submit the surrounding form). */
+  onEnterSubmit?: () => void;
+  /** When true, the dropdown stays closed after a suggestion is selected (prevents a value-change from re-opening it). */
+  keepClosedAfterSelect?: boolean;
   /** Whether disabled */
   disabled?: boolean;
   /** Placeholder text */
@@ -44,6 +48,7 @@ function FallbackInput({
   value,
   onChange,
   onSubmit,
+  onEnterSubmit,
   disabled = false,
   placeholder = '输入股票代码或名称',
   ariaLabel,
@@ -58,7 +63,8 @@ function FallbackInput({
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !disabled && value) {
           e.preventDefault();
-          onSubmit(value);
+          if (onEnterSubmit) onEnterSubmit();
+          else onSubmit(value);
         }
       }}
       placeholder={placeholder}
@@ -107,6 +113,8 @@ function StockAutocompleteInner({
   value,
   onChange,
   onSubmit,
+  onEnterSubmit,
+  keepClosedAfterSelect = false,
   disabled = false,
   placeholder = '输入股票代码或名称',
   ariaLabel,
@@ -133,6 +141,7 @@ function StockAutocompleteInner({
   const inputRef = useRef<HTMLInputElement>(null);
   const prevValueRef = useRef(value);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const suppressReopenRef = useRef(false);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number; width: string } | null>(null);
 
   const updateDropdownPosition = () => {
@@ -157,8 +166,13 @@ function StockAutocompleteInner({
   // Sync external value with internal query (only when value truly changes)
   useEffect(() => {
     if (prevValueRef.current !== value) {
-      setQuery(value);
       prevValueRef.current = value;
+      if (suppressReopenRef.current) {
+        // The change came from a suggestion selection; keep the dropdown closed.
+        suppressReopenRef.current = false;
+        return;
+      }
+      setQuery(value);
     }
   }, [value, setQuery]);
 
@@ -208,12 +222,16 @@ function StockAutocompleteInner({
         if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
           // Select highlighted item
           const selected = suggestions[highlightedIndex];
+          if (keepClosedAfterSelect) suppressReopenRef.current = true;
           onChange(selected.displayCode);
           closeSuggestions();
           onSubmit(selected.canonicalCode, selected.nameZh, 'autocomplete', {
             market: selected.market,
             displayCode: selected.displayCode,
           });
+        } else if (onEnterSubmit) {
+          // No suggestion selected: let the caller decide (e.g. submit the surrounding form)
+          onEnterSubmit();
         } else {
           // Submit directly
           onSubmit(value);
@@ -247,6 +265,7 @@ function StockAutocompleteInner({
         value={value}
         onChange={onChange}
         onSubmit={onSubmit}
+        onEnterSubmit={onEnterSubmit}
         disabled={disabled}
         placeholder={placeholder}
         ariaLabel={ariaLabel}
@@ -300,6 +319,8 @@ function StockAutocompleteInner({
           suggestions={suggestions}
           highlightedIndex={highlightedIndex}
           onSelect={(s) => {
+            // The change comes from a selection; keep the dropdown closed when requested.
+            if (keepClosedAfterSelect) suppressReopenRef.current = true;
             // Update external value (shown in input box)
             onChange(s.displayCode);
             // Close dropdown list

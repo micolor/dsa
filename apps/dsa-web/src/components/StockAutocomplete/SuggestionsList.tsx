@@ -34,7 +34,7 @@ export function SuggestionsList({
   return (
     <ul
       id="suggestions-list"
-      className="z-[100] border-x border-b rounded-b-lg rounded-t-none max-h-60 overflow-auto"
+      className="z-[160] border-x border-b rounded-b-lg rounded-t-none max-h-60 overflow-auto"
       style={{
         ...style,
         backgroundColor: 'hsl(var(--card) / 0.85)',
