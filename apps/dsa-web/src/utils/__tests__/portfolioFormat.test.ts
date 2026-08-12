@@ -5,6 +5,7 @@ import {
   formatMoney,
   formatPositionMoney,
   formatPositionPrice,
+  formatPriceDecimal,
   formatSignedPct,
   getCsvCommitVariant,
   getCsvParseVariant,
@@ -46,6 +47,14 @@ describe('portfolioFormat', () => {
     expect(formatPositionPrice(missingPosition)).toBe('--');
     expect(formatPositionMoney(123, missingPosition)).toBe('--');
     expect(getPositionPriceLabel(missingPosition)).toBe('缺价');
+  });
+
+  it('trims noisy trailing zeros in prices, costs and quantities', () => {
+    expect(formatPriceDecimal(100, 2)).toBe('100');
+    expect(formatPriceDecimal(100.5, 2)).toBe('100.5');
+    expect(formatPriceDecimal(100.25, 2)).toBe('100.25');
+    expect(formatPriceDecimal(321.12345, 4)).toBe('321.1234');
+    expect(formatPriceDecimal(Number.NaN)).toBe('--');
   });
 
   it('formats broker labels and CSV result variants', () => {

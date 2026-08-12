@@ -522,14 +522,20 @@ export const PortfolioSignalSummary: React.FC<PortfolioSignalSummaryProps> = ({ 
     return <span className="text-xs text-muted-text">{t('decisionSignals.portfolioEmpty')}</span>;
   }
   const actionLabel = getActionLabel(item, t);
+  const horizonLabel = item.horizon ? getDecisionSignalHorizonLabel(item.horizon, t) : null;
+  const riskText = item.riskSummary ? formatJsonArrayValue(item.riskSummary) : null;
+  const watchText = item.watchConditions ? formatJsonArrayValue(item.watchConditions) : null;
+  // Full text for the native tooltip: line-clamped rows truncate on screen, but
+  // hovering the cell surfaces the complete advice via `title`.
+  const fullText = [actionLabel, horizonLabel, riskText, watchText].filter(Boolean).join('\n');
   return (
-    <div className="min-w-[11rem] max-w-[18rem] text-left">
+    <div className="min-w-[8rem] max-w-[13rem] text-left" title={fullText}>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
-        {item.horizon ? <span className="text-[11px] text-secondary-text">{getDecisionSignalHorizonLabel(item.horizon, t)}</span> : null}
+        {horizonLabel ? <span className="text-[11px] text-secondary-text">{horizonLabel}</span> : null}
       </div>
-      {item.riskSummary ? <p className="mt-1 line-clamp-2 text-[11px] text-warning">{formatJsonArrayValue(item.riskSummary)}</p> : null}
-      {item.watchConditions ? <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">{formatJsonArrayValue(item.watchConditions)}</p> : null}
+      {riskText ? <p className="mt-1 line-clamp-2 text-[11px] text-warning">{riskText}</p> : null}
+      {watchText ? <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">{watchText}</p> : null}
     </div>
   );
 };

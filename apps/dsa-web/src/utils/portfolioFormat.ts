@@ -43,9 +43,17 @@ export function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
 
+export function formatPriceDecimal(value: number, maxDecimals = 4): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  const fixed = value.toFixed(maxDecimals);
+  // Trim trailing zeros (and a dangling decimal point) so integer prices/costs
+  // like 100.0000 read as "100" instead of noisy precision.
+  return fixed.replace(/\.?0+$/, '');
+}
+
 export function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
-  return row.lastPrice.toFixed(4);
+  return formatPriceDecimal(row.lastPrice, 4);
 }
 
 export function formatPositionMoney(value: number, row: PortfolioPositionItem): string {
