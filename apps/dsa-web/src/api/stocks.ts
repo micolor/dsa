@@ -1,4 +1,5 @@
 import apiClient from './index';
+import { toCamelCase } from './utils';
 
 export type ExtractItem = {
   code?: string | null;
@@ -50,5 +51,10 @@ export const stocksApi = {
       return { codes: data.codes ?? [], items: data.items };
     }
     throw new Error('请提供文件或粘贴文本');
+  },
+
+  async getQuote(code: string): Promise<{ currentPrice: number }> {
+    const response = await apiClient.get(`/api/v1/stocks/${encodeURIComponent(code)}/quote`);
+    return toCamelCase<{ currentPrice: number }>(response.data);
   },
 };

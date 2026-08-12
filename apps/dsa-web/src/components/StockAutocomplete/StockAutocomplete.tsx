@@ -32,6 +32,10 @@ export interface StockAutocompleteProps {
   ) => void;
   /** Whether disabled */
   disabled?: boolean;
+  /** Fired on Enter in addition to the normal submit */
+  onEnterSubmit?: () => void;
+  /** Keep the dropdown closed after selecting a suggestion */
+  keepClosedAfterSelect?: boolean;
   /** Placeholder text */
   placeholder?: string;
   /** Accessible label */
@@ -44,6 +48,7 @@ function FallbackInput({
   value,
   onChange,
   onSubmit,
+  onEnterSubmit,
   disabled = false,
   placeholder = '输入股票代码或名称',
   ariaLabel,
@@ -59,6 +64,7 @@ function FallbackInput({
         if (e.key === 'Enter' && !disabled && value) {
           e.preventDefault();
           onSubmit(value);
+          onEnterSubmit?.();
         }
       }}
       placeholder={placeholder}
@@ -107,6 +113,8 @@ function StockAutocompleteInner({
   value,
   onChange,
   onSubmit,
+  onEnterSubmit,
+  keepClosedAfterSelect = false,
   disabled = false,
   placeholder = '输入股票代码或名称',
   ariaLabel,
@@ -123,6 +131,7 @@ function StockAutocompleteInner({
     highlightPrevious,
     highlightNext,
     close,
+    suppressNextOpen,
     // reset,
     isComposing,
     setIsComposing,
@@ -205,11 +214,15 @@ function StockAutocompleteInner({
         break;
       case 'Enter':
         e.preventDefault();
+        onEnterSubmit?.();
         if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
           // Select highlighted item
           const selected = suggestions[highlightedIndex];
           onChange(selected.displayCode);
           closeSuggestions();
+          if (keepClosedAfterSelect) {
+            suppressNextOpen();
+          }
           onSubmit(selected.canonicalCode, selected.nameZh, 'autocomplete', {
             market: selected.market,
             displayCode: selected.displayCode,
@@ -247,6 +260,7 @@ function StockAutocompleteInner({
         value={value}
         onChange={onChange}
         onSubmit={onSubmit}
+        onEnterSubmit={onEnterSubmit}
         disabled={disabled}
         placeholder={placeholder}
         ariaLabel={ariaLabel}
@@ -304,6 +318,9 @@ function StockAutocompleteInner({
             onChange(s.displayCode);
             // Close dropdown list
             closeSuggestions();
+            if (keepClosedAfterSelect) {
+              suppressNextOpen();
+            }
             // Submit analysis
             onSubmit(s.canonicalCode, s.nameZh, 'autocomplete', {
               market: s.market,

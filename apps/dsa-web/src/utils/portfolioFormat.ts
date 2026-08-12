@@ -39,13 +39,18 @@ export function formatSignedPct(value: number | undefined | null): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+export function formatPriceDecimal(value: number | undefined | null, digits: number): string {
+  if (value === undefined || value === null || Number.isNaN(value)) return '--';
+  return value.toFixed(digits);
+}
+
 export function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
 
 export function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
-  return row.lastPrice.toFixed(4);
+  return row.lastPrice.toFixed(4).replace(/\.?0+$/, '');
 }
 
 export function formatPositionMoney(value: number, row: PortfolioPositionItem): string {

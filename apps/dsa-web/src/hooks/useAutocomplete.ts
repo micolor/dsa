@@ -39,6 +39,8 @@ export interface UseAutocompleteResult {
   handleSelect: (suggestion: StockSuggestion) => void;
   /** Close suggestions list */
   close: () => void;
+  /** Suppress the next search-triggered open */
+  suppressNextOpen: () => void;
   /** Reset state */
   reset: () => void;
   /** Whether IME is composing */
@@ -78,6 +80,8 @@ export function useAutocomplete(
 
   // Use ref to store debounce timer
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Suppress the next search-triggered open (used by keepClosedAfterSelect)
+  const suppressOpenRef = useRef(false);
 
   // Search function (debounced)
   const search = useCallback((q: string) => {
@@ -110,6 +114,10 @@ export function useAutocomplete(
 
   // Input handling (with debounce)
   const handleInputChange = useCallback((value: string) => {
+    if (suppressOpenRef.current) {
+      suppressOpenRef.current = false;
+      return;
+    }
     setQuery(value);
 
     // Clear previous timer
@@ -157,6 +165,11 @@ export function useAutocomplete(
     setHighlightedIndex(-1);
   }, []);
 
+  // Suppress the next search-triggered open (used by keepClosedAfterSelect)
+  const suppressNextOpen = useCallback(() => {
+    suppressOpenRef.current = true;
+  }, []);
+
   // Reset
   const reset = useCallback(() => {
     setQuery('');
@@ -185,6 +198,7 @@ export function useAutocomplete(
     highlightNext,
     handleSelect,
     close,
+    suppressNextOpen,
     reset,
     isComposing,
     setIsComposing,

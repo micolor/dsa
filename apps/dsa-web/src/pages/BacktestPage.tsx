@@ -1,10 +1,10 @@
 import type React from 'react';
 import { useState, useEffect, useCallback } from 'react';
-import { Check, Minus, X } from 'lucide-react';
+import { Check, Download, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, EmptyState, Pagination, StatusDot, Tooltip } from '../components/common';
+import { ApiErrorAlert, Card, Badge, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
 import {
@@ -121,45 +121,35 @@ function actualMovementBadge(movement: string | null | undefined, language: UiLa
 function boolIcon(value: boolean | null | undefined, text: BacktestText) {
   if (value === true) {
     return (
-      <span
-        className="backtest-status-chip backtest-status-chip-success"
-        aria-label={text.yes}
-      >
-        <StatusDot tone="success" className="backtest-status-chip-dot" />
+      <Badge variant="success" aria-label={text.yes}>
         <Check className="h-3.5 w-3.5" />
-      </span>
+      </Badge>
     );
   }
 
   if (value === false) {
     return (
-      <span
-        className="backtest-status-chip backtest-status-chip-danger"
-        aria-label={text.no}
-      >
-        <StatusDot tone="danger" className="backtest-status-chip-dot" />
+      <Badge variant="danger" aria-label={text.no}>
         <X className="h-3.5 w-3.5" />
-      </span>
+      </Badge>
     );
   }
 
   return (
-    <span
-      className="backtest-status-chip backtest-status-chip-neutral"
-      aria-label={text.unknown}
-    >
-      <StatusDot tone="neutral" className="backtest-status-chip-dot" />
+    <Badge variant="default" aria-label={text.unknown}>
       <Minus className="h-3.5 w-3.5" />
-    </span>
+    </Badge>
   );
 }
 
 // ============ Metric Row ============
 
 const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = ({ label, value, accent }) => (
-  <div className="backtest-metric-row">
-    <span className="label">{label}</span>
-    <span className={`value ${accent ? 'accent' : ''}`}>{value}</span>
+  <div className="flex items-center justify-between gap-2 py-2">
+    <span className="text-xs text-muted-text">{label}</span>
+    <span className={accent ? 'text-sm font-semibold tabular-nums text-foreground' : 'text-sm tabular-nums text-secondary-text'}>
+      {value}
+    </span>
   </div>
 );
 
@@ -196,7 +186,7 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string; la
       <MetricRow label={text.stopLossTriggerRate} value={pct(metrics.stopLossTriggerRate)} />
       <MetricRow label={text.takeProfitTriggerRate} value={pct(metrics.takeProfitTriggerRate)} />
       <MetricRow label={text.avgDaysToFirstHit} value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} />
-      <div className="backtest-metric-footer">
+      <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-2">
         <span className="text-xs text-muted-text">{text.evaluationCount}</span>
         <span className="text-xs text-secondary-text font-mono">
           {Number(metrics.completedCount)} / {Number(metrics.totalEvaluations)}
@@ -226,20 +216,57 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string; la
 const RunSummary: React.FC<{ data: BacktestRunResponse; language: UiLanguage }> = ({ data, language }) => {
   const text = BACKTEST_TEXT[language];
   return (
-  <div className="backtest-summary animate-fade-in">
-    <span className="label">{text.processed} <span className="value">{data.processed}</span></span>
-    <span className="label">{text.saved} <span className="value primary">{data.saved}</span></span>
-    <span className="label">{text.completed} <span className="value success">{data.completed}</span></span>
-    <span className="label">{text.insufficient} <span className="value warning">{data.insufficient}</span></span>
-    {data.errors > 0 && (
-      <span className="label">{text.errors} <span className="value danger">{data.errors}</span></span>
-    )}
-    {data.message && (
-      <span className="label message">{data.message}</span>
-    )}
-  </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary-text">
+      <span>{text.processed} <span className="font-semibold text-foreground">{data.processed}</span></span>
+      <span>{text.saved} <span className="font-semibold text-success">{data.saved}</span></span>
+      <span>{text.completed} <span className="font-semibold text-success">{data.completed}</span></span>
+      <span>{text.insufficient} <span className="font-semibold text-warning">{data.insufficient}</span></span>
+      {data.errors > 0 && (
+        <span>{text.errors} <span className="font-semibold text-danger">{data.errors}</span></span>
+      )}
+      {data.message && (
+        <span className="text-muted-text">{data.message}</span>
+      )}
+    </div>
   );
 };
+
+// ============ Export CSV ============
+
+function exportResultsCsv(
+  results: BacktestResultItem[],
+  actionLabels: Record<string, string>,
+  text: BacktestText,
+  language: UiLanguage,
+): void {
+  const escape = (value: string | number | null | undefined) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const header = [text.stock, text.analysisDate, text.phase, text.aiPrediction, text.actualPerformance, text.result, text.status]
+    .map(escape)
+    .join(',');
+  const rows = results.map((row) => {
+    const actionLabel = getDecisionActionLabel(row.action, row.actionLabel, null, null, actionLabels);
+    const prediction = [actionLabel, row.trendPrediction, row.operationAdvice].filter(Boolean).join(' / ');
+    return [
+      `${row.code}${row.stockName ? ` ${row.stockName}` : ''}`,
+      row.analysisDate ?? '',
+      phaseLabel(row, language),
+      prediction,
+      row.actualReturnPct != null ? `${row.actualReturnPct}%` : '',
+      row.outcome ?? '',
+      row.evalStatus ?? '',
+    ].map(escape).join(',');
+  });
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `backtest-results-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 // ============ Main Page ============
 
@@ -435,9 +462,9 @@ const BacktestPage: React.FC = () => {
   };
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
+    <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 md:px-6">
       {/* Header */}
-      <header className="flex-shrink-0 border-b border-white/5 px-3 py-3 sm:px-4">
+      <header className="flex-shrink-0 border-b border-border/40 px-3 py-3 sm:px-4">
         <div className="flex max-w-5xl flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-[1_1_220px]">
             <input
@@ -447,8 +474,18 @@ const BacktestPage: React.FC = () => {
               onKeyDown={handleKeyDown}
               placeholder={text.codePlaceholder}
               disabled={isRunning}
-              className={BACKTEST_INPUT_CLASS}
+              className={`${BACKTEST_INPUT_CLASS}${codeFilter ? ' pr-10' : ''}`}
             />
+            {codeFilter ? (
+              <button
+                type="button"
+                onClick={() => setCodeFilter('')}
+                aria-label={text.clearCodeFilter}
+                className="absolute inset-y-0 right-2 my-auto flex h-7 w-7 items-center justify-center rounded-lg text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
           <button
             type="button"
@@ -456,6 +493,9 @@ const BacktestPage: React.FC = () => {
             disabled={isLoadingResults}
             className="btn-secondary flex items-center gap-1.5 whitespace-nowrap"
           >
+            {isLoadingResults ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : null}
             {text.filter}
           </button>
           <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
@@ -511,19 +551,23 @@ const BacktestPage: React.FC = () => {
           <button
             type="button"
             onClick={handleShowNextDay}
+            aria-pressed={isNextDayValidation}
             disabled={isLoadingResults || isLoadingPerf}
-            className={`backtest-force-btn ${isNextDayValidation ? 'active' : ''}`}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+            }`}
           >
-            <span className="dot" />
             {text.oneDayValidation}
           </button>
           <button
             type="button"
             onClick={() => setForceRerun(!forceRerun)}
+            aria-pressed={forceRerun}
             disabled={isRunning}
-            className={`backtest-force-btn ${forceRerun ? 'active' : ''}`}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              forceRerun ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+            }`}
           >
-            <span className="dot" />
             {text.forceRerun}
           </button>
           <button
@@ -561,13 +605,11 @@ const BacktestPage: React.FC = () => {
       </header>
 
       {/* Main content */}
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 lg:flex-row">
-        {/* Left sidebar - Performance */}
-        <div className="flex max-h-[38vh] flex-col gap-3 overflow-y-auto lg:max-h-none lg:w-60 lg:flex-shrink-0">
+      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+        {/* Performance summary */}
+        <div className="grid shrink-0 gap-3 lg:grid-cols-2">
           {isLoadingPerf ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="backtest-spinner sm" />
-            </div>
+            <Loading className="py-8" />
           ) : overallPerf ? (
             <PerformanceCard metrics={overallPerf} title={text.overallPerformance} language={language} />
           ) : (
@@ -583,21 +625,18 @@ const BacktestPage: React.FC = () => {
           )}
         </div>
 
-        {/* Right content - Results table */}
+        {/* Results table */}
         <section className="min-h-0 flex-1 overflow-y-auto">
           {pageError ? (
             <ApiErrorAlert error={pageError} className="mb-3" />
           ) : null}
           {isLoadingResults ? (
-            <div className="flex flex-col items-center justify-center h-64">
-              <div className="backtest-spinner md" />
-              <p className="mt-3 text-secondary-text text-sm">{text.loadingResults}</p>
-            </div>
+            <Loading label={text.loadingResults} className="h-64" />
           ) : results.length === 0 ? (
             <EmptyState
               title={text.noResultsTitle}
               description={text.noResultsDescription}
-              className="backtest-empty-state border-dashed"
+              className="border-none bg-transparent py-6 shadow-none"
               icon={(
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -606,35 +645,48 @@ const BacktestPage: React.FC = () => {
             />
           ) : (
             <div className="animate-fade-in">
-              <div className="backtest-table-toolbar">
-                <div className="backtest-table-toolbar-meta">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <span className="label-uppercase">{isNextDayValidation ? text.nextDayValidation : text.resultSet}</span>
-                  <span className="text-xs text-secondary-text">
+                  <p className="mt-0.5 truncate text-xs text-secondary-text">
                     {codeFilter.trim() ? formatUiText(text.filteredStock, { code: codeFilter.trim() }) : text.allStocks}
                     {evalDays ? ` · ${formatUiText(text.dayWindow, { days: evalDays })}` : ''}
                     {phaseFilter !== 'all' ? ` · ${phaseFilterOptions.find((item) => item.value === phaseFilter)?.label ?? phaseFilter}` : ''}
                     {analysisDateFrom ? ` · ${formatUiText(text.fromDate, { date: analysisDateFrom })}` : ''}
                     {analysisDateTo ? ` · ${formatUiText(text.toDate, { date: analysisDateTo })}` : ''}
-                  </span>
+                  </p>
                 </div>
-                <span className="backtest-table-scroll-hint">{text.scrollHint}</span>
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => exportResultsCsv(results, actionLabels, text, language)}
+                    disabled={results.length === 0}
+                    className="btn-secondary inline-flex items-center gap-1.5 !px-3 !py-1.5 !text-xs"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {text.exportCsv}
+                  </button>
+                  <span className="text-[11px] text-muted-text">{text.scrollHint}</span>
+                </div>
               </div>
-              <div className="backtest-table-wrapper">
-                <table className="backtest-table min-w-[900px] w-full text-sm">
-                  <thead className="backtest-table-head">
-                    <tr className="text-left">
-                      <th className="backtest-table-head-cell">{text.stock}</th>
-                      <th className="backtest-table-head-cell">{text.analysisDate}</th>
-                      <th className="backtest-table-head-cell">{text.phase}</th>
-                      <th className="backtest-table-head-cell">{text.aiPrediction}</th>
-                      <th className="backtest-table-head-cell">
+
+              <div className="overflow-hidden rounded-xl border border-border/60 bg-card/50">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-left text-sm">
+                  <thead className="bg-surface-2/70 text-left text-xs uppercase tracking-[0.16em] text-secondary-text">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">{text.stock}</th>
+                      <th className="px-4 py-3 font-medium">{text.analysisDate}</th>
+                      <th className="px-4 py-3 font-medium">{text.phase}</th>
+                      <th className="px-4 py-3 font-medium">{text.aiPrediction}</th>
+                      <th className="px-4 py-3 font-medium">
                         {showNextDayActualColumns ? text.actualPerformance : text.windowReturn}
                       </th>
-                      <th className="backtest-table-head-cell">
+                      <th className="px-4 py-3 font-medium">
                         {showNextDayActualColumns ? text.accuracy : text.directionMatch}
                       </th>
-                      <th className="backtest-table-head-cell">{text.result}</th>
-                      <th className="backtest-table-head-cell">{text.status}</th>
+                      <th className="px-4 py-3 font-medium">{text.result}</th>
+                      <th className="px-4 py-3 font-medium">{text.status}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -646,17 +698,17 @@ const BacktestPage: React.FC = () => {
                       return (
                         <tr
                           key={row.analysisHistoryId}
-                          className="backtest-table-row"
+                          className="transition-colors hover:bg-hover/60"
                         >
-                          <td className="backtest-table-cell backtest-table-code">
+                          <td className="px-4 py-3 font-mono text-primary">
                             <div className="flex flex-col">
                               <span>{row.code}</span>
                               <span className="text-xs text-muted-text">{row.stockName || '--'}</span>
                             </div>
                           </td>
-                          <td className="backtest-table-cell text-secondary-text">{row.analysisDate || '--'}</td>
-                          <td className="backtest-table-cell text-secondary-text">{phaseLabel(row, language)}</td>
-                          <td className="backtest-table-cell max-w-[220px] text-foreground">
+                          <td className="px-4 py-3 text-secondary-text">{row.analysisDate || '--'}</td>
+                          <td className="px-4 py-3 text-secondary-text">{phaseLabel(row, language)}</td>
+                          <td className="px-4 py-3 max-w-[220px] text-foreground">
                             {predictionParts.length ? (
                               <Tooltip
                                 content={predictionParts.join(' / ')}
@@ -676,7 +728,7 @@ const BacktestPage: React.FC = () => {
                               '--'
                             )}
                           </td>
-                          <td className="backtest-table-cell">
+                          <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               {actualMovementBadge(row.actualMovement, language)}
                               <span className={
@@ -688,7 +740,7 @@ const BacktestPage: React.FC = () => {
                               </span>
                             </div>
                           </td>
-                          <td className="backtest-table-cell">
+                          <td className="px-4 py-3">
                             <span className="flex items-center gap-2">
                               {boolIcon(row.directionCorrect, text)}
                               <span className="text-muted-text">
@@ -696,13 +748,14 @@ const BacktestPage: React.FC = () => {
                               </span>
                             </span>
                           </td>
-                          <td className="backtest-table-cell">{outcomeBadge(row.outcome, language)}</td>
-                          <td className="backtest-table-cell">{statusBadge(row.evalStatus, language)}</td>
+                          <td className="px-4 py-3">{outcomeBadge(row.outcome, language)}</td>
+                          <td className="px-4 py-3">{statusBadge(row.evalStatus, language)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
 
               {/* Pagination */}
