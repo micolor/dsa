@@ -1,7 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { BellRing, X } from 'lucide-react';
+import { BellRing } from 'lucide-react';
 import { alertsApi } from '../api/alerts';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -13,7 +12,7 @@ import {
   type AlertTypeFilter,
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
-import { ApiErrorAlert, AppPage, EmptyState, InlineAlert, Loading } from '../components/common';
+import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import type {
   AlertNotificationItem,
@@ -212,22 +211,6 @@ const AlertsPage: React.FC = () => {
     void loadNotifications();
   }, [loadNotifications, loadTriggers, rulesLoaded]);
 
-  useEffect(() => {
-    if (!createOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setCreateOpen(false);
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [createOpen]);
-
   const handleCreateRule = async (payload: AlertRuleCreateRequest) => {
     setCreateLoading(true);
     setCreateError(null);
@@ -416,52 +399,25 @@ const AlertsPage: React.FC = () => {
         ) : null}
       </div>
 
-      {createOpen ? createPortal(
-        <div
-          className="fixed inset-0 z-[140] flex items-end bg-background/25 backdrop-blur-sm sm:items-center sm:justify-center"
-          onClick={() => setCreateOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="新建告警规则"
-            onClick={(e) => e.stopPropagation()}
-            className="relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong sm:max-w-2xl sm:rounded-2xl"
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
-                  告警中心
-                </p>
-                <h2 className="mt-1 text-lg font-semibold text-foreground">新建告警规则</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCreateOpen(false)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/80 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
-                aria-label="关闭"
-              >
-                <X aria-hidden="true" className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto px-5 py-5">
-              {createError ? (
-                <div className="mb-4">
-                  <ApiErrorAlert error={createError} onDismiss={() => setCreateError(null)} />
-                </div>
-              ) : null}
-              <AlertRuleForm
-                onSubmit={handleCreateRule}
-                isSubmitting={createLoading}
-                bare
-                onSuccess={() => setCreateOpen(false)}
-              />
-            </div>
+      <Dialog
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="新建告警规则"
+        eyebrow="告警中心"
+        ariaLabel="新建告警规则"
+      >
+        {createError ? (
+          <div className="mb-4">
+            <ApiErrorAlert error={createError} onDismiss={() => setCreateError(null)} />
           </div>
-        </div>,
-        document.body,
-      ) : null}
+        ) : null}
+        <AlertRuleForm
+          onSubmit={handleCreateRule}
+          isSubmitting={createLoading}
+          bare
+          onSuccess={() => setCreateOpen(false)}
+        />
+      </Dialog>
     </AppPage>
   );
 };
