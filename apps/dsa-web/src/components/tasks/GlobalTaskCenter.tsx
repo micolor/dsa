@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { FloatingTaskPanel } from './FloatingTaskPanel';
 import { screeningApi } from '../../api/screening';
@@ -24,6 +25,7 @@ const SCREEN_TASK_POLL_INTERVAL_MS = 3_000;
  * HomePage 的 useDashboardLifecycle 负责（两者共享同一个 SSE 单例，store 同步按 taskId 幂等）。
  */
 export const GlobalTaskCenter: React.FC = () => {
+  const navigate = useNavigate();
   const activeTasks = useStockPoolStore(
     useShallow((state) => state.activeTasks),
   );
@@ -115,7 +117,12 @@ export const GlobalTaskCenter: React.FC = () => {
     return [...activeTasks, toScreenTaskInfo(activeScreenTask)];
   }, [activeScreenTask, activeTasks]);
 
-  return <FloatingTaskPanel tasks={mergedTasks} />;
+  return (
+    <FloatingTaskPanel
+      tasks={mergedTasks}
+      onOpenRunFlow={(task) => navigate(`/?runFlowTaskId=${encodeURIComponent(task.taskId)}`)}
+    />
+  );
 };
 
 export default GlobalTaskCenter;

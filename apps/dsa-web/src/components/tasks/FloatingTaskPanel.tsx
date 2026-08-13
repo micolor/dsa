@@ -46,13 +46,20 @@ export const FloatingTaskPanel: React.FC<FloatingTaskPanelProps> = ({ tasks, onO
 
   useEffect(() => clearCloseTimer, []);
 
+  // 任务短暂清空时收起面板，避免新任务出现时面板突然弹回造成闪动。
+  useEffect(() => {
+    if (activeCount === 0 && open) {
+      setOpen(false);
+    }
+  }, [activeCount, open]);
+
   if (activeCount === 0) {
     return null;
   }
 
   return (
     <div
-      className="fixed left-0.5 top-12 z-[100] flex flex-col items-start gap-2"
+      className="fixed bottom-4 left-0.5 z-[100] flex flex-col-reverse items-start gap-2"
       onMouseEnter={openPanel}
       onMouseLeave={scheduleClose}
     >
@@ -82,7 +89,7 @@ export const FloatingTaskPanel: React.FC<FloatingTaskPanelProps> = ({ tasks, onO
       </button>
 
       {open ? (
-        <div className="w-80 max-h-[min(24rem,calc(100vh-12rem))] overflow-hidden rounded-2xl">
+        <div className="w-[28rem] max-h-[min(24rem,calc(100vh-12rem))] overflow-hidden rounded-2xl">
           <TaskPanel tasks={tasks} onOpenRunFlow={onOpenRunFlow} />
         </div>
       ) : null}

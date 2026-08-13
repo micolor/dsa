@@ -850,6 +850,27 @@ const HomePage: React.FC = () => {
     setRunFlowDrawer({ open: false });
   }, []);
 
+  // 任务浮窗跳转：打开对应任务的运行流抽屉。
+  // 依赖 location.search，这样从任意页面（包括首页自身）跳转都会重新触发，
+  // 而不仅是首页首次挂载时。
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const taskId = params.get('runFlowTaskId');
+    if (!taskId) {
+      return;
+    }
+    const source: RunFlowSnapshotSource = { type: 'task', taskId };
+    setRunFlowDrawer({
+      open: true,
+      source,
+      title: t('runFlow.taskDrawerTitle', { stock: taskId }),
+    });
+    // 清除 query，避免刷新后重复打开；用 navigate 而非裸 replaceState，
+    // 让 router 状态同步，关闭抽屉后再点同一任务仍能再次触发。
+    navigate(location.pathname, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, navigate]);
+
   const pollMarketReviewStatus = useCallback(
     async (taskId: string) => {
       stopMarketReviewPolling();

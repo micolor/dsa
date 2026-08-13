@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GlobalTaskCenter } from '../GlobalTaskCenter';
 import { useStockPoolStore } from '../../../stores/stockPoolStore';
@@ -64,7 +65,7 @@ describe('GlobalTaskCenter', () => {
       result: null,
     });
 
-    render(<GlobalTaskCenter />);
+    render(<MemoryRouter><GlobalTaskCenter /></MemoryRouter>);
 
     const button = await screen.findByTestId('floating-task-panel-button');
     fireEvent.mouseOver(button);
@@ -79,7 +80,7 @@ describe('GlobalTaskCenter', () => {
     getTasks.mockResolvedValue({ total: 0, pending: 0, processing: 0, tasks: [] });
     getScreenTask.mockResolvedValue({ taskId: 'screen-1', status: 'completed' });
 
-    render(<GlobalTaskCenter />);
+    render(<MemoryRouter><GlobalTaskCenter /></MemoryRouter>);
 
     await waitFor(() => expect(getTasks).toHaveBeenCalled());
     expect(screen.queryByTestId('floating-task-panel-button')).not.toBeInTheDocument();
@@ -102,7 +103,7 @@ describe('GlobalTaskCenter', () => {
       result: null,
     });
 
-    render(<GlobalTaskCenter />);
+    render(<MemoryRouter><GlobalTaskCenter /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.queryByTestId('floating-task-panel-button')).not.toBeInTheDocument();
