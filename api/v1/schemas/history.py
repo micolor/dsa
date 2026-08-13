@@ -9,6 +9,7 @@
 2. 定义分析报告完整模型
 """
 
+from datetime import date
 from typing import Optional, List, Any, Dict, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -102,6 +103,7 @@ class NewsIntelItem(BaseModel):
     title: str = Field(..., description="新闻标题")
     snippet: str = Field("", description="新闻摘要（最多200字）")
     url: str = Field(..., description="新闻链接")
+    published_date: Optional[date] = Field(None, description="新闻发布时间")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {

@@ -756,7 +756,8 @@ def get_history_news(
             NewsIntelItem(
                 title=item.get("title", ""),
                 snippet=item.get("snippet"),
-                url=item.get("url", "")
+                url=item.get("url", ""),
+                published_date=item.get("published_date"),
             )
             for item in items
         ]

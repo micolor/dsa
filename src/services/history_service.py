@@ -674,6 +674,7 @@ class HistoryService:
                     "title": record.title,
                     "snippet": snippet,
                     "url": record.url,
+                    "published_date": record.published_date.date() if record.published_date else None,
                 })
 
             return items

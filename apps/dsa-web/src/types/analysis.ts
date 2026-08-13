@@ -554,6 +554,7 @@ export interface NewsIntelItem {
   title: string;
   snippet: string;
   url: string;
+  publishedDate?: string;
 }
 
 /** News response */

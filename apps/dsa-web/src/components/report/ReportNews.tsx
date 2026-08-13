@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ExternalLink, RefreshCw } from 'lucide-react';
 import type { ParsedApiError } from '../../api/error';
 import { getParsedApiError } from '../../api/error';
 import { ApiErrorAlert, Card } from '../common';
@@ -138,11 +138,15 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
       {!error && items.length > 0 && (
         <div className={`space-y-3 text-left transition-opacity duration-200 ${isLoading ? 'opacity-60' : ''}`}>
           {isLoading ? <div className="sr-only" aria-live="polite">{text.loadingNews}</div> : null}
-          {items.map((item, index) => (
-            <div
-              key={item.url || `${item.title}-${index}`}
-              className="home-subpanel home-news-item group p-4"
-            >
+          {items.map((item, index) => {
+            const key = item.url || `${item.title}-${index}`;
+            const externalIcon = item.url ? (
+              <ExternalLink
+                className="h-3.5 w-3.5 shrink-0 text-muted-text opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                aria-hidden="true"
+              />
+            ) : null;
+            const body = (
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0 text-left">
                   <p className="home-news-title text-sm font-medium leading-6 text-foreground text-left">
@@ -154,28 +158,31 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
                     </p>
                   )}
                 </div>
-                {item.url && (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="home-accent-pill-link shrink-0 whitespace-nowrap px-2.5 py-1 text-xs"
-                    aria-label={text.openLink}
-                  >
-                    {text.openLink}
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M14 3h7m0 0v7m0-7L10 14"
-                      />
-                    </svg>
-                  </a>
-                )}
+                <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                  {item.publishedDate ? (
+                    <span className="text-xs tabular-nums text-muted-text">{item.publishedDate}</span>
+                  ) : null}
+                  {externalIcon}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+
+            return item.url ? (
+              <a
+                key={key}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="home-subpanel home-news-item group block p-4"
+              >
+                {body}
+              </a>
+            ) : (
+              <div key={key} className="home-subpanel home-news-item group p-4">
+                {body}
+              </div>
+            );
+          })}
 
         </div>
       )}

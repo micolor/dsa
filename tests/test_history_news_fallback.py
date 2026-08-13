@@ -10,6 +10,31 @@ from src.services.history_service import HistoryService
 
 
 class HistoryNewsFallbackTestCase(unittest.TestCase):
+    def test_get_news_intel_passes_through_published_date(self) -> None:
+        """get_news_intel 必须透传 published_date（回归：曾只返回 title/snippet/url）"""
+        now = datetime(2026, 8, 12, 10, 30, 0)
+        record = SimpleNamespace(
+            title="茅台发布新产品",
+            snippet="公司披露季度经营情况。",
+            url="https://example.com/news",
+            published_date=now,
+        )
+
+        mock_db = MagicMock()
+        mock_db.get_news_intel_by_query_id.return_value = [record]
+
+        svc = HistoryService(db_manager=mock_db)
+        items = svc.get_news_intel("q-1", limit=20)
+
+        self.assertEqual(items, [
+            {
+                "title": "茅台发布新产品",
+                "snippet": "公司披露季度经营情况。",
+                "url": "https://example.com/news",
+                "published_date": now.date(),
+            },
+        ])
+
     def test_fallback_filters_by_published_date_window(self) -> None:
         now = datetime.now()
         analysis = SimpleNamespace(code="600519", created_at=now)
