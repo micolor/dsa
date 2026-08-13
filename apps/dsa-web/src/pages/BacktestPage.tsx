@@ -54,6 +54,20 @@ function normalizeBacktestCode(value: string): string | undefined {
   return trimmed.toUpperCase();
 }
 
+function parseMinAgeDays(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = parseInt(trimmed, 10);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
 function parseEvalWindowDays(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -283,6 +297,7 @@ const BacktestPage: React.FC = () => {
   const [analysisDateTo, setAnalysisDateTo] = useState('');
   const [phaseFilter, setPhaseFilter] = useState<BacktestPhaseFilter>('all');
   const [evalDays, setEvalDays] = useState('');
+  const [minAgeDays, setMinAgeDays] = useState('');
   const [forceRerun, setForceRerun] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [runResult, setRunResult] = useState<BacktestRunResponse | null>(null);
@@ -403,7 +418,7 @@ const BacktestPage: React.FC = () => {
       const response = await backtestApi.run({
         code,
         force: forceRerun || undefined,
-        minAgeDays: forceRerun ? 0 : undefined,
+        minAgeDays: forceRerun ? 0 : parseMinAgeDays(minAgeDays),
         evalWindowDays: requestedEvalWindowDays,
         analysisDateFrom: dateFrom,
         analysisDateTo: dateTo,
@@ -504,6 +519,18 @@ const BacktestPage: React.FC = () => {
               placeholder="10"
               disabled={isRunning}
               className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
+            />
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <span className="text-xs text-muted-text">{text.minAgeDays}</span>
+            <input
+              type="number"
+              min={0}
+              value={minAgeDays}
+              onChange={(e) => setMinAgeDays(e.target.value)}
+              placeholder="14"
+              disabled={isRunning}
+              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
