@@ -1227,11 +1227,31 @@ a {
 .select-input-chevron {
   appearance: none;
   -webkit-appearance: none;
+  cursor: pointer;
+  color-scheme: light;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 16px 16px;
   padding-right: 40px;
+}
+
+/* 原生下拉选项美化：统一背景/字体/内边距，hover/选中高亮 */
+select option {
+  padding: 0.5rem 0.75rem;
+  background-color: hsl(var(--card));
+  color: var(--text-primary);
+}
+select option:hover {
+  background-color: hsl(var(--primary) / 0.15);
+}
+select option:checked {
+  background-color: hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary));
+}
+
+.dark .select-input-chevron {
+  color-scheme: dark;
 }
 
 .home-panel-card {
@@ -1661,27 +1681,6 @@ a {
 .chat-progress-dot-danger {
   background: hsl(var(--destructive));
   box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.12);
-}
-
-.home-accent-pill-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  border-radius: 9999px;
-  border: 1px solid var(--home-accent-border);
-  background: var(--home-accent-bg);
-  color: var(--home-accent-text);
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.32);
-  transition:
-    color 0.2s ease,
-    background-color 0.2s ease,
-    border-color 0.2s ease;
-}
-
-.home-accent-pill-link:hover {
-  border-color: var(--home-accent-border-hover);
-  background: var(--home-accent-bg-hover);
-  color: hsl(var(--foreground));
 }
 
 .home-spinner {
