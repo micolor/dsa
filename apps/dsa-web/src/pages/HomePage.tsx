@@ -761,9 +761,11 @@ const HomePage: React.FC = () => {
   }, [refreshStockBar, refreshWatchlist]);
 
   const [isDeletingStock, setIsDeletingStock] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const handleDeleteStock = useCallback(async (stockCode: string) => {
     if (isDeletingStock) return;
     setIsDeletingStock(true);
+    setDeleteError(null);
     try {
       await historyApi.deleteByCode(stockCode);
       await refreshStockBar();
@@ -771,8 +773,8 @@ const HomePage: React.FC = () => {
       if (stockCode === 'MARKET') {
         await refreshMarketReviewHistory(false);
       }
-    } catch {
-      // error silently ignored
+    } catch (err) {
+      setDeleteError(getParsedApiError(err).message);
     } finally {
       setIsDeletingStock(false);
     }
@@ -1542,6 +1544,17 @@ const HomePage: React.FC = () => {
             </div>
           </div>
         </header>
+
+        {deleteError ? (
+          <div className="px-3 pb-2 md:px-4">
+            <InlineAlert
+              variant="danger"
+              title={t('common.deleteFailed')}
+              message={deleteError}
+              className="rounded-xl px-3 py-2 text-xs shadow-none"
+            />
+          </div>
+        ) : null}
 
         {inputError || (duplicateError && duplicateBannerVisible) ? (
           <div className="px-3 pb-2 md:px-4">

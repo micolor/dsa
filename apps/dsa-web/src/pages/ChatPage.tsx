@@ -227,6 +227,7 @@ const ChatPage: React.FC = () => {
   const [contextCompressionError, setContextCompressionError] = useState<string | null>(null);
   const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [sessionMessagesLoading, setSessionMessagesLoading] = useState(false);
   const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
   const [isWatchlistActioning, setIsWatchlistActioning] = useState(false);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
@@ -274,7 +275,7 @@ const ChatPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '问股 - DSA';
+    document.title = t('chat.pageTitle');
   }, []);
 
   useEffect(() => {
@@ -315,18 +316,18 @@ const ChatPage: React.FC = () => {
           const codes = await systemConfigApi.removeFromWatchlist(existingStockCode);
           if (isMountedRef.current) {
             setWatchlistCodes(codes);
-            setWatchlistMessage(`已从自选中移除 ${stockCode}`);
+            setWatchlistMessage(t('chat.removedFromWatchlist').replace('{code}', stockCode));
           }
         } else {
           const codes = await systemConfigApi.addToWatchlist(stockCode);
           if (isMountedRef.current) {
             setWatchlistCodes(codes);
-            setWatchlistMessage(`已加入自选 ${stockCode}`);
+            setWatchlistMessage(t('chat.addedToWatchlist').replace('{code}', stockCode));
           }
         }
       } catch {
         if (isMountedRef.current) {
-          setWatchlistMessage('操作失败，请重试');
+          setWatchlistMessage(t('chat.watchlistActionFailed'));
         }
       } finally {
         if (isMountedRef.current) {
@@ -409,6 +410,21 @@ const ChatPage: React.FC = () => {
     syncScrollState();
   }, [syncScrollState, sessionId]);
 
+  // 打开页面/切换会话时瞬时定位到最新消息，避免从历史顶部平滑滚下去。
+  // 放在自动滚动 effect 之前，把 behavior 覆盖为 auto，覆盖挂载/清空渲染时被置为 smooth 的值。
+  const lastJumpedSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastJumpedSessionRef.current === sessionId) {
+      return;
+    }
+    if (messages.length === 0) {
+      return;
+    }
+    lastJumpedSessionRef.current = sessionId;
+    requestScrollToBottom('auto');
+    scrollToBottom('auto');
+  }, [sessionId, messages.length, requestScrollToBottom, scrollToBottom]);
+
   useEffect(() => {
     const behavior = pendingScrollBehaviorRef.current;
     const shouldAutoScroll = shouldStickToBottomRef.current;
@@ -438,7 +454,10 @@ const ChatPage: React.FC = () => {
   }, [clearCompletionBadge]);
 
   useEffect(() => {
-    loadInitialSession();
+    setSessionMessagesLoading(true);
+    void Promise.resolve(loadInitialSession()).finally(() => {
+      setSessionMessagesLoading(false);
+    });
   }, [loadInitialSession]);
 
   useEffect(() => {
@@ -628,7 +647,10 @@ const ChatPage: React.FC = () => {
     setActiveStockContext(null);
     setActiveStockCode(null);
     requestScrollToBottom('auto');
-    switchSession(targetSessionId);
+    setSessionMessagesLoading(true);
+    void Promise.resolve(switchSession(targetSessionId)).finally(() => {
+      setSessionMessagesLoading(false);
+    });
     setSidebarOpen(false);
   }, [requestScrollToBottom, sessionId, switchSession, clearAllCopyTimers]);
 
@@ -859,7 +881,7 @@ const ChatPage: React.FC = () => {
   }, []);
 
   const getCurrentStage = (steps: ProgressStep[]): string => {
-    if (steps.length === 0) return '正在连接...';
+    if (steps.length === 0) return t('chat.connecting');
     const last = steps[steps.length - 1];
     if (last.type === 'thinking') return last.message || 'AI 正在思考...';
     if (last.type === 'tool_start')
@@ -908,7 +930,7 @@ const ChatPage: React.FC = () => {
           />
         </svg>
         <span className="flex items-center gap-1.5">
-          <span className="opacity-60">思考过程</span>
+          <span className="opacity-60">{t('chat.thinking')}</span>
           <span className="text-muted-text/50">·</span>
           <span className="opacity-50">{summary}</span>
         </span>
@@ -979,13 +1001,13 @@ const ChatPage: React.FC = () => {
             <svg className="w-4 h-4 flex-shrink-0 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="truncate">历史对话</span>
+            <span className="truncate">{t('chat.historyTitle')}</span>
           </h2>
-          <Button variant="ghost" size="sm" onClick={handleStartNewChat} aria-label="开启新对话">
+          <Button variant="ghost" size="sm" onClick={handleStartNewChat} aria-label={t('chat.newChatAria')}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            新对话
+            {t('chat.newChat')}
           </Button>
         </div>
       </div>
@@ -1059,7 +1081,7 @@ const ChatPage: React.FC = () => {
 
   const selectedSkillSummary = selectedSkillIds.length > 0
     ? getSkillNames(selectedSkillIds).join('、')
-    : '通用分析';
+    : t('chat.generalAnalysis');
 
   return (
     <>
@@ -1072,7 +1094,7 @@ const ChatPage: React.FC = () => {
           <button
             onClick={() => setSidebarOpen(true)}
             className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
-            aria-label="历史对话"
+            aria-label={t('chat.historyTitle')}
           >
             <svg
               className="w-5 h-5"
@@ -1090,14 +1112,14 @@ const ChatPage: React.FC = () => {
           </button>
           <div className="ml-auto flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-              <Tooltip content="导出会话为 Markdown 文件">
+              <Tooltip content={t('chat.exportSessionAria')}>
                 <span className="inline-flex">
                   <Button
                     variant="action-primary"
                     size="sm"
                     disabled={messages.length === 0}
                     onClick={() => downloadSession(messages)}
-                    aria-label="导出会话为 Markdown 文件"
+                    aria-label={t('chat.exportSessionAria')}
                   >
                     <svg
                       className="w-4 h-4"
@@ -1112,11 +1134,11 @@ const ChatPage: React.FC = () => {
                         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                       />
                     </svg>
-                    导出会话
+                    {t('chat.exportSession')}
                   </Button>
                 </span>
               </Tooltip>
-              <Tooltip content="发送到已配置的通知机器人/邮箱">
+              <Tooltip content={t('chat.sendToChannelAria')}>
                 <span className="inline-flex">
                   <Button
                     variant="action-primary"
@@ -1140,7 +1162,7 @@ const ChatPage: React.FC = () => {
                         setSending(false);
                       }
                     }}
-                    aria-label="发送到已配置的通知机器人/邮箱"
+                    aria-label={t('chat.sendToChannelAria')}
                   >
                     {sending ? (
                       <svg
@@ -1177,7 +1199,7 @@ const ChatPage: React.FC = () => {
                         />
                       </svg>
                     )}
-                    发送
+                    {t('chat.send')}
                   </Button>
                 </span>
               </Tooltip>
@@ -1271,9 +1293,14 @@ const ChatPage: React.FC = () => {
             testId="chat-message-scroll"
           >
             {messages.length === 0 && !loading ? (
+              sessionMessagesLoading ? (
+                <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-cyan/20 border-t-cyan" />
+                </div>
+              ) : (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="开始问股"
+                  title={t('chat.startTitle')}
                   description={t(
                     agentStatus?.backend === 'codex_app_server'
                       ? 'chat.emptyDescriptionCodex'
@@ -1311,6 +1338,7 @@ const ChatPage: React.FC = () => {
                   )}
                 />
               </div>
+              )
             ) : (
               messages.map((msg) => {
                 const skillLabel = getMessageSkillLabel(msg);
@@ -1534,15 +1562,15 @@ const ChatPage: React.FC = () => {
                     onChange={(event) => void updateContextCompressionEnabled(event.target.checked)}
                     className="chat-skill-checkbox"
                   />
-                  <span className="font-medium">上下文压缩</span>
-                  <span className="text-xs text-muted-text">节省长会话 token</span>
+                  <span className="font-medium">{t('chat.contextCompression')}</span>
+                  <span className="text-xs text-muted-text">{t('chat.contextCompressionHint')}</span>
                 </label>
                 <span className="text-xs text-muted-text">
                   {contextCompressionSaving
-                    ? '保存中...'
+                    ? t('chat.compressionSaving')
                     : contextCompressionEnabled
-                      ? '已启用'
-                      : '未启用'}
+                      ? t('chat.compressionEnabled')
+                      : t('chat.compressionDisabled')}
                 </span>
               </div>
               {contextCompressionError ? (
@@ -1565,8 +1593,9 @@ const ChatPage: React.FC = () => {
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                      <span className="flex-shrink-0 font-medium">策略</span>
+                      <span className="flex-shrink-0 font-medium">{t('chat.strategy')}</span>
                       <span className="truncate text-xs text-muted-text">{selectedSkillSummary}</span>
+
                     </span>
                     <ChevronDown
                       className={cn(
@@ -1599,7 +1628,7 @@ const ChatPage: React.FC = () => {
                       <span
                         className={`transition-colors text-sm ${selectedSkillIds.length === 0 ? 'text-foreground font-medium' : 'text-secondary-text group-hover:text-foreground'}`}
                       >
-                        通用分析
+                        {t('chat.generalAnalysis')}
                       </span>
                     </label>
                     {skills.map((s) => {
@@ -1662,7 +1691,7 @@ const ChatPage: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
+                  placeholder={t('chat.inputPlaceholder')}
                   disabled={loading || !agentAvailable}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
@@ -1690,7 +1719,7 @@ const ChatPage: React.FC = () => {
                     isLoading={loading}
                     className="btn-primary flex-shrink-0"
                   >
-                    发送
+                    {t('chat.send')}
                   </Button>
                 )}
               </div>
