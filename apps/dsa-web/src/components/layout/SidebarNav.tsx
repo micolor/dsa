@@ -18,6 +18,17 @@ type SidebarNavProps = {
   variant?: 'default' | 'rail';
 };
 
+/** 选股导航项启用状态的本地缓存 key（避免每次打开菜单都动态插入该导航项） */
+const SCREENING_NAV_ENABLED_KEY = 'dsa.screeningNav.enabled';
+
+const readScreeningNavEnabled = (): boolean => {
+  try {
+    return window.localStorage.getItem(SCREENING_NAV_ENABLED_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
 type NavItem = {
   key: string;
   labelKey: UiTextKey;
@@ -45,7 +56,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
   const { t } = useUiLanguage();
   const completionBadge = useAgentChatStore((state) => state.completionBadge);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showScreeningNav, setShowScreeningNav] = useState(false);
+  // 优先从本地缓存初始化，避免打开菜单时「选股」项在接口返回后才插入的闪变
+  const [showScreeningNav, setShowScreeningNav] = useState<boolean>(readScreeningNavEnabled);
 
   useEffect(() => {
     let active = true;
@@ -53,12 +65,19 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
     const refreshScreeningStatus = async () => {
       try {
         const status = await screeningApi.getStatus();
+        const enabled = Boolean(status.enabled);
         if (active) {
-          setShowScreeningNav(status.enabled);
+          setShowScreeningNav(enabled);
+        }
+        try {
+          window.localStorage.setItem(SCREENING_NAV_ENABLED_KEY, enabled ? '1' : '0');
+        } catch {
+          // localStorage 不可用时静默降级
         }
       } catch {
         if (active) {
-          setShowScreeningNav(false);
+          // 拉取失败时回退到缓存值，避免菜单项闪变
+          setShowScreeningNav(readScreeningNavEnabled());
         }
       }
     };

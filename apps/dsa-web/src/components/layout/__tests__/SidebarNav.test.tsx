@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarNav } from '../SidebarNav';
 
 const mockLogout = vi.fn().mockResolvedValue(undefined);
@@ -36,6 +36,39 @@ vi.mock('../../theme/ThemeToggle', () => ({
 }));
 
 describe('SidebarNav', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('renders the screening item from local cache on first render without a fetch', () => {
+    window.localStorage.setItem('dsa.screeningNav.enabled', '1');
+    // 接口挂起不返回，验证首帧就用缓存渲染，不依赖接口结果
+    mockGetScreeningStatus.mockReturnValueOnce(
+      new Promise<{ enabled: boolean; available: boolean }>(() => {}),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: '选股' })).toBeInTheDocument();
+  });
+
+  it('writes the screening flag to local cache after a successful fetch', async () => {
+    mockGetScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('link', { name: '选股' });
+    await waitFor(() => expect(window.localStorage.getItem('dsa.screeningNav.enabled')).toBe('1'));
+  });
+
   it('hides the screening navigation item while Screening is disabled', () => {
     mockGetScreeningStatus.mockResolvedValueOnce({ enabled: false, available: true });
 

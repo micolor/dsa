@@ -39,8 +39,8 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
   return (
     <div className="home-subpanel grid min-w-0 gap-2.5 px-3 py-2.5" data-testid="task-panel-item">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="shrink-0 pt-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="shrink-0">
             {isProcessing ? (
               <StatusDot tone="info" pulse className="h-2.5 w-2.5" aria-label={t('taskPanel.processingAria')} />
             ) : isCancelRequested ? (
@@ -63,6 +63,23 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
         </div>
 
         <div className="relative z-10 flex shrink-0 items-center gap-1.5">
+          {requestedPhaseLabel ? (
+            <Badge
+              variant={requestedPhaseVariant}
+              className="shrink-0 shadow-none"
+              aria-label={requestedPhaseLabel}
+            >
+              {requestedPhaseLabel}
+            </Badge>
+          ) : null}
+          <Badge
+            variant={statusVariant}
+            className="min-w-[4.75rem] max-w-[7rem] justify-center gap-1.5 whitespace-nowrap shadow-none"
+            aria-label={t('taskPanel.statusAria', { status: statusLabel })}
+          >
+            <StatusDot tone={statusTone} pulse={isProcessing || isCancelRequested} className="h-1.5 w-1.5 shrink-0" />
+            <span className="min-w-0 truncate">{statusLabel}</span>
+          </Badge>
           {onOpenRunFlow ? (
             <Tooltip content={t('taskPanel.openRunFlow')}>
               <span className="inline-flex">
@@ -84,14 +101,6 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
               </span>
             </Tooltip>
           ) : null}
-          <Badge
-            variant={statusVariant}
-            className="min-w-[4.75rem] max-w-[7rem] justify-center gap-1.5 whitespace-nowrap shadow-none"
-            aria-label={t('taskPanel.statusAria', { status: statusLabel })}
-          >
-            <StatusDot tone={statusTone} pulse={isProcessing || isCancelRequested} className="h-1.5 w-1.5 shrink-0" />
-            <span className="min-w-0 truncate">{statusLabel}</span>
-          </Badge>
         </div>
       </div>
 
@@ -99,14 +108,6 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
         <p className="min-w-0 truncate text-xs text-secondary-text">
           {task.message}
         </p>
-      ) : null}
-
-      {requestedPhaseLabel ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge variant={requestedPhaseVariant} className="max-w-full shrink-0 truncate shadow-none" aria-label={requestedPhaseLabel}>
-            {requestedPhaseLabel}
-          </Badge>
-        </div>
       ) : null}
 
       <div className="flex min-w-0 items-center gap-2">
