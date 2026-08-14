@@ -16,6 +16,7 @@ import {
   EmptyState,
   InlineAlert,
   Pagination,
+  Select,
 } from '../components/common';
 import {
   DecisionSignalCard,
@@ -38,6 +39,7 @@ import type {
   DecisionSignalOutcomeStatsResponse,
   DecisionSignalReassessResponse,
   DecisionSignalReassessBlockedError,
+  DecisionSignalHorizon,
   DecisionSignalSourceType,
   DecisionSignalStatus,
   DecisionProfile,
@@ -45,9 +47,10 @@ import type {
 } from '../types/decisionSignals';
 import type { Market, StockIndexItem } from '../types/stockIndex';
 import { cn } from '../utils/cn';
-import { SELECT_CHEVRON_CLASS, SELECT_INPUT_CLASS } from '../utils/formClasses';
+import { SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { buildDecisionActionLabelMap } from '../utils/decisionAction';
 import {
+  getDecisionSignalHorizonLabel,
   getDecisionSignalMarketLabel,
   getDecisionSignalMarketPhaseLabel,
   getDecisionSignalSourceTypeLabel,
@@ -1040,19 +1043,16 @@ const DecisionSignalsPage: React.FC = () => {
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <select
-              className={SELECT_CHEVRON_CLASS}
+            <Select
               value={reassessProfile}
-              onChange={(event) => setReassessProfile(event.target.value as DecisionProfile)}
-              aria-label={t('decisionSignals.reassessProfile')}
+              onChange={(value) => setReassessProfile(value as DecisionProfile)}
+              options={REASSESS_PROFILES.map((profile) => ({
+                value: profile,
+                label: t(`decisionSignals.profile.${profile}` as UiTextKey),
+              }))}
+              placeholder={t('decisionSignals.reassessProfile')}
               disabled={!reassessSourceReportId || reassessLoading || reassessPersisting}
-            >
-              {REASSESS_PROFILES.map((profile) => (
-                <option key={profile} value={profile}>
-                  {t(`decisionSignals.profile.${profile}` as UiTextKey)}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
@@ -1303,17 +1303,16 @@ const DecisionSignalsPage: React.FC = () => {
 
         <Card title={t('decisionSignals.filter')} padding="md">
           <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-7" onSubmit={handleApplyFilters}>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+            <Select
               value={filters.market}
-              onChange={(event) => setFilters((current) => ({ ...current, market: event.target.value as ListFilters['market'] }))}
-              aria-label={t('decisionSignals.market')}
-            >
-              <option value="">{t('decisionSignals.allMarkets')}</option>
-              {MARKET_OPTIONS.map((market) => (
-                <option key={market} value={market}>{getDecisionSignalMarketLabel(market, t)}</option>
-              ))}
-            </select>
+              onChange={(value) => setFilters((current) => ({ ...current, market: value as ListFilters['market'] }))}
+              options={[
+                { value: '', label: t('decisionSignals.allMarkets') },
+                ...MARKET_OPTIONS.map((market) => ({ value: market, label: getDecisionSignalMarketLabel(market, t) })),
+              ]}
+              placeholder={t('decisionSignals.market')}
+              className="w-full"
+            />
             <input
               className={SELECT_INPUT_CLASS}
               value={filters.stockCode}
@@ -1321,39 +1320,36 @@ const DecisionSignalsPage: React.FC = () => {
               placeholder={t('decisionSignals.stockCode')}
               aria-label={t('decisionSignals.stockCode')}
             />
-            <select
-              className={SELECT_CHEVRON_CLASS}
+            <Select
               value={filters.action}
-              onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value as ListFilters['action'] }))}
-              aria-label={t('decisionSignals.action')}
-            >
-              <option value="">{t('decisionSignals.allActions')}</option>
-              {ACTION_OPTIONS.map((action) => (
-                <option key={action} value={action}>{actionLabels[action]}</option>
-              ))}
-            </select>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+              onChange={(value) => setFilters((current) => ({ ...current, action: value as ListFilters['action'] }))}
+              options={[
+                { value: '', label: t('decisionSignals.allActions') },
+                ...ACTION_OPTIONS.map((action) => ({ value: action, label: actionLabels[action] })),
+              ]}
+              placeholder={t('decisionSignals.action')}
+              className="w-full"
+            />
+            <Select
               value={filters.marketPhase}
-              onChange={(event) => setFilters((current) => ({ ...current, marketPhase: event.target.value as ListFilters['marketPhase'] }))}
-              aria-label={t('decisionSignals.marketPhase')}
-            >
-              <option value="">{t('decisionSignals.allPhases')}</option>
-              {PHASE_OPTIONS.map((phase) => (
-                <option key={phase} value={phase}>{getDecisionSignalMarketPhaseLabel(phase, t)}</option>
-              ))}
-            </select>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+              onChange={(value) => setFilters((current) => ({ ...current, marketPhase: value as ListFilters['marketPhase'] }))}
+              options={[
+                { value: '', label: t('decisionSignals.allPhases') },
+                ...PHASE_OPTIONS.map((phase) => ({ value: phase, label: getDecisionSignalMarketPhaseLabel(phase, t) })),
+              ]}
+              placeholder={t('decisionSignals.marketPhase')}
+              className="w-full"
+            />
+            <Select
               value={filters.sourceType}
-              onChange={(event) => setFilters((current) => ({ ...current, sourceType: event.target.value as ListFilters['sourceType'] }))}
-              aria-label={t('decisionSignals.source')}
-            >
-              <option value="">{t('decisionSignals.allSources')}</option>
-              {SOURCE_OPTIONS.map((source) => (
-                <option key={source} value={source}>{getDecisionSignalSourceTypeLabel(source, t)}</option>
-              ))}
-            </select>
+              onChange={(value) => setFilters((current) => ({ ...current, sourceType: value as ListFilters['sourceType'] }))}
+              options={[
+                { value: '', label: t('decisionSignals.allSources') },
+                ...SOURCE_OPTIONS.map((source) => ({ value: source, label: getDecisionSignalSourceTypeLabel(source, t) })),
+              ]}
+              placeholder={t('decisionSignals.source')}
+              className="w-full"
+            />
             <input
               className={SELECT_INPUT_CLASS}
               value={filters.sourceReportId}
@@ -1365,15 +1361,16 @@ const DecisionSignalsPage: React.FC = () => {
               step={1}
               type="number"
             />
-            <select
-              className={SELECT_CHEVRON_CLASS}
+            <Select
               value={filters.status}
-              onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as ListFilters['status'] }))}
-              aria-label={t('decisionSignals.status')}
-            >
-              <option value="">{t('decisionSignals.allStatuses')}</option>
-              {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{t(STATUS_LABEL_KEYS[status])}</option>)}
-            </select>
+              onChange={(value) => setFilters((current) => ({ ...current, status: value as ListFilters['status'] }))}
+              options={[
+                { value: '', label: t('decisionSignals.allStatuses') },
+                ...STATUS_OPTIONS.map((status) => ({ value: status, label: t(STATUS_LABEL_KEYS[status]) })),
+              ]}
+              placeholder={t('decisionSignals.status')}
+              className="w-full"
+            />
             <button type="submit" className="btn-primary inline-flex h-11 items-center justify-center gap-2">
               <Search className="h-4 w-4" />
               {t('decisionSignals.filter')}
@@ -1431,6 +1428,45 @@ const DecisionSignalsPage: React.FC = () => {
               {outcomeStats.profileCalibration ? (
                 <DecisionSignalProfileCalibration calibration={outcomeStats.profileCalibration} />
               ) : null}
+
+              {outcomeStats.breakdowns && Object.keys(outcomeStats.breakdowns).length > 0 ? (
+                <div className="mt-4 space-y-4">
+                  {Object.entries(outcomeStats.breakdowns).map(([dimension, buckets]) => (
+                    <div key={dimension}>
+                      <p className="mb-1.5 text-xs font-semibold text-secondary-text">
+                        {dimension === 'horizon'
+                          ? t('decisionSignals.statsByHorizon')
+                          : dimension === 'status'
+                            ? t('decisionSignals.statsByStatus')
+                            : dimension}
+                      </p>
+                      <div className="space-y-1">
+                        {buckets.map((bucket) => (
+                          <div
+                            key={`${dimension}-${bucket.value}`}
+                            className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                          >
+                            <span className="min-w-0 truncate font-medium text-foreground">
+                              {dimension === 'horizon'
+                                ? getDecisionSignalHorizonLabel(bucket.value as DecisionSignalHorizon, t)
+                                : dimension === 'status'
+                                  ? t(STATUS_LABEL_KEYS[bucket.value as DecisionSignalStatus])
+                                  : bucket.value}
+                            </span>
+                            <span className="text-secondary-text">{bucket.total}</span>
+                            <span className="text-success">{bucket.hit}</span>
+                            <span className="text-danger">{bucket.miss}</span>
+                            <span className="text-warning">{bucket.unable}</span>
+                            <span className="tabular-nums text-secondary-text">
+                              {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <EmptyState
@@ -1479,57 +1515,58 @@ const DecisionSignalsPage: React.FC = () => {
 
         <Card title={t('decisionSignals.timelineTitle')} subtitle={t('decisionSignals.timelineDescription')} padding="md">
           <form className="grid gap-3 md:grid-cols-5" onSubmit={handleTimelineSearch}>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+            <Select
               value={timelineFilters.market}
-              onChange={(event) => {
-                const market = event.target.value as TimelineFilters['market'];
+              onChange={(value) => {
+                const market = value as TimelineFilters['market'];
                 timelineMarketSourceRef.current = market ? 'user' : null;
                 setTimelineFilters((current) => ({ ...current, market }));
               }}
-              aria-label={t('decisionSignals.timelineMarket')}
-            >
-              <option value="">{t('decisionSignals.allMarkets')}</option>
-              {MARKET_OPTIONS.map((market) => (
-                <option key={market} value={market}>{getDecisionSignalMarketLabel(market, t)}</option>
-              ))}
-            </select>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+              options={[
+                { value: '', label: t('decisionSignals.allMarkets') },
+                ...MARKET_OPTIONS.map((market) => ({ value: market, label: getDecisionSignalMarketLabel(market, t) })),
+              ]}
+              placeholder={t('decisionSignals.timelineMarket')}
+              className="w-full"
+            />
+            <Select
               value={timelineFilters.range}
-              onChange={(event) => setTimelineFilters((current) => ({ ...current, range: event.target.value as TimelineRange }))}
-              aria-label={t('decisionSignals.timelineRange')}
-            >
-              <option value="30d">{t('decisionSignals.timelineRange.30d')}</option>
-              <option value="90d">{t('decisionSignals.timelineRange.90d')}</option>
-              <option value="180d">{t('decisionSignals.timelineRange.180d')}</option>
-            </select>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+              onChange={(value) => setTimelineFilters((current) => ({ ...current, range: value as TimelineRange }))}
+              options={[
+                { value: '30d', label: t('decisionSignals.timelineRange.30d') },
+                { value: '90d', label: t('decisionSignals.timelineRange.90d') },
+                { value: '180d', label: t('decisionSignals.timelineRange.180d') },
+              ]}
+              placeholder={t('decisionSignals.timelineRange')}
+              className="w-full"
+            />
+            <Select
               value={timelineFilters.status}
-              onChange={(event) => setTimelineFilters((current) => ({ ...current, status: event.target.value as TimelineStatusFilter }))}
-              aria-label={t('decisionSignals.timelineStatus')}
-            >
-              <option value="all">{t('decisionSignals.timelineStatus.all')}</option>
-              <option value="active">{t('decisionSignals.timelineStatus.active')}</option>
-            </select>
-            <select
-              className={SELECT_CHEVRON_CLASS}
+              onChange={(value) => setTimelineFilters((current) => ({ ...current, status: value as TimelineStatusFilter }))}
+              options={[
+                { value: 'all', label: t('decisionSignals.timelineStatus.all') },
+                { value: 'active', label: t('decisionSignals.timelineStatus.active') },
+              ]}
+              placeholder={t('decisionSignals.timelineStatus')}
+              className="w-full"
+            />
+            <Select
               value={timelineFilters.decisionProfile}
-              onChange={(event) => setTimelineFilters((current) => ({
+              onChange={(value) => setTimelineFilters((current) => ({
                 ...current,
-                decisionProfile: event.target.value as TimelineFilters['decisionProfile'],
+                decisionProfile: value as TimelineFilters['decisionProfile'],
               }))}
-              aria-label={t('decisionSignals.timelineProfile')}
-            >
-              <option value="">{t('decisionSignals.allProfiles')}</option>
-              {REASSESS_PROFILES.map((profile) => (
-                <option key={profile} value={profile}>
-                  {t(`decisionSignals.profile.${profile}` as UiTextKey)}
-                </option>
-              ))}
-              <option value="unknown">{t('decisionSignals.profile.unknown')}</option>
-            </select>
+              options={[
+                { value: '', label: t('decisionSignals.allProfiles') },
+                ...REASSESS_PROFILES.map((profile) => ({
+                  value: profile,
+                  label: t(`decisionSignals.profile.${profile}` as UiTextKey),
+                })),
+                { value: 'unknown', label: t('decisionSignals.profile.unknown') },
+              ]}
+              placeholder={t('decisionSignals.timelineProfile')}
+              className="w-full"
+            />
             <button
               type="submit"
               className="btn-secondary inline-flex h-11 items-center justify-center gap-2"

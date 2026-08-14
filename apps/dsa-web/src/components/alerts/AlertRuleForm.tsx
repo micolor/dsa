@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { portfolioApi } from '../../api/portfolio';
 import type {
   AlertRuleCreateRequest,
+  AlertRuleItem,
   AlertSeverity,
   AlertTargetScope,
   AlertType,
@@ -109,6 +110,8 @@ interface AlertRuleFormProps {
   bare?: boolean;
   /** Called after a successful create (after internal field reset). */
   onSuccess?: () => void;
+  /** When provided, the form is pre-filled from an existing rule (edit mode). */
+  editingRule?: AlertRuleItem | null;
 }
 
 function isPortfolioScope(scope: AlertTargetScope): boolean {
@@ -129,7 +132,7 @@ function optionsForScope(scope: AlertTargetScope, language: UiLanguage) {
   return scope === 'portfolio_account' ? ALERT_PORTFOLIO_TYPE_OPTIONS[language] : ALERT_SYMBOL_TYPE_OPTIONS[language];
 }
 
-export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false, bare = false, onSuccess }) => {
+export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false, bare = false, onSuccess, editingRule }) => {
   const { language } = useUiLanguage();
   const text = ALERT_FORM_TEXT[language];
   const [name, setName] = useState('');
@@ -161,6 +164,48 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
   const [marketLightStatuses, setMarketLightStatuses] = useState<MarketLightStatus[]>(['red', 'yellow']);
   const [minDrop, setMinDrop] = useState('10');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // 编辑模式：用现有规则预填表单
+  useEffect(() => {
+    if (!editingRule) return;
+    const params = editingRule.parameters ?? {};
+    setName(editingRule.name || '');
+    setTargetScope(editingRule.targetScope);
+    setSeverity(editingRule.severity);
+    setEnabled(editingRule.enabled);
+    setAlertType(editingRule.alertType);
+    if (editingRule.targetScope === 'market') {
+      setMarketRegion((editingRule.target as MarketRegion) || 'cn');
+    } else if (isPortfolioScope(editingRule.targetScope)) {
+      setPortfolioTarget(editingRule.target || 'all');
+    } else if (editingRule.targetScope === 'watchlist') {
+      setTarget('default');
+    } else {
+      setTarget(editingRule.target || '');
+    }
+    if (params.direction) {
+      const direction = params.direction;
+      if (editingRule.alertType === 'price_cross') setPriceDirection(direction as 'above' | 'below');
+      else if (editingRule.alertType === 'price_change_percent') setChangeDirection(direction as 'up' | 'down');
+      else if (editingRule.alertType === 'macd_cross' || editingRule.alertType === 'kdj_cross') setCrossDirection(direction as 'bullish_cross' | 'bearish_cross');
+      else setThresholdDirection(direction as 'above' | 'below');
+    }
+    if (params.price != null) setPrice(String(params.price));
+    if (params.changePct != null) setChangePct(String(params.changePct));
+    if (params.multiplier != null) setMultiplier(String(params.multiplier));
+    if (params.window != null) setWindow(String(params.window));
+    if (params.period != null) setPeriod(String(params.period));
+    if (params.threshold != null) setThreshold(String(params.threshold));
+    if (params.fastPeriod != null) setFastPeriod(String(params.fastPeriod));
+    if (params.slowPeriod != null) setSlowPeriod(String(params.slowPeriod));
+    if (params.signalPeriod != null) setSignalPeriod(String(params.signalPeriod));
+    if (params.kPeriod != null) setKPeriod(String(params.kPeriod));
+    if (params.dPeriod != null) setDPeriod(String(params.dPeriod));
+    if (params.mode) setStopLossMode(params.mode as PortfolioStopLossMode);
+    if (params.statuses) setMarketLightStatuses(params.statuses as MarketLightStatus[]);
+    if (params.minDrop != null) setMinDrop(String(params.minDrop));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingRule]);
 
   useEffect(() => {
     if (!isPortfolioScope(targetScope)) return undefined;
@@ -782,7 +827,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
             disabled={isSubmitting}
           />
           <Button type="submit" isLoading={isSubmitting} loadingText={text.creating}>
-            {text.create}
+            {editingRule ? text.save : text.create}
           </Button>
         </div>
         {formError ? <p role="alert" className="text-sm text-danger">{formError}</p> : null}
@@ -798,7 +843,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       <DashboardPanelHeader
         className="mb-3"
         eyebrow={text.cardSubtitle}
-        title={text.cardTitle}
+        title={editingRule ? text.editTitle : text.cardTitle}
         titleClassName="text-base font-semibold"
       />
       {formElement}

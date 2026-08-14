@@ -108,6 +108,16 @@ describe('AlertRuleList', () => {
     );
   }
 
+  /** 自定义 Select 组件交互：点击触发按钮展开，再点击 data-value 匹配的选项 */
+  function selectByValue(label: string, value: string) {
+    fireEvent.click(screen.getByLabelText(label));
+    const option = screen.getAllByRole('option').find((el) => el.getAttribute('data-value') === value);
+    if (!option) {
+      throw new Error(`Select "${label}" has no option with value "${value}"`);
+    }
+    fireEvent.click(option);
+  }
+
   it('renders rules, filters, and pagination', () => {
     renderList();
 
@@ -120,8 +130,8 @@ describe('AlertRuleList', () => {
     expect(screen.getByText('KDJ(9,3,3) 死叉')).toBeInTheDocument();
     expect(screen.getByText('冷却中')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('启停状态'), { target: { value: 'enabled' } });
-    fireEvent.change(screen.getByLabelText('规则类型'), { target: { value: 'price_cross' } });
+    selectByValue('启停状态', 'enabled');
+    selectByValue('规则类型', 'price_cross');
     fireEvent.click(screen.getByRole('button', { name: '2' }));
 
     expect(onEnabledFilterChange).toHaveBeenCalledWith('enabled');
@@ -199,6 +209,7 @@ describe('AlertRuleList', () => {
     });
 
     expect(screen.getByText('Alert rules')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Status'));
     expect(screen.getByRole('option', { name: 'All statuses' })).toBeInTheDocument();
     expect(screen.getAllByText('Portfolio drawdown').length).toBeGreaterThan(0);
     expect(screen.getByText('Portfolio account')).toBeInTheDocument();
@@ -244,7 +255,7 @@ describe('AlertRuleList', () => {
     expect(screen.getByText('红灯 / 黄灯')).toBeInTheDocument();
     expect(screen.getByText('Score 下降 >= 15')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('规则类型'), { target: { value: 'market_light_score_drop' } });
+    selectByValue('规则类型', 'market_light_score_drop');
 
     expect(onAlertTypeFilterChange).toHaveBeenCalledWith('market_light_score_drop');
   });

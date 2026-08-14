@@ -250,7 +250,7 @@ function exportResultsCsv(
   language: UiLanguage,
 ): void {
   const escape = (value: string | number | null | undefined) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  const header = [text.stock, text.analysisDate, text.phase, text.aiPrediction, text.actualPerformance, text.result, text.status]
+  const header = [text.stock, text.analysisDate, text.phase, text.aiPrediction, text.actualPerformance, text.result, text.status, text.stopLossTakeProfit, text.simulatedTrade]
     .map(escape)
     .join(',');
   const rows = results.map((row) => {
@@ -264,6 +264,12 @@ function exportResultsCsv(
       row.actualReturnPct != null ? `${row.actualReturnPct}%` : '',
       row.outcome ?? '',
       row.evalStatus ?? '',
+      `${row.stopLoss ?? ''}/${row.takeProfit ?? ''}`,
+      [
+        row.simulatedEntryPrice != null ? `${row.simulatedEntryPrice}→${row.simulatedExitPrice ?? ''}` : '',
+        row.simulatedReturnPct != null ? `${row.simulatedReturnPct}%` : '',
+        row.simulatedExitReason ?? '',
+      ].filter(Boolean).join(' '),
     ].map(escape).join(',');
   });
   const csv = [header, ...rows].join('\n');
@@ -708,6 +714,8 @@ const BacktestPage: React.FC = () => {
                       </th>
                       <th className="px-4 py-3 font-medium">{text.result}</th>
                       <th className="px-4 py-3 font-medium">{text.status}</th>
+                      <th className="px-4 py-3 font-medium">{text.stopLossTakeProfit}</th>
+                      <th className="px-4 py-3 font-medium">{text.simulatedTrade}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -771,6 +779,37 @@ const BacktestPage: React.FC = () => {
                           </td>
                           <td className="px-4 py-3">{outcomeBadge(row.outcome, language)}</td>
                           <td className="px-4 py-3">{statusBadge(row.evalStatus, language)}</td>
+                          <td className="px-4 py-3">
+                            {row.stopLoss != null || row.takeProfit != null ? (
+                              <div className="flex flex-col gap-0.5 text-secondary-text">
+                                <span>
+                                  止损 {row.stopLoss != null ? row.stopLoss : '--'}
+                                  {row.hitStopLoss ? ' ✓' : ''}
+                                </span>
+                                <span>
+                                  止盈 {row.takeProfit != null ? row.takeProfit : '--'}
+                                  {row.hitTakeProfit ? ' ✓' : ''}
+                                </span>
+                              </div>
+                            ) : '--'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {row.simulatedEntryPrice != null ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-secondary-text">
+                                  {row.simulatedEntryPrice} → {row.simulatedExitPrice ?? '--'}
+                                </span>
+                                <span className={
+                                  row.simulatedReturnPct != null
+                                    ? row.simulatedReturnPct > 0 ? 'text-danger' : row.simulatedReturnPct < 0 ? 'text-success' : 'text-secondary-text'
+                                    : 'text-muted-text'
+                                }>
+                                  {pct(row.simulatedReturnPct)}
+                                  {row.simulatedExitReason ? ` · ${row.simulatedExitReason}` : ''}
+                                </span>
+                              </div>
+                            ) : '--'}
+                          </td>
                         </tr>
                       );
                     })}

@@ -344,7 +344,7 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row">
           <textarea
             placeholder={t('settings.intelligentImportPastePlaceholder')}
-            className="input-surface bg-elevated border-border/70 min-h-[72px] w-full rounded-xl border px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-text focus:outline-none"
+            className="input-surface input-focus-glow bg-elevated border-border/70 min-h-[72px] w-full rounded-xl border px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-text focus:outline-none"
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
             disabled={disabled || isLoading}

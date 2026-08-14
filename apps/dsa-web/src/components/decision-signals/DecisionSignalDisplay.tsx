@@ -251,7 +251,7 @@ export const DecisionSignalCard: React.FC<DecisionSignalCardProps> = ({ item, on
     { label: t('decisionSignals.targetPrice'), value: formatNumber(item.targetPrice), tone: 'success' as const },
   ].filter((entry) => hasDisplayValue(entry.value));
   const className = cn(
-    'block w-full rounded-2xl border bg-card/75 p-4 text-left',
+    'flex w-full flex-col justify-start rounded-2xl border bg-card/75 p-4 text-left',
     interactive ? 'transition-colors hover:border-cyan/40 hover:bg-hover/70' : '',
     selected ? 'border-cyan/50 bg-cyan/10' : 'border-border/70',
   );
@@ -259,15 +259,15 @@ export const DecisionSignalCard: React.FC<DecisionSignalCardProps> = ({ item, on
     <>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-base font-semibold text-foreground">
+            {item.stockName || item.stockCode}
+          </h3>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
             <Badge variant={STATUS_VARIANTS[item.status]}>{t(STATUS_LABEL_KEYS[item.status])}</Badge>
             <Badge variant="info">{t('decisionSignals.profile')}: {profileLabel}</Badge>
             <span className="font-mono text-sm text-secondary-text">{item.stockCode}</span>
           </div>
-          <h3 className="mt-2 text-base font-semibold text-foreground">
-            {item.stockName || item.stockCode}
-          </h3>
         </div>
         <div className="text-right text-xs text-secondary-text">
           <div>{getDecisionSignalMarketLabel(item.market, t)}</div>
@@ -529,13 +529,11 @@ export const PortfolioSignalSummary: React.FC<PortfolioSignalSummaryProps> = ({ 
   // hovering the cell surfaces the complete advice via `title`.
   const fullText = [actionLabel, horizonLabel, riskText, watchText].filter(Boolean).join('\n');
   return (
-    <div className="min-w-[8rem] max-w-[13rem] text-left" title={fullText}>
+    <div className="min-w-[6rem] max-w-[11rem] text-left" title={fullText}>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
         {horizonLabel ? <span className="text-[11px] text-secondary-text">{horizonLabel}</span> : null}
       </div>
-      {riskText ? <p className="mt-1 line-clamp-2 text-[11px] text-warning">{riskText}</p> : null}
-      {watchText ? <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">{watchText}</p> : null}
     </div>
   );
 };

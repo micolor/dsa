@@ -132,6 +132,7 @@ const AlertsPage: React.FC = () => {
   const [createError, setCreateError] = useState<ParsedApiError | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<AlertRuleItem | null>(null);
   const [busyRule, setBusyRule] = useState<AlertRuleBusyState | null>(null);
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
   const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
@@ -216,8 +217,13 @@ const AlertsPage: React.FC = () => {
     setCreateError(null);
     setCreateSuccess(null);
     try {
-      const created = await alertsApi.createRule(payload);
-      setCreateSuccess(`已创建告警规则「${created.name}」`);
+      if (editingRule) {
+        const updated = await alertsApi.updateRule(editingRule.id, payload);
+        setCreateSuccess(`已更新告警规则「${updated.name}」`);
+      } else {
+        const created = await alertsApi.createRule(payload);
+        setCreateSuccess(`已创建告警规则「${created.name}」`);
+      }
       await loadRules(1);
       return true;
     } catch (error) {
@@ -226,6 +232,12 @@ const AlertsPage: React.FC = () => {
     } finally {
       setCreateLoading(false);
     }
+  };
+
+  const handleEditRule = (rule: AlertRuleItem) => {
+    setEditingRule(rule);
+    setCreateError(null);
+    setCreateOpen(true);
   };
 
   const handleToggleEnabled = async (rule: AlertRuleItem) => {
@@ -327,7 +339,11 @@ const AlertsPage: React.FC = () => {
               onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
               onDelete={(rule) => void handleDeleteRule(rule)}
               onTest={(rule) => void handleTestRule(rule)}
-              onCreate={() => setCreateOpen(true)}
+              onEdit={handleEditRule}
+              onCreate={() => {
+                setEditingRule(null);
+                setCreateOpen(true);
+              }}
               busyRule={busyRule}
             />
             {testResult ? (
@@ -401,10 +417,13 @@ const AlertsPage: React.FC = () => {
 
       <Dialog
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="新建告警规则"
+        onClose={() => {
+          setCreateOpen(false);
+          setEditingRule(null);
+        }}
+        title={editingRule ? '编辑告警规则' : '新建告警规则'}
         eyebrow="告警中心"
-        ariaLabel="新建告警规则"
+        ariaLabel={editingRule ? '编辑告警规则' : '新建告警规则'}
       >
         {createError ? (
           <div className="mb-4">
@@ -412,10 +431,15 @@ const AlertsPage: React.FC = () => {
           </div>
         ) : null}
         <AlertRuleForm
+          key={editingRule ? `edit-${editingRule.id}` : 'create'}
           onSubmit={handleCreateRule}
           isSubmitting={createLoading}
           bare
-          onSuccess={() => setCreateOpen(false)}
+          editingRule={editingRule}
+          onSuccess={() => {
+            setCreateOpen(false);
+            setEditingRule(null);
+          }}
         />
       </Dialog>
     </AppPage>

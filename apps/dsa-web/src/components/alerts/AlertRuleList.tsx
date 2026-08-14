@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useState } from 'react';
-import { Bell, Trash2 } from 'lucide-react';
+import { Bell, Pencil, Trash2 } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, EmptyState, Pagination, Select } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
@@ -65,9 +65,23 @@ function formatParameters(rule: AlertRuleItem, language: UiLanguage): string {
   if (rule.alertType === 'portfolio_stop_loss') {
     return rule.parameters.mode === 'breach' ? directionLabels.stopLossBreach : directionLabels.stopLossNear;
   }
-  if (rule.alertType === 'portfolio_concentration') return 'top_weight_pct';
-  if (rule.alertType === 'portfolio_drawdown') return 'max_drawdown_pct';
-  if (rule.alertType === 'portfolio_price_stale') return 'price_stale / price_available';
+  if (rule.alertType === 'portfolio_concentration') {
+    const raw = rule.parameters as unknown as Record<string, unknown>;
+    const value = raw.top_weight_pct;
+    return typeof value === 'number'
+      ? `${ALERT_TYPE_LABELS[language].portfolio_concentration} ${value}%`
+      : ALERT_TYPE_LABELS[language].portfolio_concentration;
+  }
+  if (rule.alertType === 'portfolio_drawdown') {
+    const raw = rule.parameters as unknown as Record<string, unknown>;
+    const value = raw.max_drawdown_pct;
+    return typeof value === 'number'
+      ? `${ALERT_TYPE_LABELS[language].portfolio_drawdown} ${value}%`
+      : ALERT_TYPE_LABELS[language].portfolio_drawdown;
+  }
+  if (rule.alertType === 'portfolio_price_stale') {
+    return ALERT_TYPE_LABELS[language].portfolio_price_stale;
+  }
   return `CCI${rule.parameters.period ?? '--'} ${rule.parameters.direction === 'below' ? directionLabels.belowThreshold : directionLabels.aboveThreshold} ${rule.parameters.threshold ?? '--'}`;
 }
 
@@ -77,7 +91,7 @@ function isCoolingDown(rule: AlertRuleItem): boolean {
 
 function formatTarget(rule: AlertRuleItem, language: UiLanguage): string {
   if (rule.targetScope === 'market') return ALERT_MARKET_REGION_LABELS[language][rule.target as MarketRegion] ?? rule.target;
-  if (rule.targetScope === 'watchlist') return 'default';
+  if (rule.targetScope === 'watchlist') return ALERT_SCOPE_LABELS[language].watchlist;
   if (rule.targetScope === 'portfolio_account' || rule.targetScope === 'portfolio_holdings') {
     const text = ALERT_LIST_TEXT[language];
     return rule.target === 'all'
@@ -106,6 +120,7 @@ interface AlertRuleListProps {
   onToggleEnabled: (rule: AlertRuleItem) => void;
   onDelete: (rule: AlertRuleItem) => void;
   onTest: (rule: AlertRuleItem) => void;
+  onEdit?: (rule: AlertRuleItem) => void;
   onCreate?: () => void;
   busyRule?: AlertRuleBusyState | null;
 }
@@ -125,6 +140,7 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
   onToggleEnabled,
   onDelete,
   onTest,
+  onEdit,
   onCreate,
   busyRule = null,
 }) => {
@@ -226,6 +242,18 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
                   <td className="px-3 py-3 text-xs text-secondary-text">{formatDateTime(rule.updatedAt ?? rule.createdAt)}</td>
                   <td className="px-3 py-3">
                     <div className="flex justify-end gap-2">
+                      {onEdit ? (
+                        <Button
+                          size="xsm"
+                          variant="outline"
+                          aria-label={formatUiText(text.editAria, { name: rule.name })}
+                          onClick={() => onEdit(rule)}
+                          disabled={isRuleBusy(rule)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {text.edit}
+                        </Button>
+                      ) : null}
                       <Button
                         size="xsm"
                         variant="outline"

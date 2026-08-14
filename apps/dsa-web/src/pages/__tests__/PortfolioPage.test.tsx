@@ -642,7 +642,7 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
 
     expect(await screen.findByText('600519')).toBeInTheDocument();
-    expect(await screen.findByText('分页后的风险摘要')).toBeInTheDocument();
+    expect(await screen.findByTitle(/分页后的风险摘要/)).toBeInTheDocument();
     expect(decisionSignalsApi.getLatest).toHaveBeenCalledWith('600519', {
       market: 'cn',
       limit: 1,
@@ -669,12 +669,12 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByText('旧 AI 风险')).toBeInTheDocument();
+    expect(await screen.findByTitle(/旧 AI 风险/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '刷新数据' }));
 
-    expect(await screen.findByText('新 AI 风险')).toBeInTheDocument();
+    expect(await screen.findByTitle(/新 AI 风险/)).toBeInTheDocument();
     await waitFor(() => expect(getLatestDecisionSignals).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText('旧 AI 风险')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/旧 AI 风险/)).not.toBeInTheDocument();
   });
 
   it('waits for the selected-account snapshot before loading account-scoped holding signals', async () => {
@@ -700,7 +700,7 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByText('账号信号')).toBeInTheDocument();
+    expect(await screen.findByTitle(/账号信号/)).toBeInTheDocument();
     const signalCallsBeforeSwitch = getLatestDecisionSignals.mock.calls.length;
 
     const accountSelect = screen.getAllByRole('combobox')[0];
@@ -709,7 +709,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => {
       expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false });
     });
-    expect(screen.queryByText('账号信号')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/账号信号/)).not.toBeInTheDocument();
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(signalCallsBeforeSwitch);
 
     await act(async () => {
@@ -770,7 +770,7 @@ describe('PortfolioPage FX refresh', () => {
     const accountSelect = screen.getAllByRole('combobox')[0];
     fireEvent.change(accountSelect, { target: { value: '2' } });
 
-    expect(await screen.findByText('新账号信号')).toBeInTheDocument();
+    expect(await screen.findByTitle(/新账号信号/)).toBeInTheDocument();
 
     await act(async () => {
       oldSignals.resolve({
@@ -782,8 +782,8 @@ describe('PortfolioPage FX refresh', () => {
       await oldSignals.promise;
     });
 
-    expect(screen.getByText('新账号信号')).toBeInTheDocument();
-    expect(screen.queryByText('旧账号晚返回信号')).not.toBeInTheDocument();
+    expect(screen.getByTitle(/新账号信号/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/旧账号晚返回信号/)).not.toBeInTheDocument();
   });
 
   it('matches holding signals by stock-code equivalence and leaves unmatched rows empty', async () => {
@@ -815,8 +815,8 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findAllByText('A 股风险')).toHaveLength(2);
-    expect(screen.getByText('港股风险')).toBeInTheDocument();
+    expect(await screen.findAllByTitle(/A 股风险/)).toHaveLength(2);
+    expect(screen.getByTitle(/港股风险/)).toBeInTheDocument();
     const latestLookupSymbols = getLatestDecisionSignals.mock.calls.map(([stockCode]) => String(stockCode));
     expect(latestLookupSymbols.filter((stockCode) => stockCode.includes('600519'))).toEqual(['600519']);
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(3);
@@ -845,7 +845,7 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByText('已加载风险')).toBeInTheDocument();
+    expect(await screen.findByTitle(/已加载风险/)).toBeInTheDocument();
     expect(await screen.findByText('AI 建议降级')).toBeInTheDocument();
     expect(screen.getByText(/latest AAPL failed/)).toBeInTheDocument();
   });
@@ -864,7 +864,7 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findAllByText('唯一 latest 风险')).toHaveLength(2);
+    expect(await screen.findAllByTitle(/唯一 latest 风险/)).toHaveLength(2);
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(1);
     expect(decisionSignalsApi.list).not.toHaveBeenCalled();
   });

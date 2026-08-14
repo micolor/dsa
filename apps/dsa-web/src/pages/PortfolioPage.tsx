@@ -15,6 +15,7 @@ import {
   Dialog,
   EmptyState,
   InlineAlert,
+  Loading,
   StatCard,
 } from '../components/common';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
@@ -63,6 +64,7 @@ import type {
   PortfolioSnapshotResponse,
   PortfolioTradeListItem,
 } from '../types/portfolio';
+import { useStockIndex } from '../hooks/useStockIndex';
 import { areStockCodesEquivalent, normalizeStockCode } from '../utils/stockCode';
 import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
@@ -198,6 +200,13 @@ const PortfolioPage: React.FC = () => {
   const { language, t } = useUiLanguage();
   const text = PORTFOLIO_TEXT[language];
   const decisionActionLabels = useMemo(() => buildDecisionActionLabelMap(t), [t]);
+  const { index: stockIndex } = useStockIndex();
+  const getStockName = useCallback((symbol: string): string | undefined => {
+    const item = stockIndex.find((s) =>
+      areStockCodesEquivalent(symbol, s.displayCode) || areStockCodesEquivalent(symbol, s.canonicalCode),
+    );
+    return item?.nameZh;
+  }, [stockIndex]);
 
   // Set page title
   useEffect(() => {
@@ -205,7 +214,18 @@ const PortfolioPage: React.FC = () => {
   }, [text.documentTitle]);
 
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<AccountOption>('all');
+  const [selectedAccount, setSelectedAccount] = useState<AccountOption>(() => {
+    const saved = window.localStorage.getItem('portfolio.selectedAccount');
+    if (saved === 'all') return 'all';
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (!Number.isNaN(parsed) && parsed >= 0) return parsed;
+    }
+    return 'all';
+  });
+  useEffect(() => {
+    window.localStorage.setItem('portfolio.selectedAccount', String(selectedAccount));
+  }, [selectedAccount]);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [accountCreating, setAccountCreating] = useState(false);
   const [accountCreateError, setAccountCreateError] = useState<string | null>(null);
@@ -363,30 +383,33 @@ const PortfolioPage: React.FC = () => {
     setIsLoading(true);
     setRiskWarning(null);
     try {
-      const snapshotData = await portfolioApi.getSnapshot({
-        accountId: queryAccountId,
-        costMethod,
-        includeRealtime: false,
-      });
-      setSnapshot(snapshotData);
-      setError(null);
-
-      try {
-        const riskData = await portfolioApi.getRisk({
+      const [snapshotResult, riskResult] = await Promise.allSettled([
+        portfolioApi.getSnapshot({
           accountId: queryAccountId,
           costMethod,
           includeRealtime: false,
-        });
-        setRisk(riskData);
-      } catch (riskErr) {
+        }),
+        portfolioApi.getRisk({
+          accountId: queryAccountId,
+          costMethod,
+          includeRealtime: false,
+        }),
+      ]);
+      if (snapshotResult.status === 'fulfilled') {
+        setSnapshot(snapshotResult.value);
+        setError(null);
+      } else {
+        setSnapshot(null);
         setRisk(null);
-        const parsed = getParsedApiError(riskErr);
+        setError(getParsedApiError(snapshotResult.reason));
+      }
+      if (riskResult.status === 'fulfilled') {
+        setRisk(riskResult.value);
+      } else {
+        setRisk(null);
+        const parsed = getParsedApiError(riskResult.reason);
         setRiskWarning(parsed.message || '风险数据获取失败，已降级为仅展示快照数据。');
       }
-    } catch (err) {
-      setSnapshot(null);
-      setRisk(null);
-      setError(getParsedApiError(err));
     } finally {
       setIsLoading(false);
     }
@@ -683,9 +706,9 @@ const PortfolioPage: React.FC = () => {
         tradeUid: tradeForm.tradeUid || undefined,
         note: tradeForm.note || undefined,
       });
-      await refreshPortfolioData();
       setTradeForm((prev) => ({ ...prev, symbol: '', tradeUid: '', note: '' }));
       setTradeModalOpen(false);
+      void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -707,9 +730,9 @@ const PortfolioPage: React.FC = () => {
         currency: cashForm.currency || undefined,
         note: cashForm.note || undefined,
       });
-      await refreshPortfolioData();
       setCashForm((prev) => ({ ...prev, note: '' }));
       setCashModalOpen(false);
+      void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -732,9 +755,9 @@ const PortfolioPage: React.FC = () => {
         splitRatio: corpForm.splitRatio ? Number(corpForm.splitRatio) : undefined,
         note: corpForm.note || undefined,
       });
-      await refreshPortfolioData();
       setCorpForm((prev) => ({ ...prev, symbol: '', note: '' }));
       setCorpModalOpen(false);
+      void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
     }
@@ -1264,6 +1287,7 @@ const PortfolioPage: React.FC = () => {
                     const rowKey = `${row.accountId}-${row.symbol}-${row.market}`;
                     const analyzing = positionAnalysisLoadingKey === rowKey;
                     const signal = signalByPositionKey.get(rowKey);
+                    const stockName = getStockName(row.symbol);
                     return (
                     <tr
                       key={rowKey}
@@ -1271,7 +1295,10 @@ const PortfolioPage: React.FC = () => {
                       onClick={() => handleFocusPosition(row)}
                     >
                       <td className="py-2 pr-2 text-secondary-text">{row.accountName}</td>
-                      <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
+                      <td className="py-2 pr-2">
+                        <div className="font-mono text-foreground">{row.symbol}</div>
+                        {stockName ? <div className="text-[11px] text-secondary-text">{stockName}</div> : null}
+                      </td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.quantity, 2)}</td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.avgCost, 4)}</td>
                       <td className="py-2 pr-2 text-right">
@@ -1335,11 +1362,13 @@ const PortfolioPage: React.FC = () => {
             title={concentrationMode === 'sector' ? text.sectorConcentration : text.positionConcentrationFallback}
             titleClassName="text-base font-semibold"
           />
-          {concentrationPieData.length > 0 ? (
+          {isLoading ? (
+            <Loading className="h-64" />
+          ) : concentrationPieData.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}>
+                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} isAnimationActive={false}>
                     {concentrationPieData.map((entry, index) => (
                       <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
@@ -1379,6 +1408,22 @@ const PortfolioPage: React.FC = () => {
             <div>{text.triggeredCount}: {risk?.stopLoss?.triggeredCount ?? 0}</div>
             <div>{text.nearCount}: {risk?.stopLoss?.nearCount ?? 0}</div>
             <div>{text.alert}: {risk?.stopLoss?.nearAlert ? text.yes : text.no}</div>
+            {risk?.stopLoss?.items && risk.stopLoss.items.length > 0 ? (
+              <div className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t border-border/50 pt-2">
+                {risk.stopLoss.items.map((item) => (
+                  <div key={`${item.accountId}-${item.symbol}`} className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.isTriggered ? 'bg-danger' : 'bg-warning'}`}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 truncate font-medium text-foreground">{item.symbol}</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-secondary-text">{formatPct(item.lossPct)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -1731,7 +1776,10 @@ const PortfolioPage: React.FC = () => {
               onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
           </div>
           <p className="text-xs text-secondary-text">手续费和税费可留空，系统将按 0 处理。</p>
-          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交交易</Button>
+          <div className="flex gap-2">
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交交易</Button>
+            <Button type="button" variant="outline" size="lg" onClick={() => setTradeModalOpen(false)}>关闭</Button>
+          </div>
         </form>
       </Dialog>
       <Dialog
@@ -1756,7 +1804,10 @@ const PortfolioPage: React.FC = () => {
             value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
           <input className={PORTFOLIO_INPUT_CLASS} placeholder={`币种（可选，默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
             onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value }))} />
-          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交资金流水</Button>
+          <div className="flex gap-2">
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交资金流水</Button>
+            <Button type="button" variant="outline" size="lg" onClick={() => setCashModalOpen(false)}>关闭</Button>
+          </div>
         </form>
       </Dialog>
       <Dialog
@@ -1788,7 +1839,10 @@ const PortfolioPage: React.FC = () => {
               value={corpForm.splitRatio}
               onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
           )}
-          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!writableAccountId}>提交企业行为</Button>
+          <div className="flex gap-2">
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交企业行为</Button>
+            <Button type="button" variant="outline" size="lg" onClick={() => setCorpModalOpen(false)}>关闭</Button>
+          </div>
         </form>
       </Dialog>
       <Dialog

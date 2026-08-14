@@ -927,34 +927,6 @@ describe('StockScreeningPage', () => {
     expect(screen.queryByText(/点击刷新后会拉取热点概念/)).not.toBeInTheDocument();
   });
 
-  it('shows input strategy when strategy is not in preset list', async () => {
-    getScreeningStatus.mockResolvedValueOnce({
-      enabled: true,
-      available: true,
-    });
-    screenStocks.mockResolvedValue({
-      enabled: true,
-      candidates: [],
-      candidateCount: 0,
-    });
-
-    render(<StockScreeningPage />);
-
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('策略'), {
-      target: { value: '__custom_strategy__' },
-    });
-    fireEvent.change(screen.getByLabelText('自定义策略 ID'), {
-      target: { value: 'custom_strategy_alpha' },
-    });
-
-    expect(screen.getByDisplayValue('custom_strategy_alpha')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
-    await waitFor(() => expect(screenStocks).toHaveBeenCalledTimes(1));
-    expect(screenStocks).toHaveBeenCalledWith(expect.objectContaining({ strategy: 'custom_strategy_alpha' }));
-  });
-
   it('uses supported Screening strategy ids and cn market', async () => {
     getStrategies.mockResolvedValueOnce({
       enabled: true,
@@ -981,23 +953,25 @@ describe('StockScreeningPage', () => {
 
     expect(await screen.findByText('选股已开启')).toBeInTheDocument();
 
-    const marketSelect = screen.getByLabelText('市场') as HTMLSelectElement;
-    expect(Array.from(marketSelect.options).map((option) => option.value)).toEqual(['cn']);
-
-    const strategySelect = screen.getByLabelText('策略') as HTMLSelectElement;
-    expect(Array.from(strategySelect.options).map((option) => option.textContent)).toEqual([
+    const strategySelect = screen.getByLabelText('策略');
+    fireEvent.click(strategySelect);
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([
       '平衡选股',
       '资金热度',
       '双低',
       '超跌',
       '缩量回踩',
-      '自定义策略…',
     ]);
+    fireEvent.click(strategySelect); // 关闭下拉
 
-    ['balanced_alpha', 'capital_heat', 'oversold_reversal', 'shrink_pullback'].forEach((id) => {
-      fireEvent.change(strategySelect, { target: { value: id } });
-      expect(strategySelect.value).toBe(id);
-    });
+    const selectStrategy = async (label: string) => {
+      fireEvent.click(strategySelect);
+      fireEvent.click(await screen.findByRole('option', { name: label }));
+    };
+    await selectStrategy('平衡选股');
+    await selectStrategy('资金热度');
+    await selectStrategy('超跌');
+    await selectStrategy('缩量回踩');
 
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
     await waitFor(() => expect(screenStocks).toHaveBeenCalledTimes(1));
@@ -1044,11 +1018,12 @@ describe('StockScreeningPage', () => {
     expect(await screen.findByText('旧策略股票')).toBeInTheDocument();
     expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
 
-    fireEvent.change(screen.getByLabelText('策略'), { target: { value: 'capital_heat' } });
+    fireEvent.click(screen.getByLabelText('策略'));
+    fireEvent.click(await screen.findByRole('option', { name: '资金热度' }));
 
     expect(screen.queryByText('旧策略股票')).not.toBeInTheDocument();
     expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
-    expect(screen.getByLabelText('策略')).toHaveValue('capital_heat');
+    expect(screen.getByLabelText('策略')).toHaveTextContent('资金热度');
   });
 
   it('hands a screening candidate to DSA analysis with mapped skills', async () => {

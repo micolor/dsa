@@ -425,6 +425,21 @@ beforeEach(() => {
   vi.mocked(getDecisionSignalReassessBlockedError).mockReturnValue(null);
 });
 
+/** 自定义 Select 组件交互：点击触发按钮展开，再点击 data-value 匹配的选项 */
+function selectByValue(label: string, value: string) {
+  fireEvent.click(screen.getByLabelText(label));
+  const option = screen.getAllByRole('option').find((el) => el.getAttribute('data-value') === value);
+  if (!option) {
+    throw new Error(`Select "${label}" has no option with value "${value}"`);
+  }
+  fireEvent.click(option);
+}
+
+/** 自定义 Select 组件交互：断言当前选中值（读取触发按钮的 data-value） */
+function expectSelectValue(label: string, value: string) {
+  expect(screen.getByLabelText(label)).toHaveAttribute('data-value', value);
+}
+
 describe('DecisionSignalsPage', () => {
   it('loads active signals by default', async () => {
     renderPage();
@@ -501,11 +516,14 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    expect(within(screen.getByLabelText('市场')).getByRole('option', { name: '日股' })).toHaveValue('jp');
-    expect(within(screen.getByLabelText('市场')).getByRole('option', { name: '韩股' })).toHaveValue('kr');
-    expect(within(screen.getByLabelText('阶段')).getByRole('option', { name: '午间休市' })).toHaveValue('lunch_break');
-    expect(within(screen.getByLabelText('阶段')).getByRole('option', { name: '集合竞价' })).toHaveValue('closing_auction');
-    expect(within(screen.getByLabelText('来源')).getByRole('option', { name: '大盘复盘' })).toHaveValue('market_review');
+    fireEvent.click(screen.getByLabelText('市场'));
+    expect(screen.getByRole('option', { name: '日股' })).toHaveAttribute('data-value', 'jp');
+    expect(screen.getByRole('option', { name: '韩股' })).toHaveAttribute('data-value', 'kr');
+    fireEvent.click(screen.getByLabelText('阶段'));
+    expect(screen.getByRole('option', { name: '午间休市' })).toHaveAttribute('data-value', 'lunch_break');
+    expect(screen.getByRole('option', { name: '集合竞价' })).toHaveAttribute('data-value', 'closing_auction');
+    fireEvent.click(screen.getByLabelText('来源'));
+    expect(screen.getByRole('option', { name: '大盘复盘' })).toHaveAttribute('data-value', 'market_review');
     expect(screen.getByLabelText('来源报告 ID')).toBeInTheDocument();
   });
 
@@ -523,10 +541,13 @@ describe('DecisionSignalsPage', () => {
     renderPage();
 
     await screen.findByText('Horizon');
-    expect(within(screen.getByLabelText('Market')).getByRole('option', { name: 'Japan' })).toHaveValue('jp');
-    expect(within(screen.getByLabelText('Market')).getByRole('option', { name: 'Korea' })).toHaveValue('kr');
-    expect(within(screen.getByLabelText('Phase')).getByRole('option', { name: 'Closing auction' })).toHaveValue('closing_auction');
-    expect(within(screen.getByLabelText('Source')).getByRole('option', { name: 'Market review' })).toHaveValue('market_review');
+    fireEvent.click(screen.getByLabelText('Market'));
+    expect(screen.getByRole('option', { name: 'Japan' })).toHaveAttribute('data-value', 'jp');
+    expect(screen.getByRole('option', { name: 'Korea' })).toHaveAttribute('data-value', 'kr');
+    fireEvent.click(screen.getByLabelText('Phase'));
+    expect(screen.getByRole('option', { name: 'Closing auction' })).toHaveAttribute('data-value', 'closing_auction');
+    fireEvent.click(screen.getByLabelText('Source'));
+    expect(screen.getByRole('option', { name: 'Market review' })).toHaveAttribute('data-value', 'market_review');
     expect(screen.getByLabelText('Source report ID')).toBeInTheDocument();
     expect(screen.getAllByText('Japan').length).toBeGreaterThan(1);
     expect(screen.getByText('10 days')).toBeInTheDocument();
@@ -540,9 +561,9 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    fireEvent.change(screen.getByLabelText('市场'), { target: { value: 'cn' } });
+    selectByValue('市场', 'cn');
     fireEvent.change(screen.getByLabelText('股票代码'), { target: { value: '600519' } });
-    fireEvent.change(screen.getByLabelText('动作'), { target: { value: 'hold' } });
+    selectByValue('动作', 'hold');
     fireEvent.click(screen.getByRole('button', { name: '筛选' }));
 
     await waitFor(() => {
@@ -561,11 +582,11 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    fireEvent.change(screen.getByLabelText('市场'), { target: { value: 'cn' } });
+    selectByValue('市场', 'cn');
     fireEvent.change(screen.getByLabelText('股票代码'), { target: { value: '600519' } });
-    fireEvent.change(screen.getByLabelText('动作'), { target: { value: 'hold' } });
-    fireEvent.change(screen.getByLabelText('来源'), { target: { value: 'alert' } });
-    fireEvent.change(screen.getByLabelText('状态'), { target: { value: 'closed' } });
+    selectByValue('动作', 'hold');
+    selectByValue('来源', 'alert');
+    selectByValue('状态', 'closed');
     fireEvent.change(screen.getByLabelText('来源报告 ID'), { target: { value: '3001' } });
     fireEvent.click(screen.getByRole('button', { name: '筛选' }));
 
@@ -1202,8 +1223,7 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    const marketSelect = screen.getByLabelText('市场');
-    fireEvent.change(marketSelect, { target: { value: 'cn' } });
+    selectByValue('市场', 'cn');
     fireEvent.click(screen.getByRole('button', { name: '筛选' }));
     await waitFor(() => {
       expect(decisionSignalsApi.list).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1211,7 +1231,7 @@ describe('DecisionSignalsPage', () => {
       }));
     });
 
-    fireEvent.change(marketSelect, { target: { value: 'hk' } });
+    selectByValue('市场', 'hk');
     submitCurrentStock('600519');
 
     await waitFor(() => {
@@ -1277,8 +1297,10 @@ describe('DecisionSignalsPage', () => {
     expect(screen.getAllByText('选择股票查看 AI 建议').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: '查询时间线' })).toBeDisabled();
     expect(decisionSignalsApi.list).toHaveBeenCalledTimes(1);
-    expect(within(screen.getByLabelText('时间线状态')).queryByRole('option', { name: '已关闭' })).not.toBeInTheDocument();
-    expect(within(screen.getByLabelText('时间线风格')).getByRole('option', { name: '未知' })).toHaveValue('unknown');
+    fireEvent.click(screen.getByLabelText('时间线状态'));
+    expect(screen.queryByRole('option', { name: '已关闭' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('时间线风格'));
+    expect(screen.getByRole('option', { name: '未知' })).toHaveAttribute('data-value', 'unknown');
   });
 
   it('queries timeline with independent filters and no default status', async () => {
@@ -1288,9 +1310,9 @@ describe('DecisionSignalsPage', () => {
     submitCurrentStock('600519');
     await waitFor(() => expect(decisionSignalsApi.list).toHaveBeenCalledTimes(2));
 
-    fireEvent.change(screen.getByLabelText('时间线市场'), { target: { value: 'cn' } });
-    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '30d' } });
-    fireEvent.change(screen.getByLabelText('时间线风格'), { target: { value: 'unknown' } });
+    selectByValue('时间线市场', 'cn');
+    selectByValue('时间范围', '30d');
+    selectByValue('时间线风格', 'unknown');
     fireEvent.click(screen.getByRole('button', { name: '查询时间线' }));
 
     await waitFor(() => {
@@ -1323,20 +1345,20 @@ describe('DecisionSignalsPage', () => {
     }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('时间线市场')).toHaveValue('cn');
+      expectSelectValue('时间线市场', 'cn');
       expect(decisionSignalsApi.list).toHaveBeenLastCalledWith(expect.objectContaining({
         stockCode: '600519',
         market: 'cn',
       }));
     });
 
-    fireEvent.change(screen.getByLabelText('时间线市场'), { target: { value: 'hk' } });
+    selectByValue('时间线市场', 'hk');
     const sameCandidateButton = getHistoryCandidateButton();
     expect(sameCandidateButton).toBeTruthy();
     fireEvent.click(sameCandidateButton as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('时间线市场')).toHaveValue('hk');
+      expectSelectValue('时间线市场', 'hk');
       expect(decisionSignalsApi.list).toHaveBeenLastCalledWith(expect.objectContaining({
         stockCode: '600519',
         market: 'hk',
@@ -1358,7 +1380,7 @@ describe('DecisionSignalsPage', () => {
     fireEvent.click(historyCandidateButton);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('时间线市场')).toHaveValue('cn');
+      expectSelectValue('时间线市场', 'cn');
       expect(decisionSignalsApi.list).toHaveBeenLastCalledWith(expect.objectContaining({
         stockCode: '600519',
         market: 'cn',
@@ -1367,7 +1389,7 @@ describe('DecisionSignalsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '清空当前股票' }));
     await waitFor(() => {
-      expect(screen.getByLabelText('时间线市场')).toHaveValue('');
+      expectSelectValue('时间线市场', '');
     });
 
     submitCurrentStock('AAPL');
@@ -1388,11 +1410,11 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    fireEvent.change(screen.getByLabelText('时间线市场'), { target: { value: 'us' } });
+    selectByValue('时间线市场', 'us');
     submitCurrentStock('AAPL');
 
     await waitFor(() => {
-      expect(screen.getByLabelText('时间线市场')).toHaveValue('us');
+      expectSelectValue('时间线市场', 'us');
       expect(decisionSignalsApi.getLatest).toHaveBeenLastCalledWith('AAPL', {
         market: undefined,
         limit: 5,
@@ -1411,10 +1433,10 @@ describe('DecisionSignalsPage', () => {
     submitCurrentStock('AAPL');
     await waitFor(() => expect(decisionSignalsApi.list).toHaveBeenCalledTimes(2));
 
-    fireEvent.change(screen.getByLabelText('时间线市场'), { target: { value: 'us' } });
-    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '30d' } });
-    fireEvent.change(screen.getByLabelText('时间线状态'), { target: { value: 'active' } });
-    fireEvent.change(screen.getByLabelText('时间线风格'), { target: { value: 'conservative' } });
+    selectByValue('时间线市场', 'us');
+    selectByValue('时间范围', '30d');
+    selectByValue('时间线状态', 'active');
+    selectByValue('时间线风格', 'conservative');
 
     expect(decisionSignalsApi.list).toHaveBeenCalledTimes(2);
 
@@ -1446,7 +1468,7 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    fireEvent.change(screen.getByLabelText('时间线状态'), { target: { value: 'active' } });
+    selectByValue('时间线状态', 'active');
     submitCurrentStock('AAPL');
 
     await waitFor(() => {
@@ -1522,7 +1544,7 @@ describe('DecisionSignalsPage', () => {
     renderPage();
     await screen.findByText('贵州茅台');
 
-    fireEvent.change(screen.getByLabelText('时间线状态'), { target: { value: 'active' } });
+    selectByValue('时间线状态', 'active');
     submitCurrentStock('AAPL');
     fireEvent.click(await screen.findByTestId('timeline-click-8'));
     const dialog = await screen.findByRole('dialog');

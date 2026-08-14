@@ -41,10 +41,8 @@ import { CandidateListItem } from '../components/screening/CandidateListItem';
 import { formatNumber } from '../components/screening/candidateFormat';
 import { useScreeningTaskStore } from '../stores/screeningTaskStore';
 
-const MARKETS = [{ id: 'cn', label: 'A 股' }];
 const SCREEN_TASK_STORAGE_KEY = 'dsa.screening.activeScreenTask.v1';
 const SCREEN_TASK_POLL_INTERVAL_MS = 2000;
-const CUSTOM_STRATEGY_OPTION_VALUE = '__custom_strategy__';
 const STRATEGY_CATEGORY_LABELS: Record<string, string> = {
   framework: '综合',
   income: '收益',
@@ -90,6 +88,68 @@ const readPersistedScreenTask = (): PersistedScreenTask | null => {
       strategy: typeof parsed.strategy === 'string' && parsed.strategy.trim() ? parsed.strategy : 'dual_low',
       maxResults: Number.isFinite(restoredMaxResults) ? Math.min(100, Math.max(1, restoredMaxResults)) : 3,
     };
+  } catch {
+    return null;
+  }
+};
+
+const SCREEN_FORM_STORAGE_KEY = 'dsa.screening.formPrefs.v1';
+
+type ScreenFormPrefs = {
+  market: string;
+  strategy: string;
+  maxResults: number;
+};
+
+const readScreenFormPrefs = (): ScreenFormPrefs | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(SCREEN_FORM_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<ScreenFormPrefs>;
+    const restoredMaxResults = Number(parsed.maxResults);
+    return {
+      market: typeof parsed.market === 'string' && parsed.market.trim() ? parsed.market : 'cn',
+      strategy: typeof parsed.strategy === 'string' && parsed.strategy.trim() ? parsed.strategy : 'dual_low',
+      maxResults: Number.isFinite(restoredMaxResults) ? Math.min(100, Math.max(1, restoredMaxResults)) : 3,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const persistScreenFormPrefs = (prefs: ScreenFormPrefs) => {
+  try {
+    window.localStorage.setItem(SCREEN_FORM_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // localStorage 写入失败时静默忽略。
+  }
+};
+
+const SCREEN_RESULT_STORAGE_KEY = 'dsa.screening.lastResult.v1';
+
+const persistScreenResult = (result: ScreeningScreenResponse) => {
+  try {
+    window.localStorage.setItem(SCREEN_RESULT_STORAGE_KEY, JSON.stringify(result));
+  } catch {
+    // localStorage 写入失败时静默忽略。
+  }
+};
+
+const readScreenResult = (): ScreeningScreenResponse | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(SCREEN_RESULT_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    return JSON.parse(raw) as ScreeningScreenResponse;
   } catch {
     return null;
   }
@@ -656,27 +716,39 @@ const getHotspotIcon = (topic: string) => {
 };
 
 const MiniSparkline: React.FC<{ score?: number | null; selected?: boolean }> = ({ score, selected }) => {
-  const normalizedScore = Number.isFinite(Number(score)) ? Math.max(0, Math.min(100, Number(score))) : 65;
-  const lift = Math.max(0, Math.min(16, normalizedScore / 7));
-  const path = `M2 35 C12 ${32 - lift / 4}, 16 ${34 - lift / 2}, 24 ${28 - lift / 3} S38 ${29 - lift}, 46 ${23 - lift / 2} S62 ${24 - lift}, 72 ${16 - lift / 3} S86 ${15 - lift}, 94 ${7}`;
+  const normalized = Number.isFinite(Number(score)) ? Math.max(0, Math.min(100, Number(score))) : 0;
   return (
-    <svg className="h-8 w-20" viewBox="0 0 96 40" aria-hidden="true">
-      <path d={`${path} L94 40 L2 40 Z`} fill={selected ? 'rgba(249,115,22,0.14)' : 'rgba(59,130,246,0.12)'} />
-      <path d={path} fill="none" stroke={selected ? '#f97316' : '#3b82f6'} strokeLinecap="round" strokeWidth="2" />
-    </svg>
+    <div className="flex h-8 w-20 flex-col justify-end gap-1" aria-hidden="true">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+        <div
+          className={`h-full rounded-full transition-all ${selected ? 'bg-orange-500' : 'bg-blue-500'}`}
+          style={{ width: `${normalized}%` }}
+        />
+      </div>
+      <span className={`text-right text-[10px] font-medium tabular-nums ${selected ? 'text-orange-500' : 'text-blue-500'}`}>
+        {Math.round(normalized)}
+      </span>
+    </div>
   );
 };
 
 const StockScreeningPage: React.FC = () => {
   const navigate = useNavigate();
   const [restoredTask] = useState<PersistedScreenTask | null>(() => readPersistedScreenTask());
+  const [formPrefs] = useState<ScreenFormPrefs | null>(() => readScreenFormPrefs());
+  const [restoredResult] = useState<ScreeningScreenResponse | null>(() => readScreenResult());
   const [enabled, setEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
-  const [market, setMarket] = useState(restoredTask?.market || 'cn');
-  const [strategy, setStrategy] = useState(restoredTask?.strategy || 'dual_low');
+  const [market] = useState(formPrefs?.market ?? restoredTask?.market ?? 'cn');
+  const [strategy, setStrategy] = useState(formPrefs?.strategy ?? restoredTask?.strategy ?? 'dual_low');
   const [strategies, setStrategies] = useState<ScreeningStrategy[]>([]);
-  const [maxResults, setMaxResults] = useState(restoredTask?.maxResults || 3);
-  const [candidates, setCandidates] = useState<ScreeningCandidate[]>([]);
+  const [maxResults, setMaxResults] = useState(formPrefs?.maxResults ?? restoredTask?.maxResults ?? 3);
+
+  // 市场/策略/返回数量改变时持久化到 localStorage，刷新/重开后仍记住上次选择。
+  useEffect(() => {
+    persistScreenFormPrefs({ market, strategy, maxResults });
+  }, [market, strategy, maxResults]);
+  const [candidates, setCandidates] = useState<ScreeningCandidate[]>(restoredResult?.candidates ?? []);
   const [hotspots, setHotspots] = useState<ScreeningHotspot[]>([]);
   const [hotspotsUpdatedAt, setHotspotsUpdatedAt] = useState<string | null>(null);
   const [hotspotsExpanded, setHotspotsExpanded] = useState(false);
@@ -690,8 +762,8 @@ const StockScreeningPage: React.FC = () => {
   const [hotspotDetailError, setHotspotDetailError] = useState('');
   const [loadingHotspots, setLoadingHotspots] = useState(false);
   const [hotspotError, setHotspotError] = useState('');
-  const [screenMeta, setScreenMeta] = useState<ScreeningScreenResponse | null>(null);
-  const [expandedCode, setExpandedCode] = useState<string | null>(null);
+  const [screenMeta, setScreenMeta] = useState<ScreeningScreenResponse | null>(restoredResult);
+  const [expandedCode, setExpandedCode] = useState<string | null>(restoredResult?.candidates?.[0]?.code ?? null);
   const [loading, setLoading] = useState(Boolean(restoredTask?.taskId));
   const [enabling, setEnabling] = useState(false);
   const [loadingStrategies, setLoadingStrategies] = useState(false);
@@ -727,6 +799,7 @@ const StockScreeningPage: React.FC = () => {
     setScreenMeta(result);
     setCandidates(nextCandidates);
     setExpandedCode(nextCandidates[0]?.code ?? null);
+    persistScreenResult(result);
   }, []);
 
   const clearScreeningResults = () => {
@@ -1102,13 +1175,6 @@ const StockScreeningPage: React.FC = () => {
     setStrategy(nextStrategy);
   };
 
-  const handleMarketChange = (nextMarket: string) => {
-    if (nextMarket !== market) {
-      clearScreeningResults();
-    }
-    setMarket(nextMarket);
-  };
-
   const handleMaxResultsChange = (nextMaxResults: number) => {
     if (nextMaxResults !== maxResults) {
       clearScreeningResults();
@@ -1421,53 +1487,21 @@ const StockScreeningPage: React.FC = () => {
           actions={<Badge size="sm" variant="info" className="w-fit">{selectedStrategyTag}</Badge>}
         />
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr_180px_auto] lg:items-end">
-          <label className="space-y-2 text-xs font-medium text-secondary-text">
-            市场
-            <Select
-              value={market}
-              disabled={loading}
-              placeholder=""
-              options={MARKETS.map((item) => ({ value: item.id, label: item.label }))}
-              onChange={(value) => handleMarketChange(value)}
-            />
-          </label>
-
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_180px_auto] lg:items-end">
           <div className="space-y-2 text-xs font-medium text-secondary-text">
             <label htmlFor="screening-strategy">策略</label>
             <Select
               id="screening-strategy"
-              value={selectedStrategy ? strategy : CUSTOM_STRATEGY_OPTION_VALUE}
+              value={strategy}
               disabled={loading || loadingStrategies}
               placeholder=""
-              options={[
-                ...strategies.map((item) => ({
-                  value: item.id,
-                  label: item.name || item.title || item.id,
-                })),
-                { value: CUSTOM_STRATEGY_OPTION_VALUE, label: '自定义策略…' },
-              ]}
-              onChange={(value) =>
-                handleStrategyChange(
-                  value === CUSTOM_STRATEGY_OPTION_VALUE ? '' : value,
-                )
-              }
+              options={strategies.map((item) => ({
+                value: item.id,
+                label: item.name || item.title || item.id,
+              }))}
+              onChange={(value) => handleStrategyChange(value)}
             />
           </div>
-
-          {!selectedStrategy && !loadingStrategies ? (
-            <label className="space-y-2 text-xs font-medium text-secondary-text lg:col-start-2">
-              自定义策略 ID
-              <input
-                aria-label="自定义策略 ID"
-                className="input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-3 text-sm"
-                value={strategy}
-                disabled={loading}
-                placeholder="输入策略 ID"
-                onChange={(event) => handleStrategyChange(event.target.value)}
-              />
-            </label>
-          ) : null}
 
           <label className="space-y-2 text-xs font-medium text-secondary-text">
             返回数量

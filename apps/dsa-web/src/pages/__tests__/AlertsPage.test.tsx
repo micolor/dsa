@@ -258,7 +258,8 @@ describe('AlertsPage', () => {
 
     render(<AlertsPage />);
 
-    fireEvent.change(screen.getByLabelText('启停状态'), { target: { value: 'disabled' } });
+    fireEvent.click(screen.getByLabelText('启停状态'));
+    fireEvent.click(await screen.findByRole('option', { name: '已停用' }));
     await waitFor(() => expect(listRules).toHaveBeenCalledTimes(2));
 
     filteredRequest.resolve({ items: [filteredRule], total: 1, page: 1, pageSize: 20 });
