@@ -2,8 +2,15 @@ import type React from 'react';
 import { useState } from 'react';
 import { Badge, EmptyState, Pagination } from '../common';
 import type { PaperSignalRecord, PaperTrade } from '../../types/paper';
+import type { DecisionAction } from '../../types/analysis';
 import type { UiLanguage } from '../../i18n/uiText';
+import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { PAPER_TRADING_TEXT } from '../../locales/featureText';
+import {
+  buildDecisionActionLabelMap,
+  getDecisionActionLabel,
+  getDecisionActionTone,
+} from '../../utils/decisionAction';
 
 type Props = {
   signals: PaperSignalRecord[];
@@ -16,22 +23,7 @@ type Props = {
   language: UiLanguage;
 };
 
-const DISPOSITION_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'default'> = {
-  opened: 'success',
-  added: 'success',
-  closed: 'danger',
-  reduced: 'warning',
-  hold: 'default',
-  ignored: 'default',
-};
-
-const SIGNAL_ACTION_VARIANT: Record<string, 'success' | 'danger' | 'default'> = {
-  buy: 'success',
-  add: 'success',
-  sell: 'danger',
-  reduce: 'danger',
-  hold: 'default',
-};
+type MetaBadgeVariant = 'success' | 'danger' | 'warning' | 'info' | 'default';
 
 export const PaperRecordsList: React.FC<Props> = ({
   signals,
@@ -44,6 +36,16 @@ export const PaperRecordsList: React.FC<Props> = ({
   language,
 }) => {
   const text = PAPER_TRADING_TEXT[language];
+  const { t } = useUiLanguage();
+  const actionLabels = buildDecisionActionLabelMap(t);
+  const dispositionMeta: Record<string, { label: string; variant: MetaBadgeVariant }> = {
+    opened: { label: text.dispOpened, variant: 'success' },
+    added: { label: text.dispAdded, variant: 'success' },
+    closed: { label: text.dispClosed, variant: 'danger' },
+    reduced: { label: text.dispReduced, variant: 'warning' },
+    hold: { label: text.dispHold, variant: 'default' },
+    ignored: { label: text.dispIgnored, variant: 'default' },
+  };
   const [tab, setTab] = useState<'signal' | 'trade'>('signal');
 
   const totalPages = Math.max(1, Math.ceil((tab === 'signal' ? signalTotal : tradeTotal) / pageSize));
@@ -70,17 +72,30 @@ export const PaperRecordsList: React.FC<Props> = ({
         <EmptyState title={text.noRecordsTitle} description={text.noRecordsDescription} />
       ) : tab === 'signal' ? (
         <div className="space-y-2">
-          {signals.map((record) => (
-            <div key={record.signalId} className="home-subpanel flex items-center justify-between p-3">
-              <div className="flex items-center gap-2">
-                <Badge variant={SIGNAL_ACTION_VARIANT[record.action] ?? 'default'}>{record.action}</Badge>
-                <Badge variant={DISPOSITION_VARIANT[record.disposition] ?? 'default'}>
-                  {record.disposition}
+          {signals.map((record) => {
+            const signalAction = record.action as DecisionAction;
+            const actionLabel = getDecisionActionLabel(signalAction, null, null, record.action, actionLabels)
+              ?? record.action;
+            const actionVariant = getDecisionActionTone(signalAction) as MetaBadgeVariant;
+            const disposition = dispositionMeta[record.disposition];
+            return (
+            <div key={record.signalId} className="home-subpanel flex items-center justify-between gap-2 p-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge variant={actionVariant}>{actionLabel}</Badge>
+                <Badge variant={disposition?.variant ?? 'default'}>
+                  {disposition?.label ?? record.disposition}
                 </Badge>
+                {record.stockCode ? (
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                    {record.stockName || record.stockCode}
+                    <span className="ml-1.5 font-mono text-xs text-secondary-text">{record.stockCode}</span>
+                  </span>
+                ) : null}
               </div>
-              <span className="text-xs text-secondary-text">{record.processedAt}</span>
+              <span className="shrink-0 text-xs text-secondary-text">{record.processedAt}</span>
             </div>
-          ))}
+          );
+          })}
         </div>
       ) : (
         <div className="space-y-2">

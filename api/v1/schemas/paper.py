@@ -45,6 +45,7 @@ class PaperPositionItem(BaseModel):
     entry_date: Optional[str] = None
     stop_loss: Optional[float] = None
     target_price: Optional[float] = None
+    status: Optional[str] = None
     status: str = "open"
 
 
@@ -69,6 +70,8 @@ class PaperSignalItem(BaseModel):
     action: str
     disposition: str
     processed_at: str
+    stock_code: Optional[str] = None
+    stock_name: Optional[str] = None
 
 
 class PaperSignalListResponse(BaseModel):

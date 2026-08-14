@@ -243,6 +243,16 @@ class DecisionSignalRepository:
             ).scalars().all()
             return list(rows)
 
+    def get_by_ids(self, signal_ids: List[int]) -> Dict[int, DecisionSignalRecord]:
+        """Batch-fetch decision signals by primary key, keyed by id."""
+        if not signal_ids:
+            return {}
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(DecisionSignalRecord).where(DecisionSignalRecord.id.in_(signal_ids))
+            ).scalars().all()
+            return {row.id: row for row in rows}
+
     def list_active_by_stock_actions(
         self,
         *,

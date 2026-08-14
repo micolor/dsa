@@ -60,6 +60,8 @@ export interface PaperSignalRecord {
   action: string;
   disposition: string;
   processedAt: string;
+  stockCode?: string | null;
+  stockName?: string | null;
 }
 
 export interface PaperSignalList {

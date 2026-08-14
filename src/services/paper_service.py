@@ -77,10 +77,18 @@ class PaperService:
         account = self.paper_repo.get_account(account_id) or self.paper_repo.ensure_account()
         as_of = as_of_date or date.today()
         if self.paper_repo.has_snapshot(account.id, as_of):
-            return self.get_snapshot(account.id)
+            # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
+            snap = self.get_snapshot(account.id)
+            return {
+                "account_id": snap["account_id"],
+                "trade_date": as_of.isoformat(),
+                "cash": snap["cash"],
+                "market_value": snap["market_value"],
+                "net_value": snap["net_value"],
+                "return_pct": snap["return_pct"],
+            }
 
-        snapshot = self._valuate(account, as_of)
-        return snapshot
+        return self._valuate(account, as_of)
 
     def backfill_history(
         self,
@@ -182,12 +190,20 @@ class PaperService:
 
     def get_signals(self, account_id: int, page: int = 1, limit: int = 50) -> Dict[str, Any]:
         records = self.paper_repo.list_signal_records(account_id, page=page, limit=limit)
+        signal_ids = [r.signal_id for r in records if r.signal_id]
+        signals_by_id = self.decision_repo.get_by_ids(signal_ids)
         items = [
             {
                 "signal_id": r.signal_id,
                 "action": r.action,
                 "disposition": r.disposition,
                 "processed_at": r.processed_at.isoformat(),
+                "stock_code": (
+                    signals_by_id[r.signal_id].stock_code if r.signal_id in signals_by_id else None
+                ),
+                "stock_name": (
+                    signals_by_id[r.signal_id].stock_name if r.signal_id in signals_by_id else None
+                ),
             }
             for r in records
         ]
