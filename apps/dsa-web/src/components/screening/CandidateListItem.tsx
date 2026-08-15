@@ -21,7 +21,7 @@ interface CandidateListItemProps {
   /** true when the run used deterministic factor ranking (否则展示 LLM 分) */
   factorRanking: boolean;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle: (code: string) => void;
   onAnalyze: (candidate: ScreeningCandidate) => void;
 }
 
@@ -274,7 +274,7 @@ const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
         wrapperClassName="w-full min-w-0 flex-1"
         buttonClassName="w-full min-w-0 flex-1 text-left p-3"
         ariaLabel={`${stockName} ${item.code}，展开查看详情`}
-        onClick={onToggle}
+        onClick={() => onToggle(item.code)}
         leading={leading}
         title={(
           <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">

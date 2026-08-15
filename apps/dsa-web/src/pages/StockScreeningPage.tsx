@@ -1609,7 +1609,7 @@ const StockScreeningPage: React.FC = () => {
                 rank={item.rank}
                 factorRanking={factorRanking}
                 expanded={expandedCode === item.code}
-                onToggle={() => handleToggleCandidate(item.code)}
+                onToggle={handleToggleCandidate}
                 onAnalyze={handleAnalyzeCandidate}
               />
             ))}
