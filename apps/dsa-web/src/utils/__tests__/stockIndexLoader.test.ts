@@ -5,7 +5,6 @@
  */
 
 import {
-  loadStockIndex,
   compressIndex,
   findStockInIndex,
   getPopularStocks,
@@ -17,6 +16,10 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 // Mock fetch
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+// `loadStockIndex` uses a module-level hourly cache. Re-import it fresh per test
+// (via vi.resetModules) so one test's successful load doesn't leak into the next.
+let loadStockIndex: typeof import('../stockIndexLoader').loadStockIndex;
 
 describe('stockIndexLoader', () => {
   const mockIndexData: StockIndexItem[] = [
@@ -82,7 +85,10 @@ describe('stockIndexLoader', () => {
     },
   ];
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    const fresh = await import('../stockIndexLoader');
+    loadStockIndex = fresh.loadStockIndex;
     vi.clearAllMocks();
   });
 

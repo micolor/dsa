@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [测试] 修复股票指数加载器测试的模块级缓存污染：`loadStockIndex` 存在按小时缓存的模块级单例，同文件内用例未重置便复用上一用例的成功结果，导致压缩格式/空数组/fallback 等 6 条用例读到泄漏数据（如期望 2 条却得 5 条、fetch 从未被调用）；改为 `beforeEach` 中 `vi.resetModules()` + 动态重新 import 加载器，使每条用例获得干净的模块状态（纯函数仍静态导入，加载器本身行为不变）
 - [测试] 同步设置页测试到自定义 `Select`（listbox）交互契约：共享 `Select` 由原生 `<select>` 重构为按钮触发器 + 门户下拉后，`SettingsField`/`LLMChannelEditor`/`NotificationTestPanel` 共 23 条测试仍按原生 select 交互（`getByRole('option')`、`.toHaveValue()`、`fireEvent.change`）而失败；改为「点击触发器打开下拉 → `await findByRole('option')` → 点击选项」，`.toHaveValue` 改断言 `data-value`
 - [改进] 设置页调度状态刷新加入并发守卫（`schedulerStatusRequestIdRef`）：手动刷新或调度运行时状态切换时只让最新一次请求生效，避免慢响应覆盖新状态（对齐页内 `setupStatusRequestIdRef` 既有范式）
 - [修复] 持仓页快照/风险与事件列表加载加入并发守卫：账户/成本法或事件筛选快速切换时只让最新一次请求生效（`snapshotRequestRef`/`eventsRequestRef`），避免慢响应覆盖新数据或提前清除加载态，并作废卸载后的在途请求
