@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.core.pipeline import StockAnalysisPipeline
+from src.core.pipeline import StockAnalysisPipeline, _chip_not_supported
 
 
 class PipelineFetchErrorTestCase(unittest.TestCase):
@@ -61,6 +61,15 @@ class PipelineFetchErrorTestCase(unittest.TestCase):
             ["600519", "000001", "920748"],
         )
         self.assertEqual(mock_target.call_count, 3)
+
+    def test_chip_not_supported_marks_non_a_share_and_etf(self):
+        # 美股 / 港股等非 cn 市场，以及 A 股 ETF，均无筹码分布数据。
+        for code in ("AAPL", "hk00700", "00700", "510300", "159915"):
+            self.assertTrue(_chip_not_supported(code), f"{code} 应判定为不支持筹码")
+
+        # 普通 A 股（沪深 / 北交所 / 科创板 / 创业板）支持筹码分布。
+        for code in ("600519", "000001", "920748", "688001", "300750"):
+            self.assertFalse(_chip_not_supported(code), f"{code} 应判定为支持筹码")
 
 
 if __name__ == "__main__":

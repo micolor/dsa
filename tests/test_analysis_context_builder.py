@@ -401,6 +401,31 @@ def test_builder_rejects_non_mapping_artifact_to_dict() -> None:
         AnalysisContextBuilder.build(_artifacts(trend_result=_InvalidTrend()))
 
 
+def test_fundamentals_surfaces_failed_source_chain_as_warning() -> None:
+    # 失败原因应落到 block warnings（基于已脱敏的 source_chain），
+    # 让用户在诊断卡看到「哪个数据源、什么状态」而非笼统的「缺失」；
+    # 同时不得引用可能含密钥的原始 errors。
+    block = AnalysisContextBuilder.build(
+        _artifacts(
+            fundamental_context={
+                "status": "partial",
+                "coverage": {"valuation": "ok"},
+                "source_chain": [
+                    {"provider": "realtime_quote", "result": "ok", "duration_ms": 12},
+                    {"provider": "fundamental_bundle", "result": "failed", "duration_ms": 800},
+                ],
+                "errors": ["token=secret should not be persisted"],
+            }
+        )
+    ).blocks["fundamentals"]
+
+    assert "fundamental_bundle:failed" in block.warnings
+    assert "realtime_quote:ok" not in block.warnings
+    # 不引用原始 errors，避免密钥泄露。
+    assert "token=secret" not in block.warnings
+    assert "token=secret" not in str(block.model_dump(mode="json"))
+
+
 def test_news_block_treats_blank_as_missing_and_records_pack_metadata() -> None:
     blank = AnalysisContextBuilder.build(
         _artifacts(news_context="  ", news_result_count=0)

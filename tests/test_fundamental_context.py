@@ -389,6 +389,64 @@ class TestFundamentalContext(unittest.TestCase):
         self.assertGreater(budgets.get("dragon_tiger", 0.0), 0.0)
         self.assertGreater(budgets.get("boards", 0.0), 0.0)
 
+    def test_akshare_empty_bundle_falls_back_to_baostock(self) -> None:
+        """When AkShare bundle returns no growth/earnings content, Baostock fallback fires and merges."""
+        manager = DataFetcherManager(fetchers=[])
+        cfg = SimpleNamespace(
+            enable_fundamental_pipeline=True,
+            fundamental_cache_ttl_seconds=120,
+            fundamental_stage_timeout_seconds=2.0,
+            fundamental_fetch_timeout_seconds=0.8,
+            fundamental_retry_max=1,
+        )
+        quote = SimpleNamespace(
+            pe_ratio=12.3,
+            pb_ratio=2.1,
+            total_mv=1.0e11,
+            circ_mv=7.0e10,
+            source=SimpleNamespace(value="tencent"),
+        )
+        akshare_bundle = {
+            "status": "not_supported",
+            "growth": {},
+            "earnings": {},
+            "institution": {},
+            "source_chain": [],
+            "errors": [],
+        }
+        baostock_bundle = {
+            "status": "partial",
+            "growth": {"roe": 0.105, "net_profit_yoy": 0.01},
+            "earnings": {"financial_report": {"report_date": "2026-03-31", "roe": 0.105}},
+            "institution": {},
+            "source_chain": ["growth:baostock_profit"],
+            "errors": [],
+        }
+        with patch("src.config.get_config", return_value=cfg), \
+                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch(
+                    "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                    return_value=akshare_bundle,
+                ), \
+                patch(
+                    "data_provider.baostock_fundamental_adapter.BaostockFundamentalAdapter.get_fundamental_bundle",
+                    return_value=baostock_bundle,
+                ) as mock_baostock, \
+                patch.object(manager, "get_capital_flow_context", return_value={"status": "not_supported", "source_chain": []}), \
+                patch.object(manager, "get_dragon_tiger_context", return_value={"status": "not_supported", "source_chain": []}), \
+                patch.object(manager, "get_board_context", return_value={"status": "not_supported", "source_chain": []}):
+            ctx = manager.get_fundamental_context("600519", budget_seconds=1.5)
+
+        mock_baostock.assert_called_once()
+        growth_data = ctx["growth"]["data"]
+        self.assertAlmostEqual(growth_data["roe"], 0.105, places=6)
+        self.assertAlmostEqual(growth_data["net_profit_yoy"], 0.01, places=6)
+        self.assertEqual(ctx["earnings"]["data"]["financial_report"]["report_date"], "2026-03-31")
+        # source_chain 保留真实数据源
+        self.assertTrue(
+            any("baostock" in (s.get("provider") or "") for s in ctx["growth"].get("source_chain") or [])
+        )
+
     def test_run_with_timeout_limits_hanging_workers(self) -> None:
         manager = DataFetcherManager(fetchers=[])
         manager._fundamental_timeout_slots = BoundedSemaphore(1)

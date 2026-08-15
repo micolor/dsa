@@ -384,8 +384,23 @@ def _build_fundamentals_block(artifacts: PipelineAnalysisArtifacts) -> AnalysisC
     }
     metadata = {key: value for key, value in metadata.items() if value not in (None, {}, [])}
 
+    # 失败原因落到 block warnings（基于已脱敏的 source_chain，不引用可能含密钥的原始 errors）。
+    # 前端已渲染 warnings，用户可据此判断是接口返回空/限流/不支持，而非笼统的「缺失」。
+    warnings = (
+        [
+            f"{_source_text(step.get('provider'))}:{step.get('result')}"
+            for step in source_chain
+            if isinstance(step, dict)
+            and step.get("result")
+            in ("failed", "partial", "not_supported", "error")
+        ]
+        if status != ContextFieldStatus.AVAILABLE
+        else []
+    )
+
     return AnalysisContextBlock(
         status=status,
+        warnings=warnings,
         items={
             "status": AnalysisContextItem(
                 status=status,

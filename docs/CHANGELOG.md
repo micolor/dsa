@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 基本面诊断卡显示失败原因：当基本面部分可用/失败时，会在该块下以 warning 列出各数据源的实际状态（如 `fundamental_bundle:failed`），区分「接口失败」与「该标的不支持」，不再笼统显示为「缺失」；原始报错字符串不落盘以避免密钥泄露
+- [修复] 筹码分布诊断对美股/港股/ETF 等不支持市场不再误报「缺失」：此前「该标的不支持筹码」的标记（`chip_not_supported`）只被读取、从未写入，现已接入分析上下文，这类标的显示为「该类标的不支持筹码」而非误导性的「缺失」
+- [改进] A 股基本面在 AkShare 数据源无有效成长/盈利内容时自动回退到 Baostock（免费、稳定、无需 token）：通过 `query_profit_data`/`query_growth_data` 补全 ROE、毛利率、净利率、净利润同比与财报关键指标，`source_chain` 会记录真实数据源（`baostock_profit`/`baostock_growth`），缓解基本面「经常不可用」
 - [新功能] 新增模拟盘（Paper Trading）：用 AI 决策信号驱动虚拟账户，跟踪买卖建议的实际表现，产出持仓、净值曲线、成交与信号记录；支持历史信号回填、每日估值与新增 Web `/paper` 页面；通过 `PAPER_TRADING_ENABLED` 控制每日估值后台任务
 - [改进] 模拟盘每日估值后台任务默认开启（`PAPER_TRADING_ENABLED` 默认值由 `false` 改为 `true`），长运行进程启动后默认按日幂等估值并生成净值曲线；可在 `.env` 设 `PAPER_TRADING_ENABLED=false` 关闭
 - [修复] 模拟盘历史回填不再静默截断：repo 分页上限为 100 条，回填改为按页取全区间信号，保证 `from_date..to_date` 内所有信号都被重放，避免更早信号被丢弃

@@ -27,7 +27,7 @@ import pandas as pd
 from src.config import FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT, get_config, Config
 from src.storage import get_db
 from data_provider import DataFetcherManager
-from data_provider.base import is_bse_code, normalize_stock_code
+from data_provider.base import _is_etf_code, _market_tag, is_bse_code, normalize_stock_code
 from data_provider.realtime_types import ChipDistribution
 from src.analyzer import (
     GeminiAnalyzer,
@@ -103,6 +103,15 @@ from bot.models import BotMessage
 
 
 logger = logging.getLogger(__name__)
+
+
+def _chip_not_supported(code: str) -> bool:
+    """筹码分布仅 A 股普通标的支持（ak.stock_cyq_em 为 A 股专属接口）。
+
+    与 ``data_provider.base`` 中资金流向块的判定保持一致：
+    非 cn 市场（us/hk/jp/kr/tw）或 A 股 ETF 均无筹码分布数据。
+    """
+    return _market_tag(code) != "cn" or _is_etf_code(code)
 
 
 def _share_image_payload(result: Any) -> Optional[Dict[str, Any]]:
@@ -2853,6 +2862,7 @@ class StockAnalysisPipeline:
             metadata={
                 "query_id": query_id,
                 "trigger_source": self.query_source,
+                "chip_not_supported": _chip_not_supported(code),
             },
             portfolio_context=dict(portfolio_context) if isinstance(portfolio_context, dict) else None,
         )
@@ -2903,6 +2913,7 @@ class StockAnalysisPipeline:
             metadata={
                 "query_id": query_id,
                 "trigger_source": self.query_source,
+                "chip_not_supported": _chip_not_supported(code),
             },
             portfolio_context=dict(portfolio_context) if isinstance(portfolio_context, dict) else None,
         )

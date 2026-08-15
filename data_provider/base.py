@@ -30,6 +30,7 @@ from src.services.market_symbol_utils import is_suffix_market_symbol
 from src.services.run_diagnostics import record_provider_run, record_provider_run_started
 from .fundamental_adapter import AkshareFundamentalAdapter
 from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
+from .baostock_fundamental_adapter import BaostockFundamentalAdapter
 from .realtime_types import CircuitBreaker
 
 # 配置日志
@@ -658,6 +659,7 @@ class DataFetcherManager:
             self._init_default_fetchers()
         self._fundamental_adapter = AkshareFundamentalAdapter()
         self._yfinance_fundamental_adapter = YfinanceFundamentalAdapter()
+        self._baostock_fundamental_adapter = BaostockFundamentalAdapter()
         self._tickflow_fetcher = None
         self._tickflow_api_key: Optional[str] = None
         self._tickflow_lock = RLock()
@@ -3237,6 +3239,40 @@ class DataFetcherManager:
             else:
                 bundle_status = str(bundle_payload.get("status", "not_supported"))
                 bundle_errors = [bundle_err_msg] if bundle_err_msg else []
+
+        # A 股 fallback：AkShare bundle 无有效成长/盈利内容时，尝试 Baostock（免费、稳定、无需 token）。
+        if isinstance(bundle_payload, dict) and bundle_status in ("failed", "not_supported"):
+            has_growth_or_earnings = bool(
+                bundle_payload.get("growth") or bundle_payload.get("earnings")
+            )
+            if not has_growth_or_earnings and remaining_seconds > 0:
+                bs_timeout = min(fetch_timeout, remaining_seconds)
+                bs_payload, bs_err_msg, bs_ms = self._run_with_retry(
+                    lambda: self._baostock_fundamental_adapter.get_fundamental_bundle(stock_code),
+                    bs_timeout,
+                    "fundamental_bundle_baostock",
+                )
+                _consume_budget(bs_ms)
+                if isinstance(bs_payload, dict):
+                    bs_status = str(bs_payload.get("status", "not_supported"))
+                    bs_has_content = bool(bs_payload.get("growth") or bs_payload.get("earnings"))
+                    if bs_has_content:
+                        # 合并：成长/盈利取 Baostock，机构持仓保留 AkShare 已有内容（若有）
+                        merged_growth = dict(bs_payload.get("growth") or {})
+                        merged_earnings = dict(bs_payload.get("earnings") or {})
+                        merged_institution = dict(bundle_payload.get("institution") or {})
+                        bundle_payload["growth"] = merged_growth
+                        bundle_payload["earnings"] = merged_earnings
+                        bundle_payload["institution"] = merged_institution
+                        bundle_payload["source_chain"] = list(
+                            bundle_payload.get("source_chain", [])
+                        ) + list(bs_payload.get("source_chain", []))
+                        bundle_status = "partial" if merged_growth or merged_earnings else bundle_status
+                        bundle_ms += bs_ms
+                        if not bundle_errors and bs_err_msg:
+                            bundle_errors.append(bs_err_msg)
+                elif bs_err_msg:
+                    bundle_errors.append(bs_err_msg)
 
         bundle_chain = self._normalize_source_chain(
             bundle_payload.get("source_chain", []),
