@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [测试] 同步设置页测试到自定义 `Select`（listbox）交互契约：共享 `Select` 由原生 `<select>` 重构为按钮触发器 + 门户下拉后，`SettingsField`/`LLMChannelEditor`/`NotificationTestPanel` 共 23 条测试仍按原生 select 交互（`getByRole('option')`、`.toHaveValue()`、`fireEvent.change`）而失败；改为「点击触发器打开下拉 → `await findByRole('option')` → 点击选项」，`.toHaveValue` 改断言 `data-value`
+- [改进] 设置页调度状态刷新加入并发守卫（`schedulerStatusRequestIdRef`）：手动刷新或调度运行时状态切换时只让最新一次请求生效，避免慢响应覆盖新状态（对齐页内 `setupStatusRequestIdRef` 既有范式）
 - [修复] 持仓页快照/风险与事件列表加载加入并发守卫：账户/成本法或事件筛选快速切换时只让最新一次请求生效（`snapshotRequestRef`/`eventsRequestRef`），避免慢响应覆盖新数据或提前清除加载态，并作废卸载后的在途请求
 - [改进] 选股候选列表展开交互传稳定回调：`CandidateListItem` 的 `onToggle` 改为按 code 传参、父组件直接传稳定 `handleToggleCandidate`（对齐 `onAnalyze`），此前内联 lambda 每次父重渲染都新建引用、击穿 `memo`，导致展开/收起单个候选时全量重渲染所有候选
 - [修复] 回测页并发请求防呆：结果与绩效两个异步加载加入卸载守卫（`mountedRef`）与请求序号守卫（`resultsRequestRef`/`perfRequestRef`），只让最新一次请求生效，避免快速筛选/翻页/运行/切换下慢响应覆盖新数据、初始加载与用户操作竞态，以及卸载后 `setState`

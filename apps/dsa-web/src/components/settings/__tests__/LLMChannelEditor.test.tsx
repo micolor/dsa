@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LLMChannelEditor } from '../LLMChannelEditor';
 
@@ -28,9 +28,13 @@ describe('LLMChannelEditor', () => {
     discoverLLMChannelModels.mockReset();
   });
 
-  function selectOptionValues(label: string): string[] {
-    const select = screen.getByLabelText(label) as HTMLSelectElement;
-    return Array.from(select.options).map((option) => option.value);
+  async function selectOptionValues(label: string): Promise<string[]> {
+    const trigger = screen.getByLabelText(label);
+    fireEvent.click(trigger);
+    const options = await screen.findAllByRole('option');
+    const values = options.map((option) => option.getAttribute('data-value') ?? '');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    return values;
   }
 
   const openAiItems = [
@@ -127,7 +131,7 @@ describe('LLMChannelEditor', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Anspire Open/i }));
-    expect(await screen.findByLabelText('API Surface')).toHaveValue('responses');
+    expect(await screen.findByLabelText('API Surface')).toHaveAttribute('data-value', 'responses');
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
     await waitFor(() => expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({
@@ -162,7 +166,7 @@ describe('LLMChannelEditor', () => {
       );
 
       fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-      expect(await screen.findByLabelText('API Surface')).toHaveValue('responses');
+      expect(await screen.findByLabelText('API Surface')).toHaveAttribute('data-value', 'responses');
       fireEvent.change(screen.getByLabelText('Base URL'), {
         target: { value: 'https://proxy.example.com/v1' },
       });
@@ -200,8 +204,11 @@ describe('LLMChannelEditor', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    expect(await screen.findByLabelText('API Surface')).toHaveValue('respones');
-    expect(screen.getByRole('option', { name: '无效配置：respones' })).toBeInTheDocument();
+    const apiSurface = await screen.findByLabelText('API Surface');
+    expect(apiSurface).toHaveAttribute('data-value', 'respones');
+    fireEvent.click(apiSurface);
+    expect(await screen.findByRole('option', { name: '无效配置：respones' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.change(screen.getByLabelText('Base URL'), {
       target: { value: 'https://proxy.example.com/v1' },
     });
@@ -233,11 +240,12 @@ describe('LLMChannelEditor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Hermes/i }));
     const apiSurface = await screen.findByLabelText('API Surface');
-    expect(apiSurface).toHaveValue('responses');
+    expect(apiSurface).toHaveAttribute('data-value', 'responses');
     expect(apiSurface).toBeEnabled();
 
-    fireEvent.change(apiSurface, { target: { value: 'chat_completions' } });
-    expect(apiSurface).toHaveValue('chat_completions');
+    fireEvent.click(apiSurface);
+    fireEvent.click(await screen.findByRole('option', { name: 'Chat Completions（默认）' }));
+    expect(apiSurface).toHaveAttribute('data-value', 'chat_completions');
   });
 
   it('returns to an empty generation backend draft after channel edits are restored', async () => {
@@ -375,7 +383,7 @@ describe('LLMChannelEditor', () => {
     expect(screen.queryByText(/LITELLM_CONFIG/i)).not.toBeInTheDocument();
   });
 
-  it('excludes Hermes-only route from Agent and Vision runtime selects', () => {
+  it('excludes Hermes-only route from Agent and Vision runtime selects', async () => {
     render(
       <LLMChannelEditor
         items={[
@@ -392,12 +400,12 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    expect(selectOptionValues('主模型')).toContain('openai/hermes-agent');
-    expect(selectOptionValues('Agent 主模型')).not.toContain('openai/hermes-agent');
-    expect(selectOptionValues('Vision 模型')).not.toContain('openai/hermes-agent');
+    expect(await selectOptionValues('主模型')).toContain('openai/hermes-agent');
+    expect(await selectOptionValues('Agent 主模型')).not.toContain('openai/hermes-agent');
+    expect(await selectOptionValues('Vision 模型')).not.toContain('openai/hermes-agent');
   });
 
-  it('keeps mixed Hermes route for Agent but excludes it from Vision', () => {
+  it('keeps mixed Hermes route for Agent but excludes it from Vision', async () => {
     render(
       <LLMChannelEditor
         items={[
@@ -424,10 +432,10 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    expect(selectOptionValues('主模型')).not.toContain('openai/shared-route');
-    expect(selectOptionValues('主模型')).toContain('openai/pure-route');
-    expect(selectOptionValues('Agent 主模型')).toContain('openai/shared-route');
-    expect(selectOptionValues('Vision 模型')).not.toContain('openai/shared-route');
+    expect(await selectOptionValues('主模型')).not.toContain('openai/shared-route');
+    expect(await selectOptionValues('主模型')).toContain('openai/pure-route');
+    expect(await selectOptionValues('Agent 主模型')).toContain('openai/shared-route');
+    expect(await selectOptionValues('Vision 模型')).not.toContain('openai/shared-route');
   });
 
   it('rejects bare mixed Hermes route before saving runtime generation config', async () => {
@@ -489,7 +497,7 @@ describe('LLMChannelEditor', () => {
     expect(discoverLLMChannelModels).not.toHaveBeenCalled();
   });
 
-  it('keeps pure non-Hermes route in Agent and Vision runtime selects', () => {
+  it('keeps pure non-Hermes route in Agent and Vision runtime selects', async () => {
     render(
       <LLMChannelEditor
         items={[
@@ -506,12 +514,12 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    expect(selectOptionValues('主模型')).toContain('openai/gpt-4o-mini');
-    expect(selectOptionValues('Agent 主模型')).toContain('openai/gpt-4o-mini');
-    expect(selectOptionValues('Vision 模型')).toContain('openai/gpt-4o-mini');
+    expect(await selectOptionValues('主模型')).toContain('openai/gpt-4o-mini');
+    expect(await selectOptionValues('Agent 主模型')).toContain('openai/gpt-4o-mini');
+    expect(await selectOptionValues('Vision 模型')).toContain('openai/gpt-4o-mini');
   });
 
-  it('keeps minimax-prefixed models in runtime selections', () => {
+  it('keeps minimax-prefixed models in runtime selections', async () => {
     render(
       <LLMChannelEditor
         items={[
@@ -529,13 +537,12 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    const primaryModelSelect = screen.getByRole('combobox', { name: '主模型' });
-    const agentModelSelect = screen.getByRole('combobox', { name: 'Agent 主模型' });
-    const visionModelSelect = screen.getByRole('combobox', { name: 'Vision 模型' });
-
-    expect(within(primaryModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
-    expect(within(agentModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
-    expect(within(visionModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
+    for (const label of ['主模型', 'Agent 主模型', 'Vision 模型']) {
+      const trigger = screen.getByLabelText(label);
+      fireEvent.click(trigger);
+      expect(await screen.findByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: 'Escape' });
+    }
   });
 
   it('uses DeepSeek V4 defaults when adding the official preset', async () => {
@@ -548,7 +555,8 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deepseek' } });
+    fireEvent.click(screen.getByRole('button', { name: '选择服务商' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'DeepSeek 官方' }));
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
 
     await screen.findByRole('button', { name: /DeepSeek 官方/i });
@@ -559,7 +567,7 @@ describe('LLMChannelEditor', () => {
   it.each([
     ['minimax', /MiniMax 官方/i, 'https://api.minimax.io/v1', 'MiniMax-M3,MiniMax-M2.7,MiniMax-M2.7-highspeed'],
     ['volcengine', /火山方舟/i, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-1-6-251015,doubao-seed-1-6-thinking-251015'],
-  ])('uses %s OpenAI-compatible defaults when adding the official preset', async (preset, buttonName, baseUrl, models) => {
+  ])('uses %s OpenAI-compatible defaults when adding the official preset', async (_preset, buttonName, baseUrl, models) => {
     render(
       <LLMChannelEditor
         items={[]}
@@ -569,12 +577,13 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: preset } });
+    fireEvent.click(screen.getByRole('button', { name: '选择服务商' }));
+    fireEvent.click(await screen.findByRole('option', { name: buttonName }));
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
 
     await screen.findByRole('button', { name: buttonName });
-    expect(screen.getAllByRole('combobox').some((select) => (
-      select instanceof HTMLSelectElement && select.value === 'openai'
+    expect(screen.getAllByLabelText('协议').some((select) => (
+      select.getAttribute('data-value') === 'openai'
     ))).toBe(true);
     expect(screen.getByLabelText('Base URL')).toHaveValue(baseUrl);
     expect(screen.getByLabelText('模型（逗号分隔）')).toHaveValue(models);
@@ -668,7 +677,8 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deepseek' } });
+    fireEvent.click(screen.getByRole('button', { name: '选择服务商' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'DeepSeek 官方' }));
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
 
     await screen.findByRole('button', { name: /DeepSeek 官方/i });
@@ -697,7 +707,8 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'minimax' } });
+    fireEvent.click(screen.getByRole('button', { name: '选择服务商' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'MiniMax 官方' }));
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
     await screen.findByRole('button', { name: /MiniMax 官方/i });
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
@@ -738,7 +749,8 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'minimax' } });
+    fireEvent.click(screen.getByRole('button', { name: '选择服务商' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'MiniMax 官方' }));
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
     await screen.findByRole('button', { name: /MiniMax 官方/i });
     fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));
@@ -1198,15 +1210,15 @@ describe('LLMChannelEditor', () => {
       />,
     );
 
-    expect(selectOptionValues('\u4e3b\u6a21\u578b')).toEqual(expect.arrayContaining([
+    expect(await selectOptionValues('\u4e3b\u6a21\u578b')).toEqual(expect.arrayContaining([
       'xai/grok-beta',
       'openai/deepseek-ai/DeepSeek-V3',
     ]));
-    expect(selectOptionValues('\u4e3b\u6a21\u578b')).not.toContain('openai/xai/grok-beta');
+    expect(await selectOptionValues('\u4e3b\u6a21\u578b')).not.toContain('openai/xai/grok-beta');
 
-    fireEvent.change(screen.getByLabelText('\u4e3b\u6a21\u578b'), {
-      target: { value: 'xai/grok-beta' },
-    });
+    const primaryModelTrigger = screen.getByLabelText('\u4e3b\u6a21\u578b');
+    fireEvent.click(primaryModelTrigger);
+    fireEvent.click(await screen.findByRole('option', { name: 'xai/grok-beta' }));
     fireEvent.click(screen.getByRole('button', { name: /\u4fdd\u5b58 AI \u914d\u7f6e/ }));
 
     await waitFor(() => expect(update).toHaveBeenCalled());
@@ -1541,9 +1553,9 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    const primaryModelSelect = screen.getByRole('combobox', { name: '主模型' });
-    const agentModelSelect = screen.getByRole('combobox', { name: 'Agent 主模型' });
-    const visionModelSelect = screen.getByRole('combobox', { name: 'Vision 模型' });
+    const primaryModelSelect = screen.getByLabelText('主模型');
+    const agentModelSelect = screen.getByLabelText('Agent 主模型');
+    const visionModelSelect = screen.getByLabelText('Vision 模型');
 
     fireEvent.click(screen.getByRole('button', { name: /DeepSeek 官方/i }));
     const modelInput = screen.getByLabelText('模型（逗号分隔）');
@@ -1552,9 +1564,9 @@ describe('LLMChannelEditor', () => {
     });
 
     await waitFor(() => {
-      expect(primaryModelSelect).toHaveValue('deepseek/deepseek-chat');
-      expect(agentModelSelect).toHaveValue('deepseek/deepseek-reasoner');
-      expect(visionModelSelect).toHaveValue('deepseek/deepseek-reasoner');
+      expect(primaryModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-chat');
+      expect(agentModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-reasoner');
+      expect(visionModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-reasoner');
     });
 
     fireEvent.change(modelInput, {
@@ -1562,9 +1574,9 @@ describe('LLMChannelEditor', () => {
     });
 
     await waitFor(() => {
-      expect(primaryModelSelect).toHaveValue('deepseek/deepseek-chat');
-      expect(agentModelSelect).toHaveValue('deepseek/deepseek-reasoner');
-      expect(visionModelSelect).toHaveValue('deepseek/deepseek-reasoner');
+      expect(primaryModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-chat');
+      expect(agentModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-reasoner');
+      expect(visionModelSelect).toHaveAttribute('data-value', 'deepseek/deepseek-reasoner');
       expect(screen.getByLabelText('deepseek/deepseek-v4-pro')).toBeChecked();
     });
   });

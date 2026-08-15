@@ -609,16 +609,29 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
   const [runNowSuccess, setRunNowSuccess] = useState('');
   const [scheduleEnabledOverride, setScheduleEnabledOverride] = useState<boolean | null>(null);
 
+  // 调度状态刷新并发守卫：手动刷新或调度运行时状态切换时只让最新一次请求生效，避免慢响应覆盖新状态。
+  const schedulerStatusRequestIdRef = useRef(0);
+
   const refreshSchedulerStatus = useCallback(async () => {
+    const requestId = schedulerStatusRequestIdRef.current + 1;
+    schedulerStatusRequestIdRef.current = requestId;
     setStatusError(null);
     setIsRefreshingStatus(true);
     try {
       const payload = await systemConfigApi.getSchedulerStatus();
+      if (schedulerStatusRequestIdRef.current !== requestId) {
+        return;
+      }
       setStatus(payload);
     } catch (error: unknown) {
+      if (schedulerStatusRequestIdRef.current !== requestId) {
+        return;
+      }
       setStatusError(getParsedApiError(error));
     } finally {
-      setIsRefreshingStatus(false);
+      if (schedulerStatusRequestIdRef.current === requestId) {
+        setIsRefreshingStatus(false);
+      }
     }
   }, []);
 

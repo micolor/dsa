@@ -47,10 +47,12 @@ describe('NotificationTestPanel', () => {
       />,
     );
 
-    expect(screen.getByRole('option', { name: 'ntfy' })).toBeInTheDocument();
+    const channelTrigger = screen.getByLabelText('渠道');
+    fireEvent.click(channelTrigger);
+    expect(await screen.findByRole('option', { name: 'ntfy' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Gotify' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '钉钉' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('渠道'), { target: { value: 'custom' } });
+    fireEvent.click(screen.getByRole('option', { name: '自定义 Webhook' }));
     fireEvent.click(screen.getByRole('button', { name: /发送测试/ }));
 
     await waitFor(() => expect(testNotificationChannel).toHaveBeenCalledWith(expect.objectContaining({

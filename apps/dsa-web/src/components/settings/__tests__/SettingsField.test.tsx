@@ -185,7 +185,7 @@ describe('SettingsField', () => {
     expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(2);
   });
 
-  it('allows optional select fields to be cleared when schema provides an empty option', () => {
+  it('allows optional select fields to be cleared when schema provides an empty option', async () => {
     const onChange = vi.fn();
 
     render(
@@ -221,10 +221,12 @@ describe('SettingsField', () => {
     );
 
     const select = screen.getByLabelText('最小通知级别');
-    expect(screen.getByRole('option', { name: '未设置' })).not.toBeDisabled();
+    fireEvent.click(select);
+    const notSetOption = await screen.findByRole('option', { name: '未设置' });
+    expect(notSetOption).not.toBeDisabled();
     expect(screen.queryByRole('option', { name: '请选择' })).not.toBeInTheDocument();
 
-    fireEvent.change(select, { target: { value: '' } });
+    fireEvent.click(notSetOption);
 
     expect(onChange).toHaveBeenCalledWith('NOTIFICATION_MIN_SEVERITY', '');
   });
@@ -259,33 +261,36 @@ describe('SettingsField', () => {
       />
     );
 
-    expect(screen.getByLabelText('分析生成方式')).toHaveValue('litellm');
+    expect(screen.getByLabelText('分析生成方式')).toHaveAttribute('data-value', 'litellm');
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('renders localized labels for real system config select options', () => {
+  it('renders localized labels for real system config select options', async () => {
     const selectCases = [
       {
         key: 'NEWS_STRATEGY_PROFILE',
+        title: '新闻策略窗口档位',
         category: 'data_source',
         options: ['ultra_short', 'short', 'medium', 'long'],
         expectedLabels: ['超短线（1天）', '短期（3天）', '中期（7天）', '长期（30天）'],
       },
       {
         key: 'REPORT_TYPE',
+        title: '报告类型',
         category: 'notification',
         options: ['simple', 'full', 'brief'],
         expectedLabels: ['简洁', '完整', '简报'],
       },
       {
         key: 'LOG_LEVEL',
+        title: '日志级别',
         category: 'system',
         options: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         expectedLabels: ['调试', '信息', '警告', '错误', '严重'],
       },
     ] as const;
 
-    selectCases.forEach(({ key, category, options, expectedLabels }) => {
+    for (const { key, title, category, options, expectedLabels } of selectCases) {
       const { unmount } = render(
         <SettingsField
           item={{
@@ -312,16 +317,19 @@ describe('SettingsField', () => {
         />
       );
 
-      expectedLabels.forEach((label) => {
-        expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
-      });
+      const trigger = screen.getByLabelText(title);
+      fireEvent.click(trigger);
+
+      for (const label of expectedLabels) {
+        expect(await screen.findByRole('option', { name: label })).toBeInTheDocument();
+      }
 
       options.forEach((rawOption) => {
         expect(screen.queryByRole('option', { name: rawOption })).not.toBeInTheDocument();
       });
 
       unmount();
-    });
+    }
   });
 
   it('renders MARKET_REVIEW_REGION as free-text field with comma-separated defaults', () => {
@@ -363,7 +371,7 @@ describe('SettingsField', () => {
     expect(onChange).toHaveBeenCalledWith('MARKET_REVIEW_REGION', 'cn,jp,kr');
   });
 
-  it('renders context compression profile options with Chinese labels', () => {
+  it('renders context compression profile options with Chinese labels', async () => {
     const onChange = vi.fn();
 
     render(
@@ -398,9 +406,10 @@ describe('SettingsField', () => {
     );
 
     expect(screen.getByLabelText('上下文压缩策略')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '成本优先' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '均衡推荐' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '长上下文原文优先' })).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('上下文压缩策略'));
+    expect(await screen.findByRole('option', { name: '成本优先' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '均衡推荐' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '长上下文原文优先' })).toBeInTheDocument();
   });
 
   it('renders blank-value preset guidance for context compression numeric fields', () => {
