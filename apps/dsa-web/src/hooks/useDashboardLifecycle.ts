@@ -127,8 +127,8 @@ export function useDashboardLifecycle({
       syncTaskFailed(task);
       scheduleTaskRemoval(task.taskId, 5_000);
     },
-    onError: () => {
-      console.warn('SSE connection disconnected, reconnecting...');
+    onError: (error) => {
+      console.warn('SSE connection disconnected, reconnecting...', error);
     },
     enabled,
   });

@@ -77,6 +77,7 @@ interface HomeStockWorkspaceProps {
   onAddToWatchlist: (code: string) => Promise<void>;
   onRemoveFromWatchlist: (code: string) => Promise<void>;
   onRefreshWatchlist: () => Promise<void>;
+  onRefreshToday: () => void;
   onAnalyzeWatchlist: (mode: WatchlistAnalyzeMode) => Promise<void>;
   isBatchAnalyzing: boolean;
   batchStatus: BatchStatus | null;
@@ -278,6 +279,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   onAddToWatchlist,
   onRemoveFromWatchlist,
   onRefreshWatchlist,
+  onRefreshToday,
   onAnalyzeWatchlist,
   isBatchAnalyzing,
   batchStatus,
@@ -335,6 +337,8 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     event.preventDefault();
     const code = draftCode.trim();
     if (!code) return;
+    // 正在执行自选操作时忽略提交，避免动作被跳过却仍清空输入框。
+    if (watchlistActioning) return;
     setWorkspaceNoticeCode(null);
     void onAddToWatchlist(code).then(() => setDraftCode(''));
   };
@@ -523,7 +527,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                     disabled={watchlistLoading || isLoadingTodayItems}
                     onClick={() => {
                       setWorkspaceNoticeCode(null);
-                      void onRefreshWatchlist();
+                      onRefreshToday();
                     }}
                     aria-label={t('watchlist.refreshAria')}
                   >

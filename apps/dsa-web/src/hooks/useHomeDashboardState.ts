@@ -1,31 +1,23 @@
-import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStockPoolStore } from '../stores';
 
 /**
  * Keep HomePage focused on local UI state while the store owns dashboard business state.
  * This preserves the current visual contract and only centralizes state selection.
+ *
+ * The selector intentionally picks only the fields HomePage consumes. Each subscribed
+ * field forces a re-render of HomePage when it changes, so unused fields are trimmed
+ * to avoid unrelated store updates triggering whole-page re-renders.
  */
 export function useHomeDashboardState() {
-  const dashboardState = useStockPoolStore(
+  return useStockPoolStore(
     useShallow((state) => ({
       query: state.query,
       inputError: state.inputError,
       duplicateError: state.duplicateError,
       error: state.error,
       isAnalyzing: state.isAnalyzing,
-      historyItems: state.historyItems,
-      selectedHistoryIds: state.selectedHistoryIds,
-      isDeletingHistory: state.isDeletingHistory,
-      isLoadingHistory: state.isLoadingHistory,
-      isLoadingMore: state.isLoadingMore,
-      hasMore: state.hasMore,
       marketReviewHistoryItems: state.marketReviewHistoryItems,
-      selectedMarketReviewHistoryIds: state.selectedMarketReviewHistoryIds,
-      isLoadingMarketReviewHistory: state.isLoadingMarketReviewHistory,
-      isLoadingMoreMarketReviewHistory: state.isLoadingMoreMarketReviewHistory,
-      isDeletingMarketReviewHistory: state.isDeletingMarketReviewHistory,
-      marketReviewHistoryHasMore: state.marketReviewHistoryHasMore,
       selectedReport: state.selectedReport,
       isLoadingReport: state.isLoadingReport,
       isHistoryTrendOpen: state.isHistoryTrendOpen,
@@ -44,17 +36,9 @@ export function useHomeDashboardState() {
       loadInitialHistory: state.loadInitialHistory,
       refreshHistory: state.refreshHistory,
       refreshHistoryForCompletedTask: state.refreshHistoryForCompletedTask,
-      loadMoreHistory: state.loadMoreHistory,
       loadMarketReviewHistory: state.loadMarketReviewHistory,
       refreshMarketReviewHistory: state.refreshMarketReviewHistory,
-      loadMoreMarketReviewHistory: state.loadMoreMarketReviewHistory,
       selectHistoryItem: state.selectHistoryItem,
-      toggleHistorySelection: state.toggleHistorySelection,
-      toggleSelectAllVisible: state.toggleSelectAllVisible,
-      deleteSelectedHistory: state.deleteSelectedHistory,
-      toggleMarketReviewHistorySelection: state.toggleMarketReviewHistorySelection,
-      toggleSelectAllVisibleMarketReviewHistory: state.toggleSelectAllVisibleMarketReviewHistory,
-      deleteSelectedMarketReviewHistory: state.deleteSelectedMarketReviewHistory,
       submitAnalysis: state.submitAnalysis,
       syncTaskCreated: state.syncTaskCreated,
       syncTaskUpdated: state.syncTaskUpdated,
@@ -74,21 +58,6 @@ export function useHomeDashboardState() {
       refreshStockBar: state.refreshStockBar,
     })),
   );
-
-  const selectedIds = useMemo(
-    () => new Set(dashboardState.selectedHistoryIds),
-    [dashboardState.selectedHistoryIds],
-  );
-  const selectedMarketReviewHistoryIds = useMemo(
-    () => new Set(dashboardState.selectedMarketReviewHistoryIds),
-    [dashboardState.selectedMarketReviewHistoryIds],
-  );
-
-  return {
-    ...dashboardState,
-    selectedIds,
-    selectedMarketReviewHistoryIds,
-  };
 }
 
 export default useHomeDashboardState;

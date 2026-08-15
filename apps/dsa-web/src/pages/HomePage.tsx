@@ -54,6 +54,8 @@ const BATCH_ANALYSIS_CHUNK_SIZE = 50;
 const TODAY_ANALYSIS_PAGE_SIZE = 100;
 const WATCHLIST_HISTORY_LOOKUP_CONCURRENCY = 4;
 const SERVER_LOCAL_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+const MARKET_REVIEW_POLL_MAX_ATTEMPTS = 120;
+const MARKET_REVIEW_POLL_INTERVAL_MS = 2000;
 
 type BatchAnalyzeStatus = {
   variant: 'success' | 'warning' | 'danger';
@@ -217,6 +219,12 @@ const HomePage: React.FC = () => {
   const [isSubmittingMarketReview, setIsSubmittingMarketReview] = useState(false);
   const [marketReviewNotice, setMarketReviewNotice] = useState<MarketReviewNotice>(null);
   const marketReviewNoticeRef = useRef<MarketReviewNotice>(null);
+  // 统一入口：所有对 notice 的写入都要同步 ref，避免 ref 与 state 脱节，
+  // 导致轮询时的 unchanged 短路基于陈旧 ref 误判、漏掉一次合法更新。
+  const updateMarketReviewNotice = useCallback((notice: MarketReviewNotice) => {
+    marketReviewNoticeRef.current = notice;
+    setMarketReviewNotice(notice);
+  }, []);
   const [marketReviewError, setMarketReviewError] = useState<ParsedApiError | null>(null);
   const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
   const [marketReviewPayload, setMarketReviewPayload] = useState<MarketReviewPayload | null>(null);
@@ -736,9 +744,9 @@ const HomePage: React.FC = () => {
     stopMarketReviewPolling();
     setMarketReviewReport(null);
     setMarketReviewPayload(null);
-    setMarketReviewNotice(null);
+    updateMarketReviewNotice(null);
     setMarketReviewError(null);
-  }, [stopMarketReviewPolling]);
+  }, [stopMarketReviewPolling, updateMarketReviewNotice]);
 
   const dismissMarketReviewError = useCallback(() => {
     setMarketReviewError(null);
@@ -792,16 +800,27 @@ const HomePage: React.FC = () => {
       stockName?: string,
       selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image',
       analysisSkills?: string[],
+      originalQueryOverride?: string,
     ) => {
       void submitAnalysis({
         stockCode,
         stockName,
-        originalQuery: query,
+        // 默认用当前 query 作为原始输入；导入/自动分析等场景 query 尚未更新（setQuery 异步），
+        // 需显式传入真实来源，避免提交空字符串作为 originalQuery。
+        originalQuery: originalQueryOverride ?? query,
         selectionSource: selectionSource ?? 'manual',
         skills: analysisSkills ?? selectedAnalysisSkills,
       });
     },
     [query, selectedAnalysisSkills, submitAnalysis],
+  );
+
+  // 稳定引用，配合 StockAutocomplete 的 memo 让组件在父重渲染时跳过。
+  const handleAutocompleteSubmit = useCallback(
+    (stockCode: string, stockName?: string, selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image') => {
+      handleSubmitAnalysis(stockCode, stockName, selectionSource);
+    },
+    [handleSubmitAnalysis],
   );
 
   useEffect(() => {
@@ -814,7 +833,7 @@ const HomePage: React.FC = () => {
     setQuery(stockCode);
     navigate(location.pathname, { replace: true, state: null });
     if (state?.autoAnalyze) {
-      handleSubmitAnalysis(stockCode, stockName || undefined, 'import', state.skills);
+      handleSubmitAnalysis(stockCode, stockName || undefined, 'import', state.skills, stockCode);
     }
   }, [handleSubmitAnalysis, location.pathname, location.state, navigate, setQuery]);
 
@@ -883,8 +902,8 @@ const HomePage: React.FC = () => {
     async (taskId: string) => {
       stopMarketReviewPolling();
 
-      const maxAttempts = 120;
-      const intervalMs = 2000;
+      const maxAttempts = MARKET_REVIEW_POLL_MAX_ATTEMPTS;
+      const intervalMs = MARKET_REVIEW_POLL_INTERVAL_MS;
       let attempts = 0;
 
       // 轮询每 2s 重建 notice 对象；内容未变化时跳过 setState，避免无谓的整页重渲染。
@@ -994,7 +1013,7 @@ const HomePage: React.FC = () => {
             setMarketReviewReport(null);
             setMarketReviewPayload(null);
             setMarketReviewError(parsed);
-            setMarketReviewNotice(null);
+            updateMarketReviewNotice(null);
             scrollMarketReviewFeedbackIntoView();
             return false;
           }
@@ -1012,12 +1031,12 @@ const HomePage: React.FC = () => {
         }, intervalMs);
       }
     },
-    [refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t],
+    [refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t, updateMarketReviewNotice],
   );
 
   const handleTriggerMarketReview = useCallback(async () => {
     setIsSubmittingMarketReview(true);
-    setMarketReviewNotice(null);
+    updateMarketReviewNotice(null);
     setMarketReviewError(null);
     setMarketReviewReport(null);
     setMarketReviewPayload(null);
@@ -1027,7 +1046,7 @@ const HomePage: React.FC = () => {
         sendNotification: notify,
         regions: marketReviewRegionOverride,
       });
-      setMarketReviewNotice({
+      updateMarketReviewNotice({
         variant: 'success',
         title: t('home.marketReviewSubmitted'),
         message: t('home.marketReviewSubmittedWithRegion', {
@@ -1042,14 +1061,14 @@ const HomePage: React.FC = () => {
       }
     } catch (err: unknown) {
       setMarketReviewError(getParsedApiError(err));
-      setMarketReviewNotice(null);
+      updateMarketReviewNotice(null);
       scrollMarketReviewFeedbackIntoView();
     } finally {
       setIsSubmittingMarketReview(false);
     }
-  }, [marketReviewRegionOverride, notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t]);
+  }, [marketReviewRegionOverride, notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t, updateMarketReviewNotice]);
 
-  const todayDateKey = getTodayInShanghai();
+  const todayDateKey = useMemo(() => getTodayInShanghai(), []);
   useEffect(() => {
     if (sidebarWorkspaceTab !== 'today') {
       return undefined;
@@ -1342,6 +1361,7 @@ const HomePage: React.FC = () => {
           onAddToWatchlist={watchlistState.addToWatchlist}
           onRemoveFromWatchlist={watchlistState.removeFromWatchlist}
           onRefreshWatchlist={handleRefreshWatchlist}
+          onRefreshToday={handleDashboardDataRefresh}
           onAnalyzeWatchlist={handleAnalyzeWatchlist}
           isBatchAnalyzing={isBatchAnalyzingWatchlist}
           batchStatus={batchAnalyzeStatus}
@@ -1364,6 +1384,7 @@ const HomePage: React.FC = () => {
       batchAnalyzeStatus,
       handleAnalyzeWatchlist,
       handleDeleteStock,
+      handleDashboardDataRefresh,
       handleHistoryItemClick,
       handleRefreshWatchlist,
       isBatchAnalyzingWatchlist,
@@ -1438,9 +1459,7 @@ const HomePage: React.FC = () => {
                 <StockAutocomplete
                   value={query}
                   onChange={setQuery}
-                  onSubmit={(stockCode, stockName, selectionSource) => {
-                    handleSubmitAnalysis(stockCode, stockName, selectionSource);
-                  }}
+                  onSubmit={handleAutocompleteSubmit}
                   placeholder={t('home.placeholder')}
                   disabled={isAnalyzing}
                   className={inputError ? 'border-danger/50' : undefined}

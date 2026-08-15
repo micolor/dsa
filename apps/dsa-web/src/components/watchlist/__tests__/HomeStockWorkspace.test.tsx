@@ -30,6 +30,7 @@ function renderWorkspace({
         onAddToWatchlist={vi.fn().mockResolvedValue(undefined)}
         onRemoveFromWatchlist={onRemoveFromWatchlist}
         onRefreshWatchlist={vi.fn().mockResolvedValue(undefined)}
+        onRefreshToday={vi.fn()}
         onAnalyzeWatchlist={vi.fn().mockResolvedValue(undefined)}
         isBatchAnalyzing={false}
         batchStatus={null}

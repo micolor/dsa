@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 首页审计修复：今日标签刷新按钮现会重新加载今日排行（此前为空操作）；导入/自动分析路径显式传入股票代码作为原始查询，避免提交空 `originalQuery`；大盘复盘提示统一走同步 ref 的更新入口，避免陈旧 ref 漏更新；`useHomeDashboardState` 裁剪 19 个未使用 store 字段与 2 个冗余 Set，减少无关 store 更新引发的整页重渲染；自选增删回调改用 ref 守卫以保住行 memo、提交被跳过时不再清空输入框；`StockAutocomplete` 提交回调上提为 `useCallback` 恢复 memo；今日日期键改 `useMemo`；自选提示文案接入 i18n（新增 `watchlist.addedMessage`/`removedMessage`/`actionFailed`）；大盘复盘轮询魔法数字上提为命名常量；SSE 断线日志附带错误对象便于排查
 - [修复] 修复 AI 建议页状态更新/反馈无反应（同类 StrictMode `mountedRef` 缺陷）：`DecisionSignalsPage` 卸载清理仅把 `mountedRef.current` 置 `false` 而未在挂载时重置，开发模式 `<StrictMode>` 二次挂载后该值为 `false`，`handleStatusUpdate`/`handleFeedbackSubmit` 的 `if (!mountedRef.current) return` 守卫在请求成功后静默跳过 `setState`，界面不刷新；改为在 effect 挂载时重置 `mountedRef.current = true`
 - [修复] 修复选股页策略下拉无值：`mountedRef` 卸载清理把 `mountedRef.current` 置 `false` 后，React `<StrictMode>` 开发模式二次挂载不会重新初始化为 `true`，导致 `loadStrategies`/`loadHotspots` 的 `if (!mountedRef.current) return` 守卫在请求返回后静默跳过 `setState`，策略列表与热点始终为空（接口 200 但下拉无值）；改为在 effect 挂载时重置 `mountedRef.current = true`（对齐 `HomePage` 既有正确写法）
 - [修复] 情报源抓取请求不再复用共享的可变 `proxies` 常量：`requests` 会在请求时对传入的 `proxies` 字典原地追加环境中所有 `*_proxy` 项（`merge_environment_settings` → `proxies.setdefault`），导致模块级 `_DISABLE_REQUEST_PROXIES` 被污染（如本机 `SOCKS_PROXY` 泄漏进每次请求），现改为每次请求传入独立副本，避免共享常量被跨请求污染
