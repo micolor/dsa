@@ -62,7 +62,7 @@ export const Button: React.FC<ButtonProps> = ({
       aria-busy={isLoading || undefined}
       data-variant={variant}
       className={cn(
-        'inline-flex cursor-pointer items-center justify-center gap-2 font-medium transition-all duration-200',
+        'inline-flex cursor-pointer items-center justify-center gap-2 font-medium transition-[color,background-color,border-color,box-shadow,transform,filter] duration-200',
         'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15 focus-visible:ring-offset-0',
         'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none',
         BUTTON_SIZE_STYLES[size],

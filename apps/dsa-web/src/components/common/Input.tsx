@@ -88,7 +88,7 @@ export const Input = ({
     <button
       type="button"
       className={cn(
-        'inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2',
+        'inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors duration-200 focus:outline-none focus:ring-2',
         isLoginAppearance
           ? visible
             ? 'border-[var(--login-input-toggle-active-border)] bg-[var(--login-input-toggle-active-bg)] text-[var(--login-input-toggle-active-text)] shadow-[0_0_14px_var(--login-accent-glow)] focus:ring-[var(--login-input-toggle-ring)]'
@@ -139,7 +139,7 @@ export const Input = ({
           style={inputStyle}
           data-appearance={appearance}
           className={cn(
-            'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all',
+            'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-[border-color,background-color,box-shadow]',
             'focus:outline-none',
             isLoginAppearance ? 'input-appearance-login' : '',
             error ? 'border-danger/30' : '',

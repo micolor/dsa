@@ -61,7 +61,7 @@ const FactorBar: React.FC<{ label: string; value: number; color: string }> = ({ 
     <span className="text-xs text-secondary-text">{label}</span>
     <div className="h-1.5 overflow-hidden rounded-full bg-surface">
       <div
-        className="h-full rounded-full transition-all"
+        className="h-full rounded-full transition-[width,background-color]"
         style={{ width: `${Math.min(100, Math.max(0, value))}%`, backgroundColor: color }}
       />
     </div>
@@ -266,7 +266,7 @@ const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
 
   return (
     <div
-      className={`glass-card !border-transparent overflow-hidden transition-all duration-200 ${
+      className={`glass-card !border-transparent overflow-hidden transition-[background-color,box-shadow] duration-200 ${
         expanded ? 'ring-1 ring-cyan/30' : 'hover:bg-card/55'
       }`}
     >

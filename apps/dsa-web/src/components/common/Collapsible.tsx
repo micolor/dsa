@@ -24,7 +24,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-2xl border border-subtle bg-card/70 shadow-soft-card transition-all duration-300',
+        'overflow-hidden rounded-2xl border border-subtle bg-card/70 shadow-soft-card transition-[background-color,box-shadow] duration-300',
         'hover:border-accent',
         className,
       )}
@@ -49,7 +49,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       </button>
 
       <div
-        className={cn('overflow-hidden transition-all duration-300 ease-in-out', isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0')}
+        className={cn('overflow-hidden transition-[max-height,opacity] duration-300 ease-in-out', isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0')}
       >
         <div className="border-t border-subtle px-4 pb-4 pt-2">
           {children}

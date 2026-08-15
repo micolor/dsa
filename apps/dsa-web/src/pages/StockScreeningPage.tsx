@@ -722,7 +722,7 @@ const MiniSparkline: React.FC<{ score?: number | null; selected?: boolean }> = (
     <div className="flex h-8 w-20 flex-col justify-end gap-1" aria-hidden="true">
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
         <div
-          className={`h-full rounded-full transition-all ${selected ? 'bg-orange-500' : 'bg-blue-500'}`}
+          className={`h-full rounded-full transition-[width,background-color] ${selected ? 'bg-orange-500' : 'bg-blue-500'}`}
           style={{ width: `${normalized}%` }}
         />
       </div>
@@ -744,7 +744,7 @@ const HotspotCard: React.FC<{
   const Icon = iconMeta.icon;
   return (
     <button
-      className={`group relative min-h-[116px] overflow-hidden rounded-xl border px-3 py-3 text-left transition-all ${
+      className={`group relative min-h-[116px] overflow-hidden rounded-xl border px-3 py-3 text-left transition-[transform,border-color,background-color,box-shadow] ${
         selected
           ? 'border-orange-400 bg-gradient-to-br from-orange-500/10 via-card to-card shadow-[0_0_0_1px_rgba(249,115,22,0.16),0_18px_44px_rgba(249,115,22,0.14)]'
           : 'border-subtle bg-card/70 backdrop-blur-md hover:-translate-y-0.5 hover:border-orange-300/70 hover:shadow-soft-card'

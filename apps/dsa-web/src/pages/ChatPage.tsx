@@ -1357,7 +1357,7 @@ const ChatPage: React.FC = () => {
                 >
                   <div
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm transition-all',
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm transition-colors',
                       msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
                     )}
                   >
@@ -1700,7 +1700,7 @@ const ChatPage: React.FC = () => {
                   placeholder={t('chat.inputPlaceholder')}
                   disabled={loading || !agentAvailable}
                   rows={1}
-                  className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
+                  className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ height: 'auto' }}
                   onInput={(e) => {
                     const t = e.target as HTMLTextAreaElement;
