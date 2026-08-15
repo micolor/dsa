@@ -26,7 +26,7 @@ const BUTTON_VARIANT_STYLES = {
   primary: 'border border-cyan/30 bg-primary-gradient text-primary-foreground shadow-soft-card hover:brightness-105',
   secondary: 'border border-border/60 bg-card/55 text-foreground shadow-soft-card backdrop-blur-md hover:bg-card/70',
   'settings-primary': 'border settings-button-primary hover:brightness-105 hover:shadow-xl',
-  'settings-secondary': 'border settings-button-secondary hover:translate-y-[-1px]',
+  'settings-secondary': 'border settings-button-secondary pointer-fine:hover:translate-y-[-1px]',
   outline: 'border border-border/70 bg-transparent text-foreground hover:bg-hover',
   ghost: 'border border-transparent bg-transparent text-secondary-text hover:bg-hover hover:text-foreground',
   gradient: 'border border-cyan/20 bg-gradient-to-r from-cyan to-purple text-primary-foreground shadow-soft-card hover:brightness-105',

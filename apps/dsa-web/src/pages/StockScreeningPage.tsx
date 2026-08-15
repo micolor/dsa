@@ -747,7 +747,7 @@ const HotspotCard: React.FC<{
       className={`group relative min-h-[116px] overflow-hidden rounded-xl border px-3 py-3 text-left transition-[transform,border-color,background-color,box-shadow] ${
         selected
           ? 'border-orange-400 bg-gradient-to-br from-orange-500/10 via-card to-card shadow-[0_0_0_1px_rgba(249,115,22,0.16),0_18px_44px_rgba(249,115,22,0.14)]'
-          : 'border-subtle bg-card/70 backdrop-blur-md hover:-translate-y-0.5 hover:border-orange-300/70 hover:shadow-soft-card'
+          : 'border-subtle bg-card/70 backdrop-blur-md pointer-fine:hover:-translate-y-0.5 pointer-fine:hover:border-orange-300/70 hover:shadow-soft-card'
       }`}
       type="button"
       onClick={() => onSelect(item.topic)}
@@ -780,7 +780,7 @@ const HotspotCard: React.FC<{
         <span>趋势 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.trendScore)}</strong> · 持续 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.persistenceScore)}</strong></span>
         <span>{getHotspotSampleText(item)} · 龙头 {getHotspotLeadersText(item)}</span>
       </div>
-      <div className="absolute bottom-3 right-3 opacity-95 transition-transform group-hover:scale-105">
+      <div className="absolute bottom-3 right-3 opacity-95 transition-transform pointer-fine:group-hover:scale-105">
         <MiniSparkline score={item.heatScore} selected={selected} />
       </div>
     </button>

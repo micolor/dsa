@@ -773,7 +773,7 @@ export const RunFlowGraph: React.FC<RunFlowGraphProps> = ({
                   aria-label={t('runFlow.graph.nodeAria', { label: node.label, status: statusLabel })}
                   data-layout-lane={node.laneIndex}
                   data-layout-row={node.row}
-                  className={`box-border flex max-w-full min-w-0 flex-col items-start overflow-hidden rounded-lg border-2 text-left backdrop-blur-sm transition-[transform,border-color] hover:-translate-y-0.5 hover:border-primary/60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15 ${nodeDensityClass} ${nodeStateClass} ${
+                  className={`box-border flex max-w-full min-w-0 flex-col items-start overflow-hidden rounded-lg border-2 text-left backdrop-blur-sm transition-[transform,border-color] pointer-fine:hover:-translate-y-0.5 hover:border-primary/60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15 ${nodeDensityClass} ${nodeStateClass} ${
                     expandable ? 'pb-8' : ''
                   }`}
                   style={{ width: node.width, height: node.height }}
