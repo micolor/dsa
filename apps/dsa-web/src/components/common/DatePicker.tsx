@@ -53,13 +53,16 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const parsed = useMemo(() => parseDateString(value), [value]);
   const [viewYear, setViewYear] = useState(() => parsed?.year ?? new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => parsed?.month ?? new Date().getMonth());
+  const [prevValue, setPrevValue] = useState(value);
 
-  useEffect(() => {
+  // 外部 value 变化时，把日历视图同步到所选日期（渲染期状态调整，避免 set-state-in-effect）。
+  if (value !== prevValue) {
+    setPrevValue(value);
     if (parsed) {
       setViewYear(parsed.year);
       setViewMonth(parsed.month);
     }
-  }, [parsed]);
+  }
 
   const todayText = useMemo(() => {
     const now = new Date();
@@ -102,7 +105,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    updatePopupPosition();
     const frameId = requestAnimationFrame(updatePopupPosition);
     window.addEventListener('resize', updatePopupPosition);
     window.addEventListener('scroll', updatePopupPosition, true);

@@ -46,12 +46,14 @@ export const FloatingTaskPanel: React.FC<FloatingTaskPanelProps> = ({ tasks, onO
 
   useEffect(() => clearCloseTimer, []);
 
-  // 任务短暂清空时收起面板，避免新任务出现时面板突然弹回造成闪动。
-  useEffect(() => {
+  // 任务短暂清空时收起面板，避免新任务出现时面板突然弹回造成闪动（渲染期状态调整）。
+  const [prevActiveCount, setPrevActiveCount] = useState(activeCount);
+  if (prevActiveCount !== activeCount) {
+    setPrevActiveCount(activeCount);
     if (activeCount === 0 && open) {
       setOpen(false);
     }
-  }, [activeCount, open]);
+  }
 
   if (activeCount === 0) {
     return null;

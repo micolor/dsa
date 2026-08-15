@@ -85,7 +85,6 @@ export const Select: React.FC<SelectProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    updateDropdownPosition();
     const frameId = requestAnimationFrame(updateDropdownPosition);
     window.addEventListener('resize', updateDropdownPosition);
     window.addEventListener('scroll', updateDropdownPosition, true);
