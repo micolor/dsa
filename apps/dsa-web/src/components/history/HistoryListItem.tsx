@@ -1,10 +1,9 @@
 import type React from 'react';
-import { Badge, ListItemRow, Tooltip } from '../common';
+import { ListItemRow, MarketPhaseBadge, SentimentBadge, Tooltip } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
-import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
 import { truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
@@ -41,10 +40,6 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
     sentimentColor && operationLabel != null && item.sentimentScore !== undefined
       ? `${operationLabel} ${item.sentimentScore}`
       : undefined;
-  const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, language)
-    ?.replace('市场阶段: ', '')
-    .replace('市场阶段：', '')
-    .replace('Market phase: ', '');
 
   const meta = (
     <>
@@ -55,14 +50,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
       <span className="text-[11px] text-muted-text">
         {formatDateTime(item.createdAt)}
       </span>
-      {phaseLabel ? (
-        <>
-          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-          <Badge variant="default" size="sm" className="shrink-0 shadow-none text-[10px] leading-none">
-            {phaseLabel}
-          </Badge>
-        </>
-      ) : null}
+      <MarketPhaseBadge summary={item.marketPhaseSummary} language={language} />
     </>
   );
 
@@ -100,18 +88,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
             </span>
           )}
           trailing={sentimentColor && isWatch ? (
-            <Badge
-              variant="default"
-              size="sm"
-              className="home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200"
-              style={{
-                color: sentimentColor,
-                borderColor: `${sentimentColor}30`,
-                backgroundColor: `${sentimentColor}10`,
-              }}
-            >
-              {operationLabel} {item.sentimentScore}
-            </Badge>
+            <SentimentBadge transition color={sentimentColor} operationLabel={operationLabel} score={item.sentimentScore} />
           ) : undefined}
           meta={meta}
           metaTestId="history-card-meta"

@@ -11,6 +11,7 @@ import {
   Flame,
   Gem,
   Landmark,
+  Loader2,
   Pickaxe,
   Plane,
   Play,
@@ -794,7 +795,9 @@ const StockScreeningPage: React.FC = () => {
   const [restoredResult] = useState<ScreeningScreenResponse | null>(() => readScreenResult());
   const [enabled, setEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
-  const [market] = useState(formPrefs?.market ?? restoredTask?.market ?? 'cn');
+  // 当前仅支持 A 股场景：market 为固定值，页面没有市场切换控件，setter 从未使用。
+  // 若未来要支持多市场，需补市场选择控件与 setter，再把这里改回 state。
+  const market = formPrefs?.market ?? restoredTask?.market ?? 'cn';
   const [strategy, setStrategy] = useState(formPrefs?.strategy ?? restoredTask?.strategy ?? 'dual_low');
   const [strategies, setStrategies] = useState<ScreeningStrategy[]>([]);
   const [maxResults, setMaxResults] = useState(formPrefs?.maxResults ?? restoredTask?.maxResults ?? 3);
@@ -803,6 +806,8 @@ const StockScreeningPage: React.FC = () => {
   useEffect(() => {
     persistScreenFormPrefs({ market, strategy, maxResults });
   }, [market, strategy, maxResults]);
+
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const [candidates, setCandidates] = useState<ScreeningCandidate[]>(restoredResult?.candidates ?? []);
   const [hotspots, setHotspots] = useState<ScreeningHotspot[]>([]);
   const [hotspotsUpdatedAt, setHotspotsUpdatedAt] = useState<string | null>(null);
@@ -811,6 +816,10 @@ const StockScreeningPage: React.FC = () => {
   const selectedHotspotTopicRef = useRef<string | null>(null);
   const hotspotDetailRequestIdRef = useRef(0);
   const hotspotDetailsByTopicRef = useRef<Record<string, ScreeningHotspotDetail>>({});
+  // 镜像 hotspots，供 handleHotspotSelect 读取最新列表做预览 fallback，而不把数组放入
+  // 回调依赖（否则每次刷新都会使已 memo 的 HotspotCard 失效，全量重渲染）。
+  const hotspotsRef = useRef<ScreeningHotspot[]>([]);
+  const mountedRef = useRef(true);
   const [hotspotDetail, setHotspotDetail] = useState<ScreeningHotspotDetail | null>(null);
   const [loadingHotspotDetail, setLoadingHotspotDetail] = useState(false);
   const [searchingHotspotNews, setSearchingHotspotNews] = useState(false);
@@ -874,6 +883,8 @@ const StockScreeningPage: React.FC = () => {
       ? hotspotDetailsByTopicRef.current[topic]
       : null;
     if (cachedDetail) {
+      // 缓存命中同样递增请求序号，让任何仍在途的旧请求作废（双重防线，不依赖 topic 校验）。
+      hotspotDetailRequestIdRef.current += 1;
       setHotspotDetail(cachedDetail);
       setHotspotDetailError('');
       setLoadingHotspotDetail(false);
@@ -934,6 +945,9 @@ const StockScreeningPage: React.FC = () => {
     try {
       setStrategyLoadError('');
       const result = await screeningApi.getStrategies();
+      if (!mountedRef.current) {
+        return;
+      }
       const loadedStrategies = result.strategies || [];
       setStrategies(loadedStrategies);
       if (loadedStrategies.length > 0) {
@@ -954,6 +968,9 @@ const StockScreeningPage: React.FC = () => {
     setHotspotError('');
     try {
       const result = await screeningApi.getHotspots({ provider: 'akshare', top: 12, refresh });
+      if (!mountedRef.current) {
+        return;
+      }
       const nextHotspots = result.hotspots || [];
       const nextDetails = stripHotspotSearchAugmentationByTopic(result.details || {});
       hotspotDetailsByTopicRef.current = {
@@ -963,6 +980,7 @@ const StockScreeningPage: React.FC = () => {
       const currentTopic = selectedHotspotTopicRef.current;
       const retainedTopic = Boolean(currentTopic && nextHotspots.some((item) => item.topic === currentTopic));
       const nextTopic = retainedTopic ? currentTopic : null;
+      hotspotsRef.current = nextHotspots;
       setHotspots(nextHotspots);
       setHotspotsUpdatedAt(result.cachedAt || (nextHotspots.length > 0 ? new Date().toISOString() : null));
       setSelectedHotspotTopic(nextTopic);
@@ -998,12 +1016,12 @@ const StockScreeningPage: React.FC = () => {
       setHotspotDetailError('');
       setLoadingHotspotDetail(false);
     } else {
-      const preview = hotspots.find((item) => item.topic === topic);
+      const preview = hotspotsRef.current.find((item) => item.topic === topic);
       setHotspotDetail((currentDetail) => (
         currentDetail?.topic === topic ? currentDetail : preview ? buildHotspotPreviewDetail(preview) : null
       ));
     }
-  }, [hotspots]);
+  }, []);
 
   const toggleHotspotsExpanded = useCallback(() => {
     setHotspotsExpanded((expanded) => {
@@ -1052,6 +1070,11 @@ const StockScreeningPage: React.FC = () => {
       },
     });
   }, [navigate, selectedStrategy]);
+
+  // 展开状态驱动，身份稳定，配合 CandidateListItem 的 memo 让未展开项在父重渲染时跳过。
+  const handleToggleCandidate = useCallback((code: string) => {
+    setExpandedCode((current) => (current === code ? null : code));
+  }, []);
 
   useEffect(() => {
     selectedHotspotTopicRef.current = selectedHotspotTopic;
@@ -1231,10 +1254,15 @@ const StockScreeningPage: React.FC = () => {
   };
 
   const handleMaxResultsChange = (nextMaxResults: number) => {
-    if (nextMaxResults !== maxResults) {
+    // 提交前收敛到 1..100：手输越界（如 500、0）或清空（Number('')===0）都归位，
+    // NaN 回退默认值 3，避免把非法返回数量传给后端。
+    const clamped = Number.isFinite(nextMaxResults)
+      ? Math.min(100, Math.max(1, Math.round(nextMaxResults)))
+      : 3;
+    if (clamped !== maxResults) {
       clearScreeningResults();
     }
-    setMaxResults(nextMaxResults);
+    setMaxResults(clamped);
   };
 
   const handleSubmit = async () => {
@@ -1581,12 +1609,28 @@ const StockScreeningPage: React.FC = () => {
                 rank={item.rank}
                 factorRanking={factorRanking}
                 expanded={expandedCode === item.code}
-                onToggle={() => setExpandedCode(expandedCode === item.code ? null : item.code)}
+                onToggle={() => handleToggleCandidate(item.code)}
                 onAnalyze={handleAnalyzeCandidate}
               />
             ))}
           </div>
         )}
+        </section>
+      ) : null}
+
+      {loading && !screenMeta ? (
+        <section className="glass-card !border-transparent p-4 md:p-5">
+          <DashboardPanelHeader
+            className="mb-4"
+            title="选股结果"
+            titleClassName="text-sm font-medium"
+          />
+          <EmptyState
+            className="px-4 py-6"
+            icon={<Loader2 className="h-5 w-5 animate-spin" />}
+            title="选股任务运行中"
+            description="正在执行策略筛选与评分，完成后结果会显示在这里。可在顶部任务图标查看进度。"
+          />
         </section>
       ) : null}
     </AppPage>

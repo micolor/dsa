@@ -33,3 +33,4 @@ export * from '../layout/SidebarNav';
 export * from '../theme/ThemeProvider';
 export * from '../theme/ThemeToggle';
 export * from './ParticleBackground';
+export * from './SentimentBadge';

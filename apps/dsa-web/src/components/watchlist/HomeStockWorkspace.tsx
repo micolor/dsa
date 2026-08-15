@@ -1,5 +1,6 @@
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   ArrowDownWideNarrow,
   CalendarDays,
@@ -12,17 +13,42 @@ import {
   RefreshCw,
   Star,
 } from 'lucide-react';
-import { Badge, Button, InlineAlert, Input, ListItemRow, ScrollArea, StatusDot, Tooltip } from '../common';
+import { Badge, Button, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBar } from '../history';
+import { useStockPoolStore } from '../../stores';
 import type { StockBarItem, TaskInfo } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
-import { areStockCodesEquivalent } from '../../utils/stockCode';
+import { areStockCodesEquivalent, normalizeStockCode } from '../../utils/stockCode';
 import { truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiTextKey, UiTextParams } from '../../i18n/uiText';
+
+/** 归一化股票代码键，与 HomePage 的自选/任务 key 保持一致。 */
+function getStockCodeKey(code?: string | null): string {
+  const trimmed = (code ?? '').trim();
+  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
+}
+
+/** 由活动任务推导「代码 → 运行中任务」映射（排除大盘复盘与已结束状态）。 */
+function buildActiveTaskByCode(tasks: TaskInfo[]): Map<string, TaskInfo> {
+  const tasksByCode = new Map<string, TaskInfo>();
+  for (const task of tasks) {
+    if (!['pending', 'processing', 'cancel_requested'].includes(task.status)) {
+      continue;
+    }
+    if (task.reportType === 'market_review') {
+      continue;
+    }
+    const key = getStockCodeKey(task.stockCode);
+    if (key) {
+      tasksByCode.set(key, task);
+    }
+  }
+  return tasksByCode;
+}
 
 export type HomeWorkspaceTab = 'watchlist' | 'today' | 'history';
 export type WatchlistAnalyzeMode = 'all' | 'pending';
@@ -93,31 +119,19 @@ const ScoreBadge: React.FC<{ item?: StockBarItem }> = ({ item }) => {
     actionLabels,
   );
 
-  return (
-    <Badge
-      variant="default"
-      size="sm"
-      className="shrink-0 shadow-none text-[11px] font-semibold leading-none"
-      style={{
-        color,
-        borderColor: `${color}30`,
-        backgroundColor: `${color}10`,
-      }}
-    >
-      {operationLabel} {score}
-    </Badge>
-  );
+  return <SentimentBadge color={color} operationLabel={operationLabel} score={score} />;
 };
 
-const WatchlistRowItem: React.FC<{
+const WatchlistRowItemInner: React.FC<{
   row: HomeWatchlistRow;
+  activeTask?: TaskInfo;
   onRemove: (code: string) => Promise<void>;
   onOpenDetail: (row: HomeWatchlistRow) => void;
   disabled: boolean;
   selected: boolean;
-}> = ({ row, onRemove, onOpenDetail, disabled, selected }) => {
+}> = ({ row, activeTask, onRemove, onOpenDetail, disabled, selected }) => {
   const { t } = useUiLanguage();
-  const taskLabel = getTaskStatusLabel(row.activeTask, t);
+  const taskLabel = getTaskStatusLabel(activeTask, t);
   const isLatestDetailLoading = Boolean(row.isTodayStatusLoading);
   const isLatestDetailUnavailable = !isLatestDetailLoading && Boolean(row.isTodayStatusUnknown);
   // Keep showing the last-known detail during a refresh (so the row doesn't blank
@@ -193,11 +207,11 @@ const WatchlistRowItem: React.FC<{
         </>
       )}
       actionsTestId="watchlist-row-actions"
-      footer={row.activeTask ? (
+      footer={activeTask ? (
         <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-text">
           <StatusDot
-            tone={row.activeTask.status === 'processing' ? 'info' : 'neutral'}
-            pulse={row.activeTask.status === 'processing'}
+            tone={activeTask.status === 'processing' ? 'info' : 'neutral'}
+            pulse={activeTask.status === 'processing'}
             className="h-1.5 w-1.5"
           />
           <span className="truncate">{t('watchlist.taskRunning', { status: taskLabel })}</span>
@@ -207,7 +221,9 @@ const WatchlistRowItem: React.FC<{
   );
 };
 
-const TodayItem: React.FC<{ item: StockBarItem; onClick: (recordId: number) => void; selected: boolean }> = ({ item, onClick, selected }) => {
+const WatchlistRowItem = memo(WatchlistRowItemInner);
+
+const TodayItemInner: React.FC<{ item: StockBarItem; onClick: (recordId: number) => void; selected: boolean }> = ({ item, onClick, selected }) => {
   const { t } = useUiLanguage();
   const stockName = item.stockName || item.stockCode;
   const score = typeof item.sentimentScore === 'number' ? item.sentimentScore : null;
@@ -250,6 +266,8 @@ const TodayItem: React.FC<{ item: StockBarItem; onClick: (recordId: number) => v
   );
 };
 
+const TodayItem = memo(TodayItemInner);
+
 export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   activeTab,
   onTabChange,
@@ -277,6 +295,8 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   className = '',
 }) => {
   const { t } = useUiLanguage();
+  const activeTasks = useStockPoolStore(useShallow((state) => state.activeTasks));
+  const activeTaskByCode = useMemo(() => buildActiveTaskByCode(activeTasks), [activeTasks]);
   const [draftCode, setDraftCode] = useState('');
   const [workspaceNoticeCode, setWorkspaceNoticeCode] = useState<string | null>(null);
   const pendingWatchlistCount = watchlistRows
@@ -319,7 +339,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     void onAddToWatchlist(code).then(() => setDraftCode(''));
   };
 
-  const handleWatchlistRowOpen = (row: HomeWatchlistRow) => {
+  const handleWatchlistRowOpen = useCallback((row: HomeWatchlistRow) => {
     if (row.isTodayStatusLoading || row.isTodayStatusUnknown) {
       setWorkspaceNoticeCode(row.code);
       return;
@@ -331,7 +351,13 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
       return;
     }
     setWorkspaceNoticeCode(row.code);
-  };
+  }, [onHistoryItemClick]);
+
+  // 稳定引用，配合 WatchlistRowItem 的 memo 让行在父重渲染时跳过。
+  const handleRemoveFromWatchlist = useCallback(async (code: string) => {
+    setWorkspaceNoticeCode(null);
+    await onRemoveFromWatchlist(code);
+  }, [onRemoveFromWatchlist]);
 
   const renderTabs = (
     <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
@@ -538,10 +564,8 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 <WatchlistRowItem
                   key={row.code}
                   row={row}
-                  onRemove={async (code) => {
-                    setWorkspaceNoticeCode(null);
-                    await onRemoveFromWatchlist(code);
-                  }}
+                  activeTask={activeTaskByCode.get(getStockCodeKey(row.code))}
+                  onRemove={handleRemoveFromWatchlist}
                   onOpenDetail={handleWatchlistRowOpen}
                   disabled={watchlistActioning}
                   selected={

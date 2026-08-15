@@ -113,3 +113,15 @@ export const getMarketPhaseSummaryLabel = (
 
 export const getPartialBarLabel = (language?: ReportLanguage | null): string =>
   TEXT[normalizeReportLanguage(language)].partialBar;
+
+/** 去除摘要前缀（"市场阶段: " / "市场阶段：" / "Market phase: "）后的纯阶段徽章文案。 */
+export const getMarketPhaseBadgeLabel = (
+  summary?: MarketPhaseSummary | null,
+  language?: ReportLanguage | null,
+): string | null => {
+  const label = getMarketPhaseSummaryLabel(summary, language);
+  if (!label) {
+    return null;
+  }
+  return label.replace('市场阶段: ', '').replace('市场阶段：', '').replace('Market phase: ', '');
+};

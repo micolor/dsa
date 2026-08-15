@@ -1,4 +1,4 @@
-import type React from 'react';
+import { memo } from 'react';
 import type { ScreeningCandidate } from '../../api/screening';
 import { Badge, ListItemRow } from '../common';
 import {
@@ -200,7 +200,7 @@ const CandidateDetail: React.FC<{ item: ScreeningCandidate; onAnalyze: (c: Scree
   );
 };
 
-export const CandidateListItem: React.FC<CandidateListItemProps> = ({
+const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
   item,
   rank,
   factorRanking,
@@ -290,3 +290,6 @@ export const CandidateListItem: React.FC<CandidateListItemProps> = ({
     </div>
   );
 };
+
+export const CandidateListItem = memo(CandidateListItemInner);
+CandidateListItem.displayName = 'CandidateListItem';

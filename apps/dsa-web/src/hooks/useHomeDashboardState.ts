@@ -36,7 +36,6 @@ export function useHomeDashboardState() {
       isLoadingMoreStockHistory: state.isLoadingMoreStockHistory,
       stockHistoryError: state.stockHistoryError,
       stockHistoryFilters: state.stockHistoryFilters,
-      activeTasks: state.activeTasks,
       markdownDrawerOpen: state.markdownDrawerOpen,
       notify: state.notify,
       setQuery: state.setQuery,
