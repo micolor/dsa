@@ -614,7 +614,7 @@ async def agent_chat_stream(
                     else:
                         event = await asyncio.wait_for(queue.get(), timeout=300.0)
                 except asyncio.TimeoutError:
-                    event = {"type": "error", "message": "分析超时"}
+                    event = {"type": "error", "message": "分析超时", "error_code": "timeout"}
                     yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
                     break
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"

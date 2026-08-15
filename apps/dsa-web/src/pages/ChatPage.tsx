@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -47,6 +47,14 @@ const QUICK_QUESTIONS: Array<{
   { label: '分析腾讯 hk00700', skill: 'bull_trend', stockContext: { stock_code: 'HK00700', stock_name: '腾讯控股' } },
   { label: '用情绪周期分析东方财富', skill: 'emotion_cycle', stockContext: { stock_code: '300059', stock_name: '东方财富' } },
 ];
+
+// 单条 AI 消息的 Markdown 正文。包一层 memo：运行中的 SSE progress 事件不会改变
+// 已完成消息的 content（store 里 messages 引用不变），因此这些昂贵的 Markdown
+// 子树在进度事件期间跳过重建，避免整个对话区每次进度更新都重新解析渲染。
+const MarkdownBody: React.FC<{ content: string }> = memo(({ content }) => (
+  <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+));
+MarkdownBody.displayName = 'MarkdownBody';
 
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
@@ -1412,9 +1420,7 @@ const ChatPage: React.FC = () => {
                           </button>
                         </div>
                         <div className="chat-prose pr-3 sm:pr-4">
-                          <Markdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </Markdown>
+                          <MarkdownBody content={msg.content} />
                         </div>
                       </div>
                     ) : (

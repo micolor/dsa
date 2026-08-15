@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 问股 Agent Chat 渲染优化：AI 消息的 Markdown 正文用 `memo` 包裹，任务进度 SSE 事件期间已完成消息不再每次重复解析渲染（消息数组引用不变时跳过重建）；实时进度步骤列表设保留上限（最近 200 条），完整详情仍会在完成时随消息的 `thinkingSteps` 保留，避免长任务（尤其 codex）无界累积内存与渲染
+- [修复] 问股 Agent Chat 流式超时统一进入「已超时」终态：后端整体超时事件补上 `error_code='timeout'`，前端据此与 codex 的 timeout 处理对齐，不再显示普通错误
+- [修复] 问股 Agent Chat 消息 id 改用 UUID，避免同一毫秒创建多条消息时 React key 碰撞
 - [改进] 首页报告区隔离：把右侧报告 / 大盘复盘 / 历史趋势子树抽取为 `memo` 组件 `HomeReportRegion`，其 props 在任务进度期间引用稳定，任务运行时的 SSE progress 更新不再让整份 Markdown 报告随之重建（自选列表行仍按行更新进度，属预期）
 - [改进] 首页 `activeTasks` 订阅下移：自选区自行订阅运行中任务并按股票代码推导「代码 → 运行中任务」映射，首页顶层不再订阅 `activeTasks`，任务进度 SSE 更新只触发自选区行重渲染，页头与报告区不再随之整页重建
 - [改进] 首页与选股页列表行减少不必要重渲染：自选/今日/历史与选股候选列表项改由 `React.memo` + `useCallback` 稳定回调承载，任务进度更新不再连带整行重建；大盘复盘轮询状态以 ref 守卫避免内容未变时重复 `setState`；两处异步 loader 增加卸载守卫，避免卸载后 `setState`；选股 `maxResults` 提交前 clamp 到 1–100，自选股条件无有效结果时收敛到固定 A 股市场死状态

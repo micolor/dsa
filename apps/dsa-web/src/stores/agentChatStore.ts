@@ -12,6 +12,10 @@ import { generateUUID } from '../utils/uuid';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
+// 实时进度步骤保留上限。完整详情在完成时仍会随 thinkingSteps 落进对应消息，
+// 这里只限制「运行中」状态条的常驻数组长度，避免长任务（尤其 codex）无界累积。
+const MAX_LIVE_PROGRESS_STEPS = 200;
+
 export interface ProgressStep {
   type: string;
   step?: number;
@@ -336,7 +340,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     const skillName = skillNames.join('、');
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: generateUUID(),
       role: 'user',
       content: payload.message,
       skills: payload.skills,
@@ -376,7 +380,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           messages: [
             ...s.messages,
             {
-              id: (Date.now() + 1).toString(),
+              id: generateUUID(),
               role: 'assistant',
               content: '',
               skills: payload.skills,
@@ -487,6 +491,13 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         if (event.type === 'error') {
           set({ stopError: false });
           const failureEvent = event as unknown as StreamFailureEvent;
+          // 后端把整体超时以 error 事件上报（带 error_code:'timeout'）。
+          // 与 done 事件的 timeout 分支保持一致：进入「已超时」终态而非普通错误。
+          if (failureEvent.error_code === 'timeout') {
+            receivedDoneEvent = true;
+            set({ terminalStatus: 'timeout' });
+            return;
+          }
           throw getStreamFailureError(
             failureEvent,
             streamFailureFallback(failureEvent, '分析出错'),
@@ -494,7 +505,12 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
 
         currentProgressSteps.push(event);
-        set((s) => ({ progressSteps: [...s.progressSteps, event] }));
+        const { progressSteps: liveSteps } = get();
+        const nextSteps =
+          liveSteps.length >= MAX_LIVE_PROGRESS_STEPS
+            ? [...liveSteps.slice(liveSteps.length - MAX_LIVE_PROGRESS_STEPS + 1), event]
+            : [...liveSteps, event];
+        set({ progressSteps: nextSteps });
       };
 
       while (true) {
@@ -565,7 +581,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
             messages: [
               ...s.messages,
               {
-                id: (Date.now() + 1).toString(),
+                id: generateUUID(),
                 role: 'assistant',
                 content: committedContent,
                 skills: payload.skills,
