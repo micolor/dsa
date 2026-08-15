@@ -19,6 +19,19 @@ from data_provider.yfinance_fundamental_adapter import (
 )
 
 
+def _dividend_index(offsets_days: list[int]) -> pd.DatetimeIndex:
+    """Build a tz-aware dividend index at fixed offsets before the current date.
+
+    The adapter computes the TTM dividend window against ``pd.Timestamp.now()``
+    (trailing 365 days). Using offsets relative to "now" keeps every fixture
+    inside the window regardless of when the suite runs, instead of hard-coded
+    dates that silently age out of the trailing year (breaking once the oldest
+    dividend is more than a year old).
+    """
+    now = pd.Timestamp.now(tz="America/New_York")
+    return pd.DatetimeIndex([now - pd.Timedelta(days=d) for d in offsets_days])
+
+
 def _build_mock_ticker(
     info: dict,
     income_stmt: pd.DataFrame | None = None,
@@ -93,13 +106,14 @@ class TestYfinanceFundamentalAdapter(unittest.TestCase):
                 pd.Timestamp("2025-12-31"): {"Operating Cash Flow": 3.5e10},
             }
         )
+        # Four quarterly dividends all within the trailing 365 days (latest at -30d).
         dividends = pd.Series(
             [0.26, 0.26, 0.26, 0.27],
-            index=pd.DatetimeIndex(
-                ["2025-08-11", "2025-11-10", "2026-02-09", "2026-05-11"],
-                tz="America/New_York",
-            ),
+            index=_dividend_index([300, 210, 120, 30]),
             name="Dividends",
+        )
+        latest_dividend_date = (
+            dividends.index[-1].normalize().strftime("%Y-%m-%d")
         )
         ticker = _build_mock_ticker(info, income_df_with_yoy, cashflow_df, dividends)
 
@@ -126,7 +140,7 @@ class TestYfinanceFundamentalAdapter(unittest.TestCase):
         # info.dividendYield (0.36) is intentionally ignored when TTM cash exists.
         self.assertAlmostEqual(div["ttm_dividend_yield_pct"], 0.5, places=2)
         self.assertEqual(div["currency"], "USD")
-        self.assertEqual(div["events"][0]["ex_dividend_date"], "2026-05-11")
+        self.assertEqual(div["events"][0]["ex_dividend_date"], latest_dividend_date)
 
         self.assertEqual(
             bundle["belong_boards"],
@@ -141,11 +155,10 @@ class TestYfinanceFundamentalAdapter(unittest.TestCase):
         # Series. Without coercion, `.items()` yields (column_name, Series), every event
         # is dropped, and TTM silently falls back to the annual-rate estimate — the real
         # bug seen on live US/HK/JP/KR/TW reports (24.0 / "0 次" instead of the true sum).
-        idx = pd.DatetimeIndex(
-            ["2025-08-11", "2025-11-10", "2026-02-09", "2026-05-11"],
-            tz="America/New_York",
+        dividends_df = pd.DataFrame(
+            {"Dividends": [0.26, 0.26, 0.26, 0.27]},
+            index=_dividend_index([300, 210, 120, 30]),
         )
-        dividends_df = pd.DataFrame({"Dividends": [0.26, 0.26, 0.26, 0.27]}, index=idx)
         info = {
             "currency": "USD",
             "financialCurrency": "USD",

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 情报源抓取请求不再复用共享的可变 `proxies` 常量：`requests` 会在请求时对传入的 `proxies` 字典原地追加环境中所有 `*_proxy` 项（`merge_environment_settings` → `proxies.setdefault`），导致模块级 `_DISABLE_REQUEST_PROXIES` 被污染（如本机 `SOCKS_PROXY` 泄漏进每次请求），现改为每次请求传入独立副本，避免共享常量被跨请求污染
+- [测试] 测试夹具隔离本地 `.env` 污染：`src.config.setup_env()` 会把仓库根 `.env` 写入进程环境且不复原；此前某用例加载真实 `.env` 后，后续用例会读到开发者本机配置（如 `LITELLM_FALLBACK_MODELS`、`SOCKS_PROXY`）导致结果依赖用例执行顺序；`tests/conftest.py` 新增 autouse fixture 在每个用例前后快照/还原 `os.environ`
+- [测试] 修复三处「时间炸弹」测试：yfinance 股息 TTM、东财兜底新闻时效均改为按相对当前时间构造夹具，静态日期会随日期推移掉出时效窗口导致回归
+- [测试] 情报源与用量看板 API 契约测试在 `create_app` 下禁用鉴权：本机 `.env` 设 `ADMIN_AUTH_ENABLED=true` 时这些测试返回 401，改为在中间件边界关闭鉴权（对齐 auth 测试既有模式），使契约测试与本机鉴权开关解耦
+- [chore] 重新生成静态 OpenAPI spec `docs/architecture/api_spec.json`：此前与 `create_app().openapi()` 存在 90 处缺失路径、127 处缺失 schema 的漂移，重新生成以匹配运行时契约
 - [改进] API 错误响应统一到 `{error, message}` 契约并清理内部报错：全局 `HTTPException` / 未捕获异常 handler 复用共享 `error_body()`，`detail` 为空时不回传空值；`alerts` / `paper` 端点错误改走统一 `api_error()`，内部 `str(exc)` 不再泄入响应；`agent` / `stocks` / `history` 若干 500 文案去敏（去掉异常字符串与堆栈），避免向客户端暴露内部细节
 - [改进] API 入参与契约加固：`stocks` 报价/历史接口统一 `_validate_and_normalize_stock_code` 规范化股票代码、JSON 文本分析增加 100KB 上限；`history` 日期解析前置并校验非法日期返回 400；`paper` 回填增加起始日期不晚于结束日期的校验；`portfolio` 快照/风险 `cost_method` 收紧为 `Literal["fifo","avg"]`（非法值由 FastAPI 直接 422）、`delete_account` 补齐 `response_model`
 - [chore] 移除未注册的 `ErrorHandlerMiddleware` 死代码类及其导出，统一由 `error_handler.py` 的注册式 handler 承载全局异常处理

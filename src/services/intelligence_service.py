@@ -568,7 +568,11 @@ class IntelligenceService:
             socket.getaddrinfo = guarded_getaddrinfo
             try:
                 request_kwargs = dict(kwargs)
-                request_kwargs.setdefault("proxies", _DISABLE_REQUEST_PROXIES)
+                # Pass a fresh copy, never the shared module-level constant:
+                # requests.merge_environment_settings mutates the proxies dict in
+                # place (proxies.setdefault for every *_proxy env var), which would
+                # otherwise permanently corrupt the constant for the whole process.
+                request_kwargs.setdefault("proxies", dict(_DISABLE_REQUEST_PROXIES))
                 return requests.get(raw_url, **request_kwargs)
             finally:
                 socket.getaddrinfo = original_getaddrinfo

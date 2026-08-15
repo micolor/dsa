@@ -32,6 +32,12 @@ class IntelligenceApiTestCase(unittest.TestCase):
         )
         self._dns_patcher.start()
         self.addCleanup(self._dns_patcher.stop)
+        # These tests exercise the intelligence API contract, not auth. The local
+        # .env has ADMIN_AUTH_ENABLED=true, so disable auth at the middleware
+        # boundary (mirrors test_auth_api.py) to keep them env-independent.
+        self._auth_patcher = patch("api.middlewares.auth.is_auth_enabled", return_value=False)
+        self._auth_patcher.start()
+        self.addCleanup(self._auth_patcher.stop)
         self.client = TestClient(create_app(static_dir=Path(self._temp_dir.name)))
 
     def tearDown(self) -> None:

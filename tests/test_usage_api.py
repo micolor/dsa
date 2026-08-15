@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -68,6 +69,13 @@ class FakeUsageDbManager:
 
 
 class UsageDashboardApiTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        # Disable auth at the middleware boundary (mirrors test_auth_api.py) so the
+        # usage dashboard contract test is independent of local ADMIN_AUTH_ENABLED.
+        self._auth_patcher = patch("api.middlewares.auth.is_auth_enabled", return_value=False)
+        self._auth_patcher.start()
+        self.addCleanup(self._auth_patcher.stop)
+
     def test_dashboard_returns_token_summary_and_recent_calls(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app(static_dir=Path(temp_dir))

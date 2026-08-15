@@ -13,6 +13,7 @@
 import json
 import sys
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 # Mock newspaper before search_service import (optional dependency)
@@ -26,9 +27,15 @@ from src.search_service import SearchResponse, SearchService  # noqa: E402
 
 
 def _eastmoney_jsonp(title="贵州茅台：最新消息", content="内容<em>摘要</em>。", media_name="第一财经"):
-    """构造东财 jsonp 响应。"""
+    """构造东财 jsonp 响应。
+
+    发布日期取「1 天前」的相对日期：情报搜索的严格时效过滤按 news_max_age_days
+    相对当前时间截断（默认 3 天 + 1 天缓冲），若写死某个具体日期，会随时间推移
+    掉出时效窗口（如 2026-08-10 在 2026-08-15 之后即被判过期）导致用例回归。
+    """
+    pub_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     articles = [{
-        "date": "2026-08-10 14:00:00",
+        "date": pub_date,
         "title": title,
         "content": content,
         "mediaName": media_name,

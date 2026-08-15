@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import os
 import time
 import threading
 from collections.abc import Awaitable, Callable
@@ -16,8 +17,26 @@ from warnings import warn
 import anyio.to_thread
 import fastapi.testclient
 import httpx
+import pytest
 import starlette.testclient
 from anyio._backends import _asyncio
+
+
+@pytest.fixture(autouse=True)
+def _isolate_os_environ():
+    """Snapshot and restore ``os.environ`` around every test.
+
+    ``src.config.setup_env()`` loads the repo's real ``./.env`` into the process
+    environment via ``load_dotenv(..., override=...)`` (src/config.py:843) and never
+    undoes it. Any test that exercises that path leaks keys from the developer's
+    real ``.env`` (e.g. ``LITELLM_FALLBACK_MODELS=deepseek/...``, proxy settings)
+    into every later test, making suites order-dependent. Restoring the snapshot
+    after each test keeps each test hermetic regardless of what earlier tests ran.
+    """
+    saved = os.environ.copy()
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 T = TypeVar("T")
 
