@@ -588,6 +588,11 @@ const DecisionSignalsPage: React.FC = () => {
   // 卸载时作废 mutation 类在途请求（reassess/persist 共用 reassessRequestIdRef），
   // 避免 resolve 后执行卸载后 setState；handleStatusUpdate / handleFeedbackSubmit 再叠加 mounted 守卫。
   useEffect(() => {
+    // Reset in setup: under React <StrictMode> dev double-mounting the cleanup runs
+    // once and useRef(true) never re-initializes, which would otherwise leave
+    // mountedRef.current === false and make handleStatusUpdate / handleFeedbackSubmit
+    // silently skip their setState via the mounted guard.
+    mountedRef.current = true;
     const cleanup = () => {
       mountedRef.current = false;
       reassessRequestIdRef.current += 1;

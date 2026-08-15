@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 修复 AI 建议页状态更新/反馈无反应（同类 StrictMode `mountedRef` 缺陷）：`DecisionSignalsPage` 卸载清理仅把 `mountedRef.current` 置 `false` 而未在挂载时重置，开发模式 `<StrictMode>` 二次挂载后该值为 `false`，`handleStatusUpdate`/`handleFeedbackSubmit` 的 `if (!mountedRef.current) return` 守卫在请求成功后静默跳过 `setState`，界面不刷新；改为在 effect 挂载时重置 `mountedRef.current = true`
 - [修复] 修复选股页策略下拉无值：`mountedRef` 卸载清理把 `mountedRef.current` 置 `false` 后，React `<StrictMode>` 开发模式二次挂载不会重新初始化为 `true`，导致 `loadStrategies`/`loadHotspots` 的 `if (!mountedRef.current) return` 守卫在请求返回后静默跳过 `setState`，策略列表与热点始终为空（接口 200 但下拉无值）；改为在 effect 挂载时重置 `mountedRef.current = true`（对齐 `HomePage` 既有正确写法）
 - [修复] 情报源抓取请求不再复用共享的可变 `proxies` 常量：`requests` 会在请求时对传入的 `proxies` 字典原地追加环境中所有 `*_proxy` 项（`merge_environment_settings` → `proxies.setdefault`），导致模块级 `_DISABLE_REQUEST_PROXIES` 被污染（如本机 `SOCKS_PROXY` 泄漏进每次请求），现改为每次请求传入独立副本，避免共享常量被跨请求污染
 - [测试] 测试夹具隔离本地 `.env` 污染：`src.config.setup_env()` 会把仓库根 `.env` 写入进程环境且不复原；此前某用例加载真实 `.env` 后，后续用例会读到开发者本机配置（如 `LITELLM_FALLBACK_MODELS`、`SOCKS_PROXY`）导致结果依赖用例执行顺序；`tests/conftest.py` 新增 autouse fixture 在每个用例前后快照/还原 `os.environ`
