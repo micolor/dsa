@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 回测页并发请求防呆：结果与绩效两个异步加载加入卸载守卫（`mountedRef`）与请求序号守卫（`resultsRequestRef`/`perfRequestRef`），只让最新一次请求生效，避免快速筛选/翻页/运行/切换下慢响应覆盖新数据、初始加载与用户操作竞态，以及卸载后 `setState`
 - [改进] 问股 Agent Chat 渲染优化：AI 消息的 Markdown 正文用 `memo` 包裹，任务进度 SSE 事件期间已完成消息不再每次重复解析渲染（消息数组引用不变时跳过重建）；实时进度步骤列表设保留上限（最近 200 条），完整详情仍会在完成时随消息的 `thinkingSteps` 保留，避免长任务（尤其 codex）无界累积内存与渲染
 - [修复] 问股 Agent Chat 流式超时统一进入「已超时」终态：后端整体超时事件补上 `error_code='timeout'`，前端据此与 codex 的 timeout 处理对齐，不再显示普通错误
 - [修复] 问股 Agent Chat 消息 id 改用 UUID，避免同一毫秒创建多条消息时 React key 碰撞

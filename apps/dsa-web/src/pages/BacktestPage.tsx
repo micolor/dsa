@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Check, Download, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
@@ -316,6 +316,11 @@ const BacktestPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const pageSize = 20;
+  // 并发请求守卫：mountedRef 防止卸载后 setState；
+  // resultsRequestRef / perfRequestRef 只让"最新一次请求"生效，丢弃过期慢响应。
+  const mountedRef = useRef(true);
+  const resultsRequestRef = useRef(0);
+  const perfRequestRef = useRef(0);
 
   // Performance state
   const [overallPerf, setOverallPerf] = useState<PerformanceMetrics | null>(null);
@@ -324,6 +329,14 @@ const BacktestPage: React.FC = () => {
   const effectiveWindowDays = parseEvalWindowDays(evalDays) ?? overallPerf?.evalWindowDays;
   const isNextDayValidation = effectiveWindowDays === 1;
   const showNextDayActualColumns = isNextDayValidation;
+
+  // Mount guard
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Fetch results
   const fetchResults = useCallback(async (
@@ -334,6 +347,7 @@ const BacktestPage: React.FC = () => {
     endDate?: string,
     phase?: BacktestPhaseFilter,
   ) => {
+    const requestId = ++resultsRequestRef.current;
     setIsLoadingResults(true);
     try {
       const response = await backtestApi.getResults({
@@ -345,15 +359,20 @@ const BacktestPage: React.FC = () => {
         page,
         limit: pageSize,
       });
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
       setResults(response.items);
       setTotalResults(response.total);
       setCurrentPage(response.page);
       setPageError(null);
     } catch (err) {
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
       console.error('Failed to fetch backtest results:', err);
       setPageError(getParsedApiError(err));
     } finally {
-      setIsLoadingResults(false);
+      // 只让最新一次请求关闭 loading，避免过期请求提前清除加载态
+      if (mountedRef.current && requestId === resultsRequestRef.current) {
+        setIsLoadingResults(false);
+      }
     }
   }, []);
 
@@ -365,6 +384,7 @@ const BacktestPage: React.FC = () => {
     endDate?: string,
     phase?: BacktestPhaseFilter,
   ) => {
+    const requestId = ++perfRequestRef.current;
     setIsLoadingPerf(true);
     try {
       const overall = await backtestApi.getOverallPerformance({
@@ -373,6 +393,7 @@ const BacktestPage: React.FC = () => {
         analysisDateTo: endDate || undefined,
         analysisPhase: phase && phase !== 'all' ? phase : undefined,
       });
+      if (!mountedRef.current || requestId !== perfRequestRef.current) return;
       setOverallPerf(overall);
 
       if (code) {
@@ -382,16 +403,20 @@ const BacktestPage: React.FC = () => {
           analysisDateTo: endDate || undefined,
           analysisPhase: phase && phase !== 'all' ? phase : undefined,
         });
+        if (!mountedRef.current || requestId !== perfRequestRef.current) return;
         setStockPerf(stock);
       } else {
         setStockPerf(null);
       }
       setPageError(null);
     } catch (err) {
+      if (!mountedRef.current || requestId !== perfRequestRef.current) return;
       console.error('Failed to fetch performance:', err);
       setPageError(getParsedApiError(err));
     } finally {
-      setIsLoadingPerf(false);
+      if (mountedRef.current && requestId === perfRequestRef.current) {
+        setIsLoadingPerf(false);
+      }
     }
   }, []);
 
@@ -399,7 +424,9 @@ const BacktestPage: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       // Get latest performance (unfiltered returns most recent summary)
+      const perfId = ++perfRequestRef.current;
       const overall = await backtestApi.getOverallPerformance();
+      if (!mountedRef.current || perfId !== perfRequestRef.current) return;
       setOverallPerf(overall);
       // Use the summary's eval_window_days to filter results consistently
       const windowDays = overall?.evalWindowDays;
