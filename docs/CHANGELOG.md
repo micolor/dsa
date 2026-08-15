@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [测试] 同步测试到收紧后的契约：`cost_method` 非法值断言由 400 改为 422；litellm 非流式错误断言改为「不泄露内部异常、message 为统一中文文案」
 - [改进] hover 位移动效加 `pointer-fine` 门控（Apple 流体界面「减少动效 + 指针门控」原则）：settings-secondary 按钮上浮、hotspot/节点卡上浮、hotspot 卡装饰图标缩放共 4 处位移/缩放动效改为仅在精确指针设备生效，避免触屏首点后残留 hover 位移
 - [改进] 全站 `transition-all` 收敛为确切过渡属性（Apple 流体界面「指明确切属性」原则）：输入框/选择器/focus 光晕收敛为 `transition-[border-color,background-color,box-shadow]`；导航项、分页、勾选框、遮罩等纯色变化元素收敛为 `transition-colors`；按钮/节点卡/hotspot 卡保留 `transform`/`filter` 过渡（hover 有位移或亮度变化），进度条收敛为 `transition-[width,background-color]`，折叠面板收敛为 `transition-[max-height,opacity]`；22 处 `transition-all` 全部收敛，行为不变
+- [改进] 多维度情报搜索（`search_comprehensive_intel`）由「每维度轮询一个引擎」改为「按优先级逐个尝试多个来源」：某来源无相关结果或异常时自动尝试下一个来源，命中直接个股新闻或满足目标条数则提前结束该维度；东财免费兜底仅在没有任何来源返回原始结果时触发（与个股资讯路径语义一致），避免来源返回结果但被时效过滤掉时误触网络兜底
 - [改进] 首页策略菜单按钮动效属性收敛：`transition-all` 改为 `transition-colors`（Apple 流体界面「指明确切属性」原则，按钮 hover 仅变背景/边框色，避免对无变化属性做无意义过渡）
 - [修复] 决策信号建议单元移除原生 `title`（治理规则禁止对 div/span 使用原生 title，键盘不可达）：改用可访问 `Tooltip` 承载完整建议文本（操作/期限/风险/观察条件），悬停或聚焦时展开；持仓页持有信号风险摘要测试同步为「悬停建议单元 → 断言 Tooltip 内容」，并在账户切换重建行（key 含 accountId）时每次重新定位触发器，避免拿到已卸载旧行
 - [测试] 同步告警模块测试到自定义 `Select` 异步渲染契约：`AlertRuleForm`/`AlertRuleList` 共 18 条测试仍按原生 select 交互而失败；改为「点击触发器 → `await waitFor`/`findByRole('option')` → 点击 `data-value` 选项」，并修正 `waitFor` 从 `@testing-library/react` 导入，消除级联失败，告警测试全部恢复通过

@@ -4615,51 +4615,184 @@ class SearchService:
             provider_max_results,
         )
         
-        # 轮流使用不同的搜索引擎
-        provider_index = 0
+        # 每个维度按 provider 优先级顺序逐个尝试：无相关结果则自动尝试下一个来源，
+        # 取命中里最好的一份；命中直接个股新闻或满足目标条数则提前结束该维度；
+        # 所有来源都无相关结果时，用东财免费兜底（整次情报搜索只兜底一次）。
+        prefer_chinese = self._should_prefer_chinese_news(stock_code, stock_name)
         fallback_used = False
 
         for dim in search_dimensions:
             if search_count >= max_searches:
                 break
-            
-            # 选择搜索引擎（轮流使用）
-            available_providers = [p for p in self._providers if p.is_available]
-            if not available_providers:
-                break
-            
-            provider = available_providers[provider_index % len(available_providers)]
-            provider_index += 1
-            
+
             request_days = (
                 self.ANALYTICAL_INTEL_LOOKBACK_DAYS
                 if dim['name'] in self.ANALYTICAL_INTEL_DIMENSIONS
                 else search_days
             )
 
-            logger.info(
-                "[情报搜索] %s: 使用 %s，请求窗口: 近%s天",
-                dim['desc'],
-                provider.name,
-                request_days,
-            )
+            available_providers = [p for p in self._providers if p.is_available]
+            if not available_providers:
+                break
 
-            if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
-                    topic=dim['tavily_topic'],
-                )
-            else:
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
+            best_filtered: Optional[SearchResponse] = None
+            best_stats: Optional[Dict[str, int]] = None
+            provider_attempted = False
+            had_raw_results = False  # 是否有来源返回了原始结果（用于决定是否东财兜底）
+
+            for provider in available_providers:
+                provider_attempted = True
+                logger.info(
+                    "[情报搜索] %s: 使用 %s，请求窗口: 近%s天",
+                    dim['desc'],
+                    provider.name,
+                    request_days,
                 )
 
-            # 免费兜底：provider 无结果时，用东财免费个股新闻填充（每次情报搜索只兜底一次）
-            if not (response.success and response.results) and not fallback_used:
+                started_at = time.monotonic()
+                try:
+                    if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
+                        response = provider.search(
+                            dim['query'],
+                            max_results=provider_max_results,
+                            days=request_days,
+                            topic=dim['tavily_topic'],
+                        )
+                    else:
+                        response = provider.search(
+                            dim['query'],
+                            max_results=provider_max_results,
+                            days=request_days,
+                        )
+                except Exception as exc:
+                    self._record_news_search_run(
+                        provider=provider.name,
+                        operation="search_comprehensive_intel",
+                        success=False,
+                        latency_ms=self._elapsed_ms(started_at),
+                        error_type=type(exc).__name__,
+                        error_message=exc,
+                    )
+                    logger.warning(
+                        "[情报搜索] %s: %s 搜索异常 - %s，尝试下一个来源",
+                        dim['desc'],
+                        provider.name,
+                        exc,
+                    )
+                    # 异常不算“相关结果”，继续尝试下一个来源
+                    continue
+
+                had_raw_results = had_raw_results or bool(response.success and response.results)
+
+                if dim['strict_freshness']:
+                    filtered_response = self._filter_news_response(
+                        response,
+                        search_days=search_days,
+                        max_results=provider_max_results,
+                        log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
+                    )
+                elif dim['name'] in self.ANALYTICAL_INTEL_DIMENSIONS:
+                    filtered_response = self._filter_news_response(
+                        response,
+                        search_days=self.ANALYTICAL_INTEL_LOOKBACK_DAYS,
+                        max_results=provider_max_results,
+                        keep_unknown=True,
+                        log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
+                    )
+                else:
+                    filtered_response = self._normalize_and_limit_response(
+                        response,
+                        max_results=provider_max_results,
+                    )
+                filtered_response = self._rank_news_response(
+                    filtered_response,
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    prefer_chinese=prefer_chinese,
+                    max_results=provider_max_results,
+                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}:rank",
+                )
+                filtered_response = self._filter_ranked_news_for_context(
+                    filtered_response,
+                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}:admission",
+                )
+                filtered_response = self._limit_search_response(
+                    filtered_response,
+                    max_results=target_per_dimension,
+                )
+                admitted_count = len(filtered_response.results or [])
+
+                self._record_news_search_run(
+                    provider=provider.name,
+                    operation="search_comprehensive_intel",
+                    success=bool(admitted_count),
+                    latency_ms=self._elapsed_ms(started_at),
+                    record_count=admitted_count,
+                    error_type=None if admitted_count else "NoUsableNews",
+                    error_message=None if admitted_count else (
+                        response.error_message or "过滤后无有效资讯"
+                    ),
+                )
+
+                if response.success:
+                    logger.info(
+                        "[情报搜索] %s: 原始=%s条, 过滤后=%s条",
+                        dim['desc'],
+                        len(response.results),
+                        admitted_count,
+                    )
+                else:
+                    logger.warning(f"[情报搜索] {dim['desc']}: 搜索失败 - {response.error_message}")
+
+                # 无相关结果：继续尝试下一个来源
+                if not admitted_count:
+                    continue
+
+                stats = self._news_relevance_stats(
+                    filtered_response,
+                    prefer_chinese=prefer_chinese,
+                )
+                if self._is_better_ranked_news_response(
+                    filtered_response,
+                    candidate_stats=stats,
+                    best_response=best_filtered,
+                    best_stats=best_stats,
+                    prefer_chinese=prefer_chinese,
+                ):
+                    best_filtered = filtered_response
+                    best_stats = stats
+
+                # 命中直接个股新闻：提前结束该维度，不再尝试后续来源
+                if stats["direct_count"] > 0 and (
+                    not prefer_chinese or stats["preferred_direct_count"] > 0
+                ):
+                    logger.info(
+                        "[情报搜索] %s: %s 命中直接个股新闻，停止尝试后续来源",
+                        dim['desc'],
+                        provider.name,
+                    )
+                    break
+
+                # 结果已满足目标条数：停止尝试后续来源
+                if admitted_count >= target_per_dimension and (
+                    not prefer_chinese or stats["preferred_count"] > 0
+                ):
+                    logger.info(
+                        "[情报搜索] %s: %s 结果已满足目标条数，停止尝试后续来源",
+                        dim['desc'],
+                        provider.name,
+                    )
+                    break
+
+            # 所有来源都无相关结果时，用东财免费兜底（整次情报搜索只兜底一次）。
+            # 仅当没有任何来源返回原始结果时才兜底，与 search_stock_news 的东财兜底语义保持一致
+            # （避免来源返回了原始结果但被时效过滤掉时误触网络兜底）。
+            if (
+                (best_filtered is None or not best_filtered.results)
+                and not fallback_used
+                and provider_attempted
+                and not had_raw_results
+            ):
                 free_response = self._search_eastmoney_free(
                     stock_code,
                     stock_name,
@@ -4667,65 +4800,63 @@ class SearchService:
                 )
                 if free_response is not None and free_response.success and free_response.results:
                     logger.info(
-                        "[情报搜索] %s: 使用东方财富免费资讯兜底 %s 条",
+                        "[情报搜索] %s: 所有来源无相关结果，使用东方财富免费资讯兜底 %s 条",
                         dim['desc'],
                         len(free_response.results),
                     )
-                    response = free_response
+                    if dim['strict_freshness']:
+                        free_filtered = self._filter_news_response(
+                            free_response,
+                            search_days=search_days,
+                            max_results=provider_max_results,
+                            log_scope=f"{stock_code}:eastmoney:{dim['name']}",
+                        )
+                    elif dim['name'] in self.ANALYTICAL_INTEL_DIMENSIONS:
+                        free_filtered = self._filter_news_response(
+                            free_response,
+                            search_days=self.ANALYTICAL_INTEL_LOOKBACK_DAYS,
+                            max_results=provider_max_results,
+                            keep_unknown=True,
+                            log_scope=f"{stock_code}:eastmoney:{dim['name']}",
+                        )
+                    else:
+                        free_filtered = self._normalize_and_limit_response(
+                            free_response,
+                            max_results=provider_max_results,
+                        )
+                    free_ranked = self._rank_news_response(
+                        free_filtered,
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        prefer_chinese=prefer_chinese,
+                        max_results=provider_max_results,
+                        log_scope=f"{stock_code}:eastmoney:{dim['name']}:rank",
+                    )
+                    free_admitted = self._filter_ranked_news_for_context(
+                        free_ranked,
+                        log_scope=f"{stock_code}:eastmoney:{dim['name']}:admission",
+                    )
+                    best_filtered = self._limit_search_response(
+                        free_admitted,
+                        max_results=target_per_dimension,
+                    )
                     fallback_used = True
 
-            if dim['strict_freshness']:
-                filtered_response = self._filter_news_response(
-                    response,
-                    search_days=search_days,
-                    max_results=provider_max_results,
-                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
-                )
-            elif dim['name'] in self.ANALYTICAL_INTEL_DIMENSIONS:
-                filtered_response = self._filter_news_response(
-                    response,
-                    search_days=self.ANALYTICAL_INTEL_LOOKBACK_DAYS,
-                    max_results=provider_max_results,
-                    keep_unknown=True,
-                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
-                )
+            if best_filtered is not None:
+                results[dim['name']] = best_filtered
             else:
-                filtered_response = self._normalize_and_limit_response(
-                    response,
-                    max_results=provider_max_results,
+                results[dim['name']] = SearchResponse(
+                    query=dim['query'],
+                    results=[],
+                    provider="Filtered",
+                    success=True,
+                    error_message=None,
                 )
-            filtered_response = self._rank_news_response(
-                filtered_response,
-                stock_code=stock_code,
-                stock_name=stock_name,
-                prefer_chinese=self._should_prefer_chinese_news(stock_code, stock_name),
-                max_results=provider_max_results,
-                log_scope=f"{stock_code}:{provider.name}:{dim['name']}:rank",
-            )
-            filtered_response = self._filter_ranked_news_for_context(
-                filtered_response,
-                log_scope=f"{stock_code}:{provider.name}:{dim['name']}:admission",
-            )
-            filtered_response = self._limit_search_response(
-                filtered_response,
-                max_results=target_per_dimension,
-            )
-            results[dim['name']] = filtered_response
             search_count += 1
-            
-            if response.success:
-                logger.info(
-                    "[情报搜索] %s: 原始=%s条, 过滤后=%s条",
-                    dim['desc'],
-                    len(response.results),
-                    len(filtered_response.results),
-                )
-            else:
-                logger.warning(f"[情报搜索] {dim['desc']}: 搜索失败 - {response.error_message}")
-            
+
             # 短暂延迟避免请求过快
             time.sleep(0.5)
-        
+
         return results
     
     def format_intel_report(self, intel_results: Dict[str, SearchResponse], stock_name: str) -> str:
