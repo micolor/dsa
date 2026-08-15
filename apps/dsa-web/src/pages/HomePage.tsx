@@ -1458,7 +1458,7 @@ const HomePage: React.FC = () => {
                     onClick={() => setStrategyMenuOpen((open) => !open)}
                     onKeyDown={handleStrategyButtonKeyDown}
                     disabled={isAnalyzing}
-                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-card/55 px-4 text-sm text-foreground shadow-soft-card backdrop-blur-md transition-all duration-200 hover:bg-card/70 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-card/55 px-4 text-sm text-foreground shadow-soft-card backdrop-blur-md transition-colors duration-200 hover:bg-card/70 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedStrategy?.name || t('home.strategy')}</span>
