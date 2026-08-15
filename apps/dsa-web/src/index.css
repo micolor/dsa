@@ -782,6 +782,11 @@
   box-shadow: var(--input-surface-shadow, var(--shadow-soft-card)), var(--input-surface-focus-ring);
 }
 
+/* 首页股票搜索框 focus：让通用 .input-focus-glow 的默认淡 focus ring 在上方不被裁掉。
+   默认 ring（--input-surface-focus-ring）为对称的 4px 淡描边，本身四边一致；
+   但首页搜索框贴在 overflow-hidden 容器顶边（top≈53），上方 ring 被裁剪只剩一点，
+   故配合 HomePage header 的 pt-5 留出上方空间，即可让默认淡 ring 完整对称显示。 */
+
 .input-appearance-login {
   --input-surface-bg: var(--login-input-surface);
   --input-surface-border: var(--login-input-border);
