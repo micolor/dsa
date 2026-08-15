@@ -97,4 +97,5 @@ class BackfillResponse(BaseModel):
     from_date: str
     to_date: str
     signals_replayed: int = 0
+    signals_unavailable: int = 0
     snapshot: PaperSnapshotResponse

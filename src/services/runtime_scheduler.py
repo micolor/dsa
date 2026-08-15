@@ -8,6 +8,7 @@ import os
 import threading
 import _thread
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -21,6 +22,66 @@ RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV = "DSA_RUNTIME_SCHEDULER_RUN_IMMEDIATELY"
 RUNTIME_SCHEDULER_SUPPRESS_START_ENV = "DSA_RUNTIME_SCHEDULER_SUPPRESS_START"
 RUNTIME_SCHEDULER_ARGS_ENV = "DSA_RUNTIME_SCHEDULER_ARGS"
 _RUNTIME_ANALYSIS_LOCK = threading.Lock()
+
+# Bounded retry for a scheduled analysis run that failed outright (e.g. an LLM
+# key that was briefly down). Prevents a single failure silently dropping the
+# whole day's report with no follow-up.
+MAX_SCHEDULED_RETRIES = 3
+RETRY_DELAY_SECONDS = 300  # 5 min
+
+
+def _analysis_lock_path_from_config(config: Any) -> str:
+    """Cross-process lock file anchored next to the shared SQLite DB."""
+    try:
+        db_path = Path(getattr(config, "database_path", "./data/stock_analysis.db"))
+        return str(db_path) + ".analysis.lock"
+    except Exception:  # pragma: no cover - defensive fallback
+        return "./data/stock_analysis.db.analysis.lock"
+
+
+class CrossProcessAnalysisLock:
+    """Non-blocking cross-process mutual exclusion for the daily analysis run.
+
+    The process-local ``_RUNTIME_ANALYSIS_LOCK`` only coordinates threads inside
+    one process; the CLI ``--schedule`` path and the API runtime scheduler (or
+    several uvicorn workers) can otherwise run the same day's analysis
+    concurrently and emit duplicate reports/notifications. An ``fcntl`` file
+    lock shared through the on-disk lock file coordinates all of them.
+    """
+
+    def __init__(self, lock_path: str):
+        self._lock_path = lock_path
+        self._fd: Optional[int] = None
+
+    def acquire(self) -> bool:
+        try:
+            import fcntl
+        except ImportError:  # pragma: no cover - non-POSIX; fall back to in-process lock
+            return True
+        parent = os.path.dirname(self._lock_path) or "."
+        try:
+            os.makedirs(parent, exist_ok=True)
+            fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        self._fd = fd
+        return True
+
+    def release(self) -> None:
+        if self._fd is None:
+            return
+        try:
+            import fcntl
+
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+        except Exception:  # pragma: no cover - best-effort unlock
+            pass
+        try:
+            os.close(self._fd)
+        except OSError:  # pragma: no cover - best-effort close
+            pass
+        self._fd = None
 SCHEDULE_ARGS_OVERRIDE_KEYS = {
     "no_notify",
     "no_market_review",
@@ -49,6 +110,31 @@ def run_with_global_analysis_lock(
     finally:
         _RUNTIME_ANALYSIS_LOCK.release()
     return True
+
+
+def run_full_analysis_cross_process(
+    config: Config,
+    args: Any,
+    stock_codes: Optional[List[str]] = None,
+) -> Any:
+    """Run the full analysis guarded by the cross-process file lock.
+
+    The CLI ``--schedule`` path calls this instead of ``run_full_analysis``
+    directly, so it shares mutual exclusion with the API runtime scheduler
+    (which runs in a separate process under uvicorn). Returns ``False`` when
+    another process already holds the lock; otherwise returns the underlying
+    ``run_full_analysis`` result.
+    """
+    from main import run_full_analysis
+
+    lock = CrossProcessAnalysisLock(_analysis_lock_path_from_config(config))
+    if not lock.acquire():
+        logger.warning("Cross-process analysis lock busy; skipping scheduled run")
+        return False
+    try:
+        return run_full_analysis(config, args, stock_codes)
+    finally:
+        lock.release()
 
 
 def _agent_event_monitor_interval_seconds(config: Config) -> int:
@@ -139,6 +225,8 @@ class RuntimeSchedulerService:
         self._last_run_at: Optional[str] = None
         self._last_success_at: Optional[str] = None
         self._last_error: Optional[str] = None
+        self._last_failed_at: Optional[str] = None
+        self._consecutive_failures: int = 0
         self._last_skipped_at: Optional[str] = None
         self._last_skip_reason: Optional[str] = None
 
@@ -172,6 +260,14 @@ class RuntimeSchedulerService:
         self._last_skip_reason = "analysis_already_running"
         logger.warning("Runtime scheduler skipped run: analysis already running")
 
+    def _record_cross_process_busy_skip(self) -> None:
+        self._last_skipped_at = datetime.now().isoformat()
+        self._last_skip_reason = "analysis_running_elsewhere"
+        logger.warning("Runtime scheduler skipped run: analysis running in another process")
+
+    def _analysis_lock_path(self, config: Config) -> str:
+        return _analysis_lock_path_from_config(config)
+
     def _run_analysis_locked(self, stock_codes: Optional[List[str]]) -> None:
         try:
             config = self._reload_config()
@@ -180,15 +276,51 @@ class RuntimeSchedulerService:
                 from main import run_scheduled_analysis
 
                 runner = run_scheduled_analysis
-            self._last_run_at = datetime.now().isoformat()
-            result = runner(config, self._make_schedule_args(), stock_codes)
+            xp_lock = CrossProcessAnalysisLock(self._analysis_lock_path(config))
+            if not xp_lock.acquire():
+                self._record_cross_process_busy_skip()
+                return
+            try:
+                self._last_run_at = datetime.now().isoformat()
+                result = runner(config, self._make_schedule_args(), stock_codes)
+            finally:
+                xp_lock.release()
             if result is False:
                 raise RuntimeError("runtime scheduled analysis reported failure")
             self._last_success_at = datetime.now().isoformat()
             self._last_error = None
+            self._last_failed_at = None
+            self._consecutive_failures = 0
         except Exception as exc:  # noqa: BLE001 - scheduled runs must not kill API process.
             self._last_error = str(exc)
+            self._last_failed_at = datetime.now().isoformat()
+            self._consecutive_failures += 1
             logger.exception("Runtime scheduled analysis failed: %s", exc)
+            self._schedule_retry_if_needed()
+
+    def _schedule_retry_if_needed(self) -> None:
+        if self._consecutive_failures >= MAX_SCHEDULED_RETRIES:
+            logger.warning(
+                "Runtime scheduled analysis failed %d consecutive times; no more retries",
+                self._consecutive_failures,
+            )
+            return
+        retry_num = self._consecutive_failures
+
+        def _retry() -> None:
+            # Skip if a newer run already succeeded or changed the failure count.
+            if self._consecutive_failures != retry_num:
+                return
+            logger.warning(
+                "Retrying runtime scheduled analysis (attempt %d/%d)",
+                retry_num,
+                MAX_SCHEDULED_RETRIES,
+            )
+            self._run_analysis_once(None)
+
+        timer = threading.Timer(RETRY_DELAY_SECONDS, _retry)
+        timer.daemon = True
+        timer.start()
 
     def _run_analysis_once(self, stock_codes: Optional[List[str]] = None) -> bool:
         if not self._run_lock.acquire(blocking=False):
@@ -415,6 +547,8 @@ class RuntimeSchedulerService:
             "last_run_at": self._last_run_at,
             "last_success_at": self._last_success_at,
             "last_error": self._last_error,
+            "last_failed_at": self._last_failed_at,
+            "consecutive_failures": self._consecutive_failures,
             "last_skipped_at": self._last_skipped_at,
             "last_skip_reason": self._last_skip_reason,
         }

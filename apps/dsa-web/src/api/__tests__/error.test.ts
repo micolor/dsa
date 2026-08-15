@@ -47,3 +47,34 @@ describe('parseApiError - LLM 配置错误识别', () => {
     expect(parsed.category).toBe('upstream_timeout');
   });
 });
+
+describe('parseApiError - FastAPI 422 / 429', () => {
+  it('把 422 的 detail 数组渲染成可读的字段错误，而非原始 JSON', () => {
+    const error = new Error('Request failed with status code 422');
+    Object.assign(error, {
+      response: {
+        status: 422,
+        data: {
+          detail: [
+            { loc: ['query', 'cost_method'], msg: "Input should be 'fifo' or 'avg'", type: 'literal_error' },
+            { loc: ['query', 'account_id'], msg: 'Input should be a valid integer', type: 'int_parsing' },
+          ],
+        },
+        statusText: 'Unprocessable Entity',
+      },
+    });
+    const parsed = getParsedApiError(error);
+    expect(parsed.category).toBe('http_error');
+    expect(parsed.status).toBe(422);
+    expect(parsed.title).toBe('请求参数校验失败');
+    expect(parsed.message).toContain('cost_method');
+    expect(parsed.message).toContain('fifo');
+    expect(parsed.message).not.toContain('[{');
+  });
+
+  it('429 归类为请求过于频繁', () => {
+    const parsed = getParsedApiError(buildError('rate limit', 429));
+    expect(parsed.category).toBe('http_error');
+    expect(parsed.title).toBe('请求过于频繁');
+  });
+});

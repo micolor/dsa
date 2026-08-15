@@ -33,6 +33,32 @@ _CLOSE_ACTIONS = ("sell", "reduce")
 # adds nothing and only pollutes the equity curve with redundant snapshots).
 _PORTFOLIO_CHANGING_DISPOSITIONS = ("opened", "added", "reduced", "closed")
 
+# Dispositions recorded when a data-source failure prevented pricing; these are
+# *not* persisted as consumed so the signal can be retried on a later run rather
+# than being permanently dropped (single data-source failures must not silently
+# discard a trade that should have filled).
+_DATA_UNAVAILABLE = "data_unavailable"
+
+# Per-account serialization locks. Paper writes (signal consumption, daily
+# valuation, backfill, manual refresh) mutate cash/positions/trades across
+# several independent commits. Without serialization, concurrent threads would
+# lose cash/position updates (read-modify-write) or double-execute the same
+# signal (the idempotency check + execution + record are separate commits). The
+# lock registry is module-level, not per-instance, because callers create fresh
+# PaperService() instances (e.g. the background valuation task) that must still
+# share one lock per account.
+_account_locks: Dict[int, threading.RLock] = {}
+_account_locks_guard = threading.Lock()
+
+
+def _account_lock(account_id: int) -> threading.RLock:
+    with _account_locks_guard:
+        lock = _account_locks.get(account_id)
+        if lock is None:
+            lock = threading.RLock()
+            _account_locks[account_id] = lock
+        return lock
+
 
 class PaperService:
     """Core paper-trading engine (signal consumption + daily valuation + backfill)."""
@@ -80,23 +106,37 @@ class PaperService:
             return {"status": "not_found"}
         account = self.paper_repo.ensure_account()
 
-        if self.paper_repo.has_signal_record(account.id, signal.id):
-            return {"status": "skipped", "signal_id": signal.id}
+        # Serialize the whole consume (dedup-check -> execute -> record) per
+        # account so concurrent consumers of the same signal cannot both buy.
+        with _account_lock(account.id):
+            if self.paper_repo.has_signal_record(account.id, signal.id):
+                return {"status": "skipped", "signal_id": signal.id}
 
-        as_of = self._signal_trade_date(signal)
-        disposition = self._handle_signal(account, signal, as_of)
-        self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
+            as_of = self._signal_trade_date(signal)
+            disposition = self._handle_signal(account, signal, as_of)
 
-        # Only re-value when the position actually changed; hold/ignored leave the
-        # portfolio untouched.
-        if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
-            self._valuate(account, as_of)
-        return {
-            "status": "processed",
-            "signal_id": signal.id,
-            "action": signal.action,
-            "disposition": disposition,
-        }
+            # Data-source failure (no price): do not mark the signal consumed, so
+            # a later run can retry instead of permanently dropping a fill.
+            if disposition == _DATA_UNAVAILABLE:
+                return {
+                    "status": _DATA_UNAVAILABLE,
+                    "signal_id": signal.id,
+                    "action": signal.action,
+                    "disposition": disposition,
+                }
+
+            self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
+
+            # Only re-value when the position actually changed; hold/ignored leave
+            # the portfolio untouched.
+            if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
+                self._valuate(account, as_of)
+            return {
+                "status": "processed",
+                "signal_id": signal.id,
+                "action": signal.action,
+                "disposition": disposition,
+            }
 
     def run_daily_valuation(
         self,
@@ -111,20 +151,23 @@ class PaperService:
         button) to re-price today even if a snapshot already exists.
         """
         account = self.paper_repo.get_account(account_id) or self.paper_repo.ensure_account()
-        as_of = as_of_date or date.today()
-        if not force and self.paper_repo.has_snapshot(account.id, as_of):
-            # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
-            snap = self.get_snapshot(account.id)
-            return {
-                "account_id": snap["account_id"],
-                "trade_date": as_of.isoformat(),
-                "cash": snap["cash"],
-                "market_value": snap["market_value"],
-                "net_value": snap["net_value"],
-                "return_pct": snap["return_pct"],
-            }
+        # Serialize valuation against signal consumption / backfill on the same
+        # account so a stop-loss exit and a concurrent signal cannot interleave.
+        with _account_lock(account.id):
+            as_of = as_of_date or date.today()
+            if not force and self.paper_repo.has_snapshot(account.id, as_of):
+                # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
+                snap = self.get_snapshot(account.id)
+                return {
+                    "account_id": snap["account_id"],
+                    "trade_date": as_of.isoformat(),
+                    "cash": snap["cash"],
+                    "market_value": snap["market_value"],
+                    "net_value": snap["net_value"],
+                    "return_pct": snap["return_pct"],
+                }
 
-        return self._valuate(account, as_of)
+            return self._valuate(account, as_of)
 
     def backfill_history(
         self,
@@ -139,17 +182,27 @@ class PaperService:
         logger.info("paper backfill: replaying %d signals in %s..%s", len(signals), from_date, to)
 
         processed = 0
-        for signal in signals:
-            if self.paper_repo.has_signal_record(account.id, signal.id):
-                continue
-            as_of = self._signal_trade_date(signal)
-            disposition = self._handle_signal(account, signal, as_of)
-            self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
-            if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
-                self._valuate(account, as_of)
-            processed += 1
+        unavailable = 0
+        # Serialize the whole replay per account so it never interleaves with live
+        # signal consumption or the valuation task on the same account.
+        with _account_lock(account.id):
+            for signal in signals:
+                if self.paper_repo.has_signal_record(account.id, signal.id):
+                    continue
+                as_of = self._signal_trade_date(signal)
+                disposition = self._handle_signal(account, signal, as_of)
+                if disposition == _DATA_UNAVAILABLE:
+                    # 不记已消费，留给后续回填/运行重试，避免瞬时数据缺失永久丢单。
+                    unavailable += 1
+                    continue
+                self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
+                if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
+                    self._valuate(account, as_of)
+                processed += 1
 
         return {
+            "signals_unavailable": unavailable,
+
             "account_id": account.id,
             "from_date": from_date.isoformat(),
             "to_date": to.isoformat(),
@@ -264,7 +317,9 @@ class PaperService:
         code = signal.stock_code
         buy_price = self._entry_price(signal, as_of)
         if not buy_price or buy_price <= 0:
-            return "ignored"
+            # 拿不到现价/入场价属数据源瞬时不可用，区别于真正的观望：不落已消费，
+            # 留给后续轮次重试（见 process_signal / backfill_history）。
+            return _DATA_UNAVAILABLE
 
         position = self.paper_repo.get_open_position(account.id, code)
         total = self._net_value(account)
@@ -363,7 +418,7 @@ class PaperService:
 
         sell_price = self._close_price(code, as_of) or position.current_price
         if not sell_price or sell_price <= 0:
-            return "ignored"
+            return _DATA_UNAVAILABLE
 
         quantity = float(position.quantity or 0) * fraction
         quantity = self._round_lot(quantity, market=signal.market)
@@ -416,6 +471,9 @@ class PaperService:
         for position in positions:
             bar = self._bar_for(position.stock_code, as_of)
             if bar is None:
+                logger.warning(
+                    "paper: 无 %s 在 %s 的行情 bar，估值跳过该标的", position.stock_code, as_of
+                )
                 continue
             close = bar.get("close")
             if close is None or close <= 0:

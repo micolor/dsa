@@ -265,7 +265,9 @@ export const portfolioApi = {
     formData.append('broker', broker);
     formData.append('file', file);
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/imports/csv/parse', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      // Let the browser set multipart Content-Type with the boundary (stocks.ts
+      // does the same); hard-coding it without the boundary breaks the request.
+      headers: { 'Content-Type': undefined },
     });
     return toCamelCase<PortfolioImportParseResponse>(response.data);
   },
@@ -282,7 +284,7 @@ export const portfolioApi = {
     formData.append('dry_run', dryRun ? 'true' : 'false');
     formData.append('file', file);
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/imports/csv/commit', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { 'Content-Type': undefined },
     });
     return toCamelCase<PortfolioImportCommitResponse>(response.data);
   },

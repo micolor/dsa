@@ -46,7 +46,11 @@ type CreateParsedApiErrorOptions = {
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  // Arrays are not records: FastAPI 422 validation errors arrive as
+  // `{detail: [{loc, msg}, ...]}` and must be handled by extractValidationDetail,
+  // not mistaken for a single object (which would stringify them into an opaque
+  // JSON blob).
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function pickString(...values: unknown[]): string | null {
@@ -492,6 +496,26 @@ export function parseApiError(error: unknown): ParsedApiError {
       rawMessage,
       status,
       category: 'local_connection_failed',
+    });
+  }
+
+  if (status === 422) {
+    return createParsedApiError({
+      title: '请求参数校验失败',
+      message: payloadText ?? '请求参数格式不正确，请检查输入后重试。',
+      rawMessage,
+      status,
+      category: 'http_error',
+    });
+  }
+
+  if (status === 429) {
+    return createParsedApiError({
+      title: '请求过于频繁',
+      message: '请求次数过多，请稍后再试。',
+      rawMessage,
+      status,
+      category: 'http_error',
     });
   }
 

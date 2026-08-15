@@ -110,6 +110,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] FAQ 补充 macOS 桌面应用被 Gatekeeper quarantine 阻止启动时的受信任安装包临时放行步骤（refs #2113）。
 - [新功能] LLM 渠道新增显式 Chat Completions / Responses API Surface，支持 Anspire GPT-5.6 系列等 Responses-only 模型，并统一连接测试、主分析、筛选、图片识别与状态诊断路由；所有运行路径先按同一规则解析协议再校验 Surface，混合 Surface 的同名路由按未知能力保守处理；显式 Anspire 渠道独占共享 Key，非法 Surface 或协议不匹配时不会把该 Key 回退为旧版 Chat 部署，同时保留无关的 Gemini/OpenAI 等 legacy provider；本地 loopback 渠道可在图片识别路径继续无 Key 调用，远端渠道仍要求凭据；禁用渠道不会因残留 Surface 配置阻断其他兼容 fallback；Web 编辑器不会静默改写非法历史值，并允许将 Hermes 非法 Surface 修复为 Chat Completions。
 - [修复] 将 Responses 渠道的协议、模型 provider、公开 route alias 与 wire-model 构造收敛为统一路由契约，保存校验、运行时加载、状态诊断、选股入口和 Web 编辑器共同使用当前安装的 LiteLLM provider registry，拒绝 `openai` 协议下显式非 OpenAI provider 的模型、拒绝同一 alias 混用 Chat/Responses，并保留 OpenAI-compatible 网关自有的带斜杠模型 ID。
+- [修复] 模拟盘信号消费加入 per-account 串行锁与「数据不可用」可重试语义：同一账户的信号消费/每日估值/历史回填串行执行，避免并发重复建仓或现金竞态；`buy`/`add`/`reduce` 在缺失行情价时返回 `data_unavailable` 且不落信号记录（下次信号可重试补齐），回填响应新增 `signals_unavailable` 计数
+- [改进] 市场复盘红涨绿跌配色方案默认值统一为 `green_up`：`market_review_color_scheme` 配置默认、环境变量读取与配置注册表默认值三处由 `red_up` 收敛为 `green_up`（与文档默认一致，避免同一配置在运行时与注册表之间漂移）
+- [修复] 前端 API 错误解析补全 FastAPI 422 / 429 分支：`isRecord` 不再把数组当对象（修复 422 校验详情 `detail` 数组被误判为单一对象而整段 JSON 化），422 渲染为逐字段可读错误、429 归为「请求过于频繁」；CSV 导入上传不再手动写死 `multipart/form-data` Content-Type（由浏览器自动携带 boundary），避免上传请求被拒
+- [改进] 调度跨进程互斥：API 运行时调度器与 CLI `--schedule` 定时路径共用基于 `fcntl` 文件锁的跨进程互斥（锁文件锚定在共享 SQLite 数据库旁），避免 API 与 CLI 或多个 uvicorn worker 并发跑同一天分析产生重复报告/通知；另一进程已持锁时本进程跳过并记录 `analysis_running_elsewhere`
+- [改进] 定时分析失败可观测与限次重试：运行时调度器记录 `last_failed_at` 与连续失败次数并暴露到 `/scheduler/status`，整轮失败不再被静默吞掉；失败后最多重试 3 次（间隔 5 分钟，成功即清零计数），防止单次故障静默丢当日报告
 
 ## [3.29.0] - 2026-08-02
 

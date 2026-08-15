@@ -86,6 +86,25 @@ class _SynchronousThread(_NoopThread):
             self.target()
 
 
+class _CaptureTimer:
+    """Fake threading.Timer that records its target without starting a real timer."""
+
+    instances = []
+
+    def __init__(self, interval, function, args=None, kwargs=None):
+        self.interval = interval
+        self.function = function
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        _CaptureTimer.instances.append(self)
+
+    def start(self):
+        return None
+
+    def cancel(self):
+        return None
+
+
 class RuntimeSchedulerServiceTestCase(unittest.TestCase):
     def test_run_analysis_args_include_workers(self) -> None:
         config = SimpleNamespace(
@@ -770,6 +789,76 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             ("reconcile", True, False),
             ("stop",),
         ])
+
+
+    def test_cross_process_busy_records_skip_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "test.db")
+            config = SimpleNamespace(
+                schedule_enabled=True,
+                schedule_time="18:00",
+                schedule_times=["18:00"],
+                database_path=db_path,
+            )
+            service = RuntimeSchedulerService(
+                config_provider=lambda: config,
+                task_runner=lambda c, a, s: True,
+            )
+            service._reload_config = lambda: config
+
+            from src.services.runtime_scheduler import CrossProcessAnalysisLock
+
+            holder = CrossProcessAnalysisLock(db_path + ".analysis.lock")
+            self.assertTrue(holder.acquire())
+            try:
+                service._run_analysis_once()
+            finally:
+                holder.release()
+
+            status = service.status()
+            self.assertEqual(status["last_skip_reason"], "analysis_running_elsewhere")
+            self.assertIsNotNone(status["last_skipped_at"])
+            self.assertIsNone(status["last_run_at"])
+
+    def test_failed_run_records_failure_and_schedules_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = SimpleNamespace(
+                schedule_enabled=True,
+                schedule_time="18:00",
+                schedule_times=["18:00"],
+                database_path=os.path.join(td, "test.db"),
+            )
+            calls = {"n": 0}
+
+            def runner(c, a, s):
+                calls["n"] += 1
+                return calls["n"] > 1  # first run fails, the retry succeeds
+
+            service = RuntimeSchedulerService(
+                config_provider=lambda: config,
+                task_runner=runner,
+            )
+            service._reload_config = lambda: config
+
+            _CaptureTimer.instances = []
+            with patch("src.services.runtime_scheduler.threading.Timer", _CaptureTimer):
+                service._run_analysis_once()
+
+            self.assertEqual(calls["n"], 1)
+            status = service.status()
+            self.assertIsNotNone(status["last_failed_at"])
+            self.assertEqual(status["consecutive_failures"], 1)
+            self.assertIn("reported failure", status["last_error"])
+            self.assertEqual(len(_CaptureTimer.instances), 1)
+
+            # Fire the scheduled retry now that the outer run released its lock.
+            _CaptureTimer.instances[0].function()
+
+            self.assertEqual(calls["n"], 2)
+            status = service.status()
+            self.assertIsNotNone(status["last_success_at"])
+            self.assertIsNone(status["last_failed_at"])
+            self.assertEqual(status["consecutive_failures"], 0)
 
 
 if __name__ == "__main__":

@@ -336,3 +336,25 @@ def test_hold_signal_does_not_snapshot(isolated_db, service):
 
     service.process_signal(sig.id)
     assert service.get_equity_curve(account_id) == []
+
+
+def test_buy_without_price_is_data_unavailable_and_retryable(isolated_db, service):
+    # A buy with no entry price and no price bar is data-unavailable, NOT consumed,
+    # so a later run (e.g. after the data source recovers) can still fill it
+    # instead of permanently dropping the signal.
+    sig = _make_signal(isolated_db, action="buy", entry_high=None, created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    result = service.process_signal(sig.id)
+    assert result["status"] == "data_unavailable"
+    assert result["disposition"] == "data_unavailable"
+
+    # Not consumed: positions untouched and no signal record written.
+    assert service.get_positions(account_id) == []
+    assert service.get_signals(account_id)["total"] == 0
+
+    # Once the price is available, a later run (fresh service instance, as the
+    # background valuation task recreates it) can still consume the same signal.
+    _seed_daily(isolated_db, "600519", date(2026, 1, 5), 100, 100, 100, 100)
+    result2 = PaperService(isolated_db).process_signal(sig.id)
+    assert result2["disposition"] == "opened"

@@ -1553,8 +1553,9 @@ def main() -> int:
             schedule_times_provider = _build_schedule_times_provider(config.schedule_time)
 
             def scheduled_task():
+                from src.services.runtime_scheduler import run_full_analysis_cross_process
                 runtime_config = _reload_runtime_config()
-                run_full_analysis(runtime_config, args, scheduled_stock_codes)
+                run_full_analysis_cross_process(runtime_config, args, scheduled_stock_codes)
 
             background_tasks = []
             if getattr(config, 'agent_event_monitor_enabled', False):
