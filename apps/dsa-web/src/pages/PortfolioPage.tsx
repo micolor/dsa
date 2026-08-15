@@ -250,6 +250,10 @@ const PortfolioPage: React.FC = () => {
   const [portfolioSignalsWarning, setPortfolioSignalsWarning] = useState<string | null>(null);
   const [portfolioSignalsRefreshKey, setPortfolioSignalsRefreshKey] = useState(0);
   const portfolioSignalsRequestRef = useRef(0);
+  // 快照/风险与事件列表的并发守卫：账户/成本法或事件筛选快速切换时，
+  // 只让最新一次请求生效，避免慢响应覆盖新数据或提前清除加载态。
+  const snapshotRequestRef = useRef(0);
+  const eventsRequestRef = useRef(0);
   const [positionAnalysisLoadingKey, setPositionAnalysisLoadingKey] = useState<string | null>(null);
   const [positionAnalysisMessage, setPositionAnalysisMessage] = useState<string | null>(null);
 
@@ -380,6 +384,9 @@ const PortfolioPage: React.FC = () => {
   }, [selectedBroker]);
 
   const loadSnapshotAndRisk = useCallback(async () => {
+    const requestId = snapshotRequestRef.current + 1;
+    snapshotRequestRef.current = requestId;
+    const isCurrentRequest = () => snapshotRequestRef.current === requestId;
     setIsLoading(true);
     setRiskWarning(null);
     try {
@@ -395,6 +402,9 @@ const PortfolioPage: React.FC = () => {
           includeRealtime: false,
         }),
       ]);
+      if (!isCurrentRequest()) {
+        return;
+      }
       if (snapshotResult.status === 'fulfilled') {
         setSnapshot(snapshotResult.value);
         setError(null);
@@ -411,11 +421,16 @@ const PortfolioPage: React.FC = () => {
         setRiskWarning(parsed.message || '风险数据获取失败，已降级为仅展示快照数据。');
       }
     } finally {
-      setIsLoading(false);
+      if (isCurrentRequest()) {
+        setIsLoading(false);
+      }
     }
   }, [queryAccountId, costMethod]);
 
   const loadEventsPage = useCallback(async (page: number) => {
+    const requestId = eventsRequestRef.current + 1;
+    eventsRequestRef.current = requestId;
+    const isCurrentRequest = () => eventsRequestRef.current === requestId;
     setEventLoading(true);
     try {
       if (eventType === 'trade') {
@@ -428,6 +443,9 @@ const PortfolioPage: React.FC = () => {
           page,
           pageSize: DEFAULT_PAGE_SIZE,
         });
+        if (!isCurrentRequest()) {
+          return;
+        }
         setTradeEvents(response.items || []);
         setEventTotal(response.total || 0);
       } else if (eventType === 'cash') {
@@ -439,6 +457,9 @@ const PortfolioPage: React.FC = () => {
           page,
           pageSize: DEFAULT_PAGE_SIZE,
         });
+        if (!isCurrentRequest()) {
+          return;
+        }
         setCashEvents(response.items || []);
         setEventTotal(response.total || 0);
       } else {
@@ -451,13 +472,21 @@ const PortfolioPage: React.FC = () => {
           page,
           pageSize: DEFAULT_PAGE_SIZE,
         });
+        if (!isCurrentRequest()) {
+          return;
+        }
         setCorporateEvents(response.items || []);
         setEventTotal(response.total || 0);
       }
     } catch (err) {
+      if (!isCurrentRequest()) {
+        return;
+      }
       setError(getParsedApiError(err));
     } finally {
-      setEventLoading(false);
+      if (isCurrentRequest()) {
+        setEventLoading(false);
+      }
     }
   }, [
     eventActionType,
@@ -490,6 +519,14 @@ const PortfolioPage: React.FC = () => {
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
+
+  // 卸载时作废在途的快照/事件请求，与组合信号 loader 的 cleanup 同一守卫思路。
+  useEffect(() => {
+    return () => {
+      snapshotRequestRef.current += 1;
+      eventsRequestRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     refreshContextRef.current = {

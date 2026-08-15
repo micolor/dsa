@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 持仓页快照/风险与事件列表加载加入并发守卫：账户/成本法或事件筛选快速切换时只让最新一次请求生效（`snapshotRequestRef`/`eventsRequestRef`），避免慢响应覆盖新数据或提前清除加载态，并作废卸载后的在途请求
 - [改进] 选股候选列表展开交互传稳定回调：`CandidateListItem` 的 `onToggle` 改为按 code 传参、父组件直接传稳定 `handleToggleCandidate`（对齐 `onAnalyze`），此前内联 lambda 每次父重渲染都新建引用、击穿 `memo`，导致展开/收起单个候选时全量重渲染所有候选
 - [修复] 回测页并发请求防呆：结果与绩效两个异步加载加入卸载守卫（`mountedRef`）与请求序号守卫（`resultsRequestRef`/`perfRequestRef`），只让最新一次请求生效，避免快速筛选/翻页/运行/切换下慢响应覆盖新数据、初始加载与用户操作竞态，以及卸载后 `setState`
 - [改进] 问股 Agent Chat 渲染优化：AI 消息的 Markdown 正文用 `memo` 包裹，任务进度 SSE 事件期间已完成消息不再每次重复解析渲染（消息数组引用不变时跳过重建）；实时进度步骤列表设保留上限（最近 200 条），完整详情仍会在完成时随消息的 `thinkingSteps` 保留，避免长任务（尤其 codex）无界累积内存与渲染
