@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertRuleList } from '../AlertRuleList';
@@ -108,17 +108,20 @@ describe('AlertRuleList', () => {
     );
   }
 
-  /** 自定义 Select 组件交互：点击触发按钮展开，再点击 data-value 匹配的选项 */
-  function selectByValue(label: string, value: string) {
+  /** 自定义 Select 组件交互：点击触发按钮展开，等待选项经 requestAnimationFrame 异步渲染后，再点击 data-value 匹配的选项 */
+  async function selectByValue(label: string, value: string) {
     fireEvent.click(screen.getByLabelText(label));
-    const option = screen.getAllByRole('option').find((el) => el.getAttribute('data-value') === value);
-    if (!option) {
-      throw new Error(`Select "${label}" has no option with value "${value}"`);
-    }
+    const option = await waitFor(() => {
+      const el = screen.getAllByRole('option').find((o) => o.getAttribute('data-value') === value);
+      if (!el) {
+        throw new Error(`Select "${label}" has no option with value "${value}"`);
+      }
+      return el;
+    });
     fireEvent.click(option);
   }
 
-  it('renders rules, filters, and pagination', () => {
+  it('renders rules, filters, and pagination', async () => {
     renderList();
 
     expect(screen.getByText('茅台价格突破')).toBeInTheDocument();
@@ -130,8 +133,8 @@ describe('AlertRuleList', () => {
     expect(screen.getByText('KDJ(9,3,3) 死叉')).toBeInTheDocument();
     expect(screen.getByText('冷却中')).toBeInTheDocument();
 
-    selectByValue('启停状态', 'enabled');
-    selectByValue('规则类型', 'price_cross');
+    await selectByValue('启停状态', 'enabled');
+    await selectByValue('规则类型', 'price_cross');
     fireEvent.click(screen.getByRole('button', { name: '2' }));
 
     expect(onEnabledFilterChange).toHaveBeenCalledWith('enabled');
@@ -190,7 +193,7 @@ describe('AlertRuleList', () => {
     expect(screen.getByText('已触发止损')).toBeInTheDocument();
   });
 
-  it('renders portfolio drawdown alert labels in English UI mode', () => {
+  it('renders portfolio drawdown alert labels in English UI mode', async () => {
     renderEnglishList({
       rules: [
         {
@@ -210,7 +213,7 @@ describe('AlertRuleList', () => {
 
     expect(screen.getByText('Alert rules')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Status'));
-    expect(screen.getByRole('option', { name: 'All statuses' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'All statuses' })).toBeInTheDocument();
     expect(screen.getAllByText('Portfolio drawdown').length).toBeGreaterThan(0);
     expect(screen.getByText('Portfolio account')).toBeInTheDocument();
     expect(screen.getAllByText('Enabled').length).toBeGreaterThan(0);
@@ -218,7 +221,7 @@ describe('AlertRuleList', () => {
     expect(screen.queryByText('组合回撤')).not.toBeInTheDocument();
   });
 
-  it('renders market scope labels, filters, and parameters', () => {
+  it('renders market scope labels, filters, and parameters', async () => {
     renderList({
       rules: [
         {
@@ -255,7 +258,7 @@ describe('AlertRuleList', () => {
     expect(screen.getByText('红灯 / 黄灯')).toBeInTheDocument();
     expect(screen.getByText('Score 下降 >= 15')).toBeInTheDocument();
 
-    selectByValue('规则类型', 'market_light_score_drop');
+    await selectByValue('规则类型', 'market_light_score_drop');
 
     expect(onAlertTypeFilterChange).toHaveBeenCalledWith('market_light_score_drop');
   });

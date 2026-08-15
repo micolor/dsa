@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 决策信号建议单元移除原生 `title`（治理规则禁止对 div/span 使用原生 title，键盘不可达）：改用可访问 `Tooltip` 承载完整建议文本（操作/期限/风险/观察条件），悬停或聚焦时展开；持仓页持有信号风险摘要测试同步为「悬停建议单元 → 断言 Tooltip 内容」，并在账户切换重建行（key 含 accountId）时每次重新定位触发器，避免拿到已卸载旧行
+- [测试] 同步告警模块测试到自定义 `Select` 异步渲染契约：`AlertRuleForm`/`AlertRuleList` 共 18 条测试仍按原生 select 交互而失败；改为「点击触发器 → `await waitFor`/`findByRole('option')` → 点击 `data-value` 选项」，并修正 `waitFor` 从 `@testing-library/react` 导入，消除级联失败，告警测试全部恢复通过
+- [修复] 决策信号页并发守卫收尾：切换非空信号时先清空上一信号的 outcomes/feedback，避免 persist-reassess 原地切换 id 时新信号头部下闪一帧旧数据；新增卸载守卫使 reassess/persist 在途请求作废，状态更新与反馈提交叠加 `mounted` 守卫，避免卸载后 setState（对齐页内既有 request-id 范式）
+- [测试] 决策信号页测试同步到自定义 `Select` 异步渲染契约：共享 `Select` 选项经 `requestAnimationFrame` 异步渲染后，`selectByValue` 助手与 22 处内联 `getByRole('option')` 仍按同步读取而失败；改为等待选项出现（`await waitFor` / `await findByRole`）再点击或断言 `data-value`，消除随后续用例的级联失败，59 条测试全部恢复通过
 - [测试] 修复股票指数加载器测试的模块级缓存污染：`loadStockIndex` 存在按小时缓存的模块级单例，同文件内用例未重置便复用上一用例的成功结果，导致压缩格式/空数组/fallback 等 6 条用例读到泄漏数据（如期望 2 条却得 5 条、fetch 从未被调用）；改为 `beforeEach` 中 `vi.resetModules()` + 动态重新 import 加载器，使每条用例获得干净的模块状态（纯函数仍静态导入，加载器本身行为不变）
 - [测试] 同步设置页测试到自定义 `Select`（listbox）交互契约：共享 `Select` 由原生 `<select>` 重构为按钮触发器 + 门户下拉后，`SettingsField`/`LLMChannelEditor`/`NotificationTestPanel` 共 23 条测试仍按原生 select 交互（`getByRole('option')`、`.toHaveValue()`、`fireEvent.change`）而失败；改为「点击触发器打开下拉 → `await findByRole('option')` → 点击选项」，`.toHaveValue` 改断言 `data-value`
 - [改进] 设置页调度状态刷新加入并发守卫（`schedulerStatusRequestIdRef`）：手动刷新或调度运行时状态切换时只让最新一次请求生效，避免慢响应覆盖新状态（对齐页内 `setupStatusRequestIdRef` 既有范式）

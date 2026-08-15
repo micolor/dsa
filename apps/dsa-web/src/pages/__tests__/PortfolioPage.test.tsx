@@ -329,8 +329,47 @@ async function waitForInitialLoad() {
   await waitFor(() => expect(listTrades).toHaveBeenCalledTimes(1));
 }
 
+/**
+ * 定位持仓行建议单元格中的 Tooltip 触发器。
+ * 持仓风险摘要原先通过原生 `title` 承载（`findByTitle` 可直接断言）；按治理规则
+ * 替换为可访问 Tooltip 后，内容仅在悬停时渲染，测试需悬停展开后断言。
+ */
+async function getAdviceTrigger(symbol: string, index = 0): Promise<HTMLElement> {
+  // 每次轮询都重新定位行：账户切换等场景会以 accountId-symbol 为 key 重建 <tr>，
+  // 若只定位一次会拿到已卸载的旧行，导致永远找不到触发器。
+  return await waitFor(() => {
+    const row = screen.queryAllByText(symbol)[index]?.closest('tr');
+    const trigger = row?.querySelector<HTMLElement>('td[class*="align-top"] span[class*="inline-flex"]');
+    if (!trigger) {
+      throw new Error(`advice tooltip trigger not loaded for "${symbol}"`);
+    }
+    return trigger;
+  });
+}
+
+// 上一次展开的建议 Tooltip 触发器，用于在再次悬停前关闭，避免多个 Tooltip 并存导致断言歧义。
+let lastAdviceTrigger: HTMLElement | null = null;
+
+/** 悬停持仓行的建议单元，展开可访问 Tooltip 并返回其内容元素 */
+async function revealSignalAdvice(symbol: string, index = 0): Promise<HTMLElement> {
+  if (lastAdviceTrigger) {
+    fireEvent.mouseLeave(lastAdviceTrigger);
+  }
+  const trigger = await getAdviceTrigger(symbol, index);
+  fireEvent.mouseEnter(trigger);
+  lastAdviceTrigger = trigger;
+  return await screen.findByRole('tooltip');
+}
+
+/** 悬停建议单元并断言 Tooltip 包含指定建议文本 */
+async function expectSignalAdvice(symbol: string, text: string | RegExp, index = 0): Promise<void> {
+  const tooltip = await revealSignalAdvice(symbol, index);
+  expect(tooltip).toHaveTextContent(text);
+}
+
 describe('PortfolioPage FX refresh', () => {
   beforeEach(() => {
+    lastAdviceTrigger = null;
     vi.clearAllMocks();
     window.localStorage.clear();
 
@@ -642,7 +681,7 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
 
     expect(await screen.findByText('600519')).toBeInTheDocument();
-    expect(await screen.findByTitle(/分页后的风险摘要/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /分页后的风险摘要/);
     expect(decisionSignalsApi.getLatest).toHaveBeenCalledWith('600519', {
       market: 'cn',
       limit: 1,
@@ -669,12 +708,14 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByTitle(/旧 AI 风险/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /旧 AI 风险/);
     fireEvent.click(screen.getByRole('button', { name: '刷新数据' }));
 
-    expect(await screen.findByTitle(/新 AI 风险/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /新 AI 风险/);
     await waitFor(() => expect(getLatestDecisionSignals).toHaveBeenCalledTimes(2));
-    expect(screen.queryByTitle(/旧 AI 风险/)).not.toBeInTheDocument();
+    // 刷新后 Tooltip 承载最新建议，旧风险摘要不应再出现
+    const refreshedTooltip = await revealSignalAdvice('600519');
+    expect(refreshedTooltip).not.toHaveTextContent(/旧 AI 风险/);
   });
 
   it('waits for the selected-account snapshot before loading account-scoped holding signals', async () => {
@@ -700,7 +741,7 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByTitle(/账号信号/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /账号信号/);
     const signalCallsBeforeSwitch = getLatestDecisionSignals.mock.calls.length;
 
     const accountSelect = screen.getAllByRole('combobox')[0];
@@ -709,7 +750,8 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => {
       expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false });
     });
-    expect(screen.queryByTitle(/账号信号/)).not.toBeInTheDocument();
+    // 切换到尚未加载的账户后，信号区应清空，不应有展开的 Tooltip
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(signalCallsBeforeSwitch);
 
     await act(async () => {
@@ -770,7 +812,7 @@ describe('PortfolioPage FX refresh', () => {
     const accountSelect = screen.getAllByRole('combobox')[0];
     fireEvent.change(accountSelect, { target: { value: '2' } });
 
-    expect(await screen.findByTitle(/新账号信号/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /新账号信号/);
 
     await act(async () => {
       oldSignals.resolve({
@@ -782,8 +824,10 @@ describe('PortfolioPage FX refresh', () => {
       await oldSignals.promise;
     });
 
-    expect(screen.getByTitle(/新账号信号/)).toBeInTheDocument();
-    expect(screen.queryByTitle(/旧账号晚返回信号/)).not.toBeInTheDocument();
+    // 迟到的旧响应应被丢弃，Tooltip 仍承载新账号信号
+    const latestTooltip = await revealSignalAdvice('600519');
+    expect(latestTooltip).toHaveTextContent(/新账号信号/);
+    expect(latestTooltip).not.toHaveTextContent(/旧账号晚返回信号/);
   });
 
   it('matches holding signals by stock-code equivalence and leaves unmatched rows empty', async () => {
@@ -815,8 +859,10 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findAllByTitle(/A 股风险/)).toHaveLength(2);
-    expect(screen.getByTitle(/港股风险/)).toBeInTheDocument();
+    // 同一信号经股票代码等价匹配挂在 600519 与 SH600519 两行上，各自悬停应均能揭示 A 股风险
+    await expectSignalAdvice('600519', /A 股风险/);
+    await expectSignalAdvice('SH600519', /A 股风险/);
+    await expectSignalAdvice('00700.HK', /港股风险/);
     const latestLookupSymbols = getLatestDecisionSignals.mock.calls.map(([stockCode]) => String(stockCode));
     expect(latestLookupSymbols.filter((stockCode) => stockCode.includes('600519'))).toEqual(['600519']);
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(3);
@@ -845,7 +891,7 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findByTitle(/已加载风险/)).toBeInTheDocument();
+    await expectSignalAdvice('600519', /已加载风险/);
     expect(await screen.findByText('AI 建议降级')).toBeInTheDocument();
     expect(screen.getByText(/latest AAPL failed/)).toBeInTheDocument();
   });
@@ -864,7 +910,9 @@ describe('PortfolioPage FX refresh', () => {
 
     render(<PortfolioPage />);
 
-    expect(await screen.findAllByTitle(/唯一 latest 风险/)).toHaveLength(2);
+    // 单条 latest 信号经代码等价匹配挂在两行 600519 上，各自悬停均应能揭示
+    await expectSignalAdvice('600519', /唯一 latest 风险/, 0);
+    await expectSignalAdvice('600519', /唯一 latest 风险/, 1);
     expect(getLatestDecisionSignals).toHaveBeenCalledTimes(1);
     expect(decisionSignalsApi.list).not.toHaveBeenCalled();
   });

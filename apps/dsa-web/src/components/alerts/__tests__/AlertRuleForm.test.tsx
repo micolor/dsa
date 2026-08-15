@@ -34,13 +34,16 @@ describe('AlertRuleForm', () => {
     );
   }
 
-  /** 自定义 Select 组件交互：点击触发按钮展开，再点击 data-value 匹配的选项 */
-  function selectByValue(label: string, value: string) {
+  /** 自定义 Select 组件交互：点击触发按钮展开，等待选项经 requestAnimationFrame 异步渲染后，再点击 data-value 匹配的选项 */
+  async function selectByValue(label: string, value: string) {
     fireEvent.click(screen.getByLabelText(label));
-    const option = screen.getAllByRole('option').find((el) => el.getAttribute('data-value') === value);
-    if (!option) {
-      throw new Error(`Select "${label}" has no option with value "${value}"`);
-    }
+    const option = await waitFor(() => {
+      const el = screen.getAllByRole('option').find((o) => o.getAttribute('data-value') === value);
+      if (!el) {
+        throw new Error(`Select "${label}" has no option with value "${value}"`);
+      }
+      return el;
+    });
     fireEvent.click(option);
   }
 
@@ -74,10 +77,10 @@ describe('AlertRuleForm', () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: 'aapl' } });
-    selectByValue('规则类型', 'price_change_percent');
-    selectByValue('方向', 'down');
+    await selectByValue('规则类型', 'price_change_percent');
+    await selectByValue('方向', 'down');
     fireEvent.change(screen.getByLabelText('涨跌幅阈值（%）'), { target: { value: '3.5' } });
-    selectByValue('严重级别', 'critical');
+    await selectByValue('严重级别', 'critical');
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     await waitFor(() => {
@@ -94,7 +97,7 @@ describe('AlertRuleForm', () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: 'msft' } });
-    selectByValue('规则类型', 'volume_spike');
+    await selectByValue('规则类型', 'volume_spike');
     fireEvent.change(screen.getByLabelText('成交量放大倍数'), { target: { value: '2.5' } });
     fireEvent.click(screen.getByLabelText('创建后立即启用'));
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
@@ -113,8 +116,8 @@ describe('AlertRuleForm', () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: '600519' } });
-    selectByValue('规则类型', 'macd_cross');
-    selectByValue('交叉方向', 'bearish_cross');
+    await selectByValue('规则类型', 'macd_cross');
+    await selectByValue('交叉方向', 'bearish_cross');
     fireEvent.change(screen.getByLabelText('快线周期'), { target: { value: '6' } });
     fireEvent.change(screen.getByLabelText('慢线周期'), { target: { value: '13' } });
     fireEvent.change(screen.getByLabelText('信号周期'), { target: { value: '5' } });
@@ -134,11 +137,11 @@ describe('AlertRuleForm', () => {
     });
   });
 
-  it('rejects invalid technical indicator boundaries before submit', () => {
+  it('rejects invalid technical indicator boundaries before submit', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: '600519' } });
-    selectByValue('规则类型', 'rsi_threshold');
+    await selectByValue('规则类型', 'rsi_threshold');
     fireEvent.change(screen.getByLabelText('RSI 阈值'), { target: { value: '200' } });
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
@@ -146,11 +149,11 @@ describe('AlertRuleForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('rejects indicator period combinations that exceed fetchable history', () => {
+  it('rejects indicator period combinations that exceed fetchable history', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: '600519' } });
-    selectByValue('规则类型', 'macd_cross');
+    await selectByValue('规则类型', 'macd_cross');
     fireEvent.change(screen.getByLabelText('快线周期'), { target: { value: '2' } });
     fireEvent.change(screen.getByLabelText('慢线周期'), { target: { value: '250' } });
     fireEvent.change(screen.getByLabelText('信号周期'), { target: { value: '250' } });
@@ -160,17 +163,17 @@ describe('AlertRuleForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('rejects empty required technical indicator thresholds before submit', () => {
+  it('rejects empty required technical indicator thresholds before submit', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: '600519' } });
-    selectByValue('规则类型', 'rsi_threshold');
+    await selectByValue('规则类型', 'rsi_threshold');
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('RSI 阈值不能为空');
     expect(onSubmit).not.toHaveBeenCalled();
 
-    selectByValue('规则类型', 'cci_threshold');
+    await selectByValue('规则类型', 'cci_threshold');
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('CCI 阈值不能为空');
@@ -202,7 +205,7 @@ describe('AlertRuleForm', () => {
   it('filters alert types and submits a watchlist rule payload', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'watchlist');
+    await selectByValue('目标范围', 'watchlist');
     expect(screen.queryByText('组合止损')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('价格阈值'), { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
@@ -220,11 +223,11 @@ describe('AlertRuleForm', () => {
   it('loads accounts and submits portfolio stop-loss mode', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'portfolio_account');
+    await selectByValue('目标范围', 'portfolio_account');
     await waitFor(() => expect(getAccounts).toHaveBeenCalledWith(false));
     expect(screen.queryByText('价格突破')).not.toBeInTheDocument();
-    selectByValue('账户', '9');
-    selectByValue('止损模式', 'breach');
+    await selectByValue('账户', '9');
+    await selectByValue('止损模式', 'breach');
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     await waitFor(() => {
@@ -240,26 +243,26 @@ describe('AlertRuleForm', () => {
   it('renders portfolio alert type options in English UI mode', async () => {
     renderEnglishForm();
 
-    selectByValue('Target scope', 'portfolio_account');
+    await selectByValue('Target scope', 'portfolio_account');
 
     await waitFor(() => expect(getAccounts).toHaveBeenCalledWith(false));
     fireEvent.click(screen.getByLabelText('Rule type'));
-    expect(screen.getByRole('option', { name: 'Portfolio drawdown' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Portfolio stop loss' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Portfolio drawdown' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Portfolio stop loss' })).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Severity'));
-    expect(screen.getByRole('option', { name: 'Info' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Info' })).toBeInTheDocument();
     expect(screen.queryByText('组合回撤')).not.toBeInTheDocument();
   });
 
-  it('shows market region options for market scope in Chinese UI mode', () => {
+  it('shows market region options for market scope in Chinese UI mode', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'market');
+    await selectByValue('目标范围', 'market');
     fireEvent.click(screen.getByLabelText('市场区域'));
 
-    expect(screen.getByRole('option', { name: 'A 股（cn）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '港股（hk）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '美股（us）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'A 股（cn）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '港股（hk）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '美股（us）' })).toBeInTheDocument();
     // 告警市场区域仅支持 A 股/港股/美股，日韩不在候选内
     expect(screen.queryByRole('option', { name: '日股（jp）' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '韩股（kr）' })).not.toBeInTheDocument();
@@ -268,14 +271,14 @@ describe('AlertRuleForm', () => {
   it('submits a market light status rule payload', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'market');
+    await selectByValue('目标范围', 'market');
     fireEvent.click(screen.getByLabelText('市场区域'));
-    expect(screen.getByRole('option', { name: 'A 股（cn）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '港股（hk）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '美股（us）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'A 股（cn）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '港股（hk）' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: '美股（us）' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '日股（jp）' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '韩股（kr）' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: '港股（hk）' }));
+    fireEvent.click(await screen.findByRole('option', { name: '港股（hk）' }));
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     await waitFor(() => {
@@ -288,15 +291,15 @@ describe('AlertRuleForm', () => {
     });
   });
 
-  it('keeps JP/KR out of market light options in English UI mode', () => {
+  it('keeps JP/KR out of market light options in English UI mode', async () => {
     renderEnglishForm();
 
-    selectByValue('Target scope', 'market');
+    await selectByValue('Target scope', 'market');
     fireEvent.click(screen.getByLabelText('Market region'));
 
-    expect(screen.getByRole('option', { name: 'A-shares (cn)' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Hong Kong (hk)' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'US (us)' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'A-shares (cn)' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Hong Kong (hk)' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'US (us)' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Japan (jp)' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Korea (kr)' })).not.toBeInTheDocument();
   });
@@ -304,9 +307,9 @@ describe('AlertRuleForm', () => {
   it('submits a market light score-drop rule payload', async () => {
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'market');
-    selectByValue('市场区域', 'us');
-    selectByValue('规则类型', 'market_light_score_drop');
+    await selectByValue('目标范围', 'market');
+    await selectByValue('市场区域', 'us');
+    await selectByValue('规则类型', 'market_light_score_drop');
     fireEvent.change(screen.getByLabelText('Score 下降阈值'), { target: { value: '12' } });
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
@@ -324,7 +327,7 @@ describe('AlertRuleForm', () => {
     getAccounts.mockRejectedValueOnce(new Error('boom'));
     render(<AlertRuleForm onSubmit={onSubmit} />);
 
-    selectByValue('目标范围', 'portfolio_holdings');
+    await selectByValue('目标范围', 'portfolio_holdings');
     expect(await screen.findByRole('alert')).toHaveTextContent('boom');
     expectSelectValue('账户', 'all');
   });

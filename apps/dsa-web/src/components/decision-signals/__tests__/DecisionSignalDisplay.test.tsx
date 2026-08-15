@@ -166,7 +166,13 @@ describe('DecisionSignalDetails', () => {
     expect(container.textContent).toContain('<svg onload=\\"window.__signalMetadataXss = true\\"></svg>');
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect(container.querySelector('svg')).toBeNull();
+    // JsonViewer's copy button legitimately renders a lucide Copy/Check icon svg;
+    // the only svgs present must be those, not nodes leaked from the opaque JSON
+    // strings (which are rendered as escaped text).
+    const leakedSvgs = Array.from(container.querySelectorAll('svg')).filter(
+      (svg) => !svg.getAttribute('class')?.includes('lucide-copy') && !svg.getAttribute('class')?.includes('lucide-check'),
+    );
+    expect(leakedSvgs).toHaveLength(0);
     expect(container.querySelector('[onerror]')).toBeNull();
     expect(container.querySelector('[onload]')).toBeNull();
   });

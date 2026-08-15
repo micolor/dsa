@@ -458,6 +458,7 @@ const DecisionSignalsPage: React.FC = () => {
   const reassessRequestIdRef = useRef(0);
   const selectedSignalIdRef = useRef<number | null>(null);
   const statusUpdateInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
   const timelineMarketSourceRef = useRef<TimelineMarketSource>(null);
 
   const popularCandidates = useMemo(
@@ -584,6 +585,16 @@ const DecisionSignalsPage: React.FC = () => {
     timelineRequestIdRef.current += 1;
   }, []);
 
+  // 卸载时作废 mutation 类在途请求（reassess/persist 共用 reassessRequestIdRef），
+  // 避免 resolve 后执行卸载后 setState；handleStatusUpdate / handleFeedbackSubmit 再叠加 mounted 守卫。
+  useEffect(() => {
+    const cleanup = () => {
+      mountedRef.current = false;
+      reassessRequestIdRef.current += 1;
+    };
+    return cleanup;
+  }, []);
+
   useEffect(() => {
     selectedSignalIdRef.current = selected?.item.id ?? null;
     if (!selected) {
@@ -599,6 +610,10 @@ const DecisionSignalsPage: React.FC = () => {
 
     const requestId = detailRequestIdRef.current + 1;
     detailRequestIdRef.current = requestId;
+    // 切到另一个非空信号时，先清掉上一信号的 outcomes/feedback，避免
+    // 新信号头部下闪一帧旧数据（如 persist-reassess 原地切换 id 的路径）。
+    setSelectedOutcomes([]);
+    setSelectedFeedback(null);
     setSelectedOutcomesLoading(true);
     setSelectedFeedbackLoading(true);
     setSelectedOutcomesError(null);
@@ -942,6 +957,7 @@ const DecisionSignalsPage: React.FC = () => {
       const updated = await decisionSignalsApi.updateStatus(pendingStatus.item.id, {
         status: pendingStatus.status,
       });
+      if (!mountedRef.current) return;
       setPendingStatus(null);
       setLatestItems((current) => current.flatMap((item) => {
         if (item.id !== updated.id) return [item];
@@ -988,11 +1004,11 @@ const DecisionSignalsPage: React.FC = () => {
         feedbackValue,
         source: 'web',
       });
-      if (selectedSignalIdRef.current !== signalId) return;
+      if (!mountedRef.current || selectedSignalIdRef.current !== signalId) return;
       setSelectedFeedback(updated);
       setSelectedFeedbackError(null);
     } catch (err) {
-      if (selectedSignalIdRef.current !== signalId) return;
+      if (!mountedRef.current || selectedSignalIdRef.current !== signalId) return;
       setSelectedFeedbackError(getParsedApiError(err));
     } finally {
       setFeedbackSaving(false);

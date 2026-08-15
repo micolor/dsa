@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Badge, Card, JsonViewer } from '../common';
+import { Badge, Card, JsonViewer, Tooltip } from '../common';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey } from '../../i18n/uiText';
 import type {
@@ -529,11 +529,14 @@ export const PortfolioSignalSummary: React.FC<PortfolioSignalSummaryProps> = ({ 
   // hovering the cell surfaces the complete advice via `title`.
   const fullText = [actionLabel, horizonLabel, riskText, watchText].filter(Boolean).join('\n');
   return (
-    <div className="min-w-[6rem] max-w-[11rem] text-left" title={fullText}>
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
-        {horizonLabel ? <span className="text-[11px] text-secondary-text">{horizonLabel}</span> : null}
-      </div>
+    <div className="min-w-[6rem] max-w-[11rem] text-left">
+      {/* 用可访问的 Tooltip 承载完整建议文本，替代原生 title（键盘不可达且被治理规则禁止） */}
+      <Tooltip content={fullText} className="w-full">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
+          {horizonLabel ? <span className="text-[11px] text-secondary-text">{horizonLabel}</span> : null}
+        </div>
+      </Tooltip>
     </div>
   );
 };
