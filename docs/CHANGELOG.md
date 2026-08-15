@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] API 错误响应统一到 `{error, message}` 契约并清理内部报错：全局 `HTTPException` / 未捕获异常 handler 复用共享 `error_body()`，`detail` 为空时不回传空值；`alerts` / `paper` 端点错误改走统一 `api_error()`，内部 `str(exc)` 不再泄入响应；`agent` / `stocks` / `history` 若干 500 文案去敏（去掉异常字符串与堆栈），避免向客户端暴露内部细节
+- [改进] API 入参与契约加固：`stocks` 报价/历史接口统一 `_validate_and_normalize_stock_code` 规范化股票代码、JSON 文本分析增加 100KB 上限；`history` 日期解析前置并校验非法日期返回 400；`paper` 回填增加起始日期不晚于结束日期的校验；`portfolio` 快照/风险 `cost_method` 收紧为 `Literal["fifo","avg"]`（非法值由 FastAPI 直接 422）、`delete_account` 补齐 `response_model`
+- [chore] 移除未注册的 `ErrorHandlerMiddleware` 死代码类及其导出，统一由 `error_handler.py` 的注册式 handler 承载全局异常处理
+- [测试] 同步测试到收紧后的契约：`cost_method` 非法值断言由 400 改为 422；litellm 非流式错误断言改为「不泄露内部异常、message 为统一中文文案」
 - [改进] 全站 `transition-all` 收敛为确切过渡属性（Apple 流体界面「指明确切属性」原则）：输入框/选择器/focus 光晕收敛为 `transition-[border-color,background-color,box-shadow]`；导航项、分页、勾选框、遮罩等纯色变化元素收敛为 `transition-colors`；按钮/节点卡/hotspot 卡保留 `transform`/`filter` 过渡（hover 有位移或亮度变化），进度条收敛为 `transition-[width,background-color]`，折叠面板收敛为 `transition-[max-height,opacity]`；22 处 `transition-all` 全部收敛，行为不变
 - [改进] 首页策略菜单按钮动效属性收敛：`transition-all` 改为 `transition-colors`（Apple 流体界面「指明确切属性」原则，按钮 hover 仅变背景/边框色，避免对无变化属性做无意义过渡）
 - [修复] 决策信号建议单元移除原生 `title`（治理规则禁止对 div/span 使用原生 title，键盘不可达）：改用可访问 `Tooltip` 承载完整建议文本（操作/期限/风险/观察条件），悬停或聚焦时展开；持仓页持有信号风险摘要测试同步为「悬停建议单元 → 断言 Tooltip 内容」，并在账户切换重建行（key 含 accountId）时每次重新定位触发器，避免拿到已卸载旧行

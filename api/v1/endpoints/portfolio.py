@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -144,16 +144,17 @@ def update_account(account_id: int, request: PortfolioAccountUpdateRequest) -> P
 
 @router.delete(
     "/accounts/{account_id}",
+    response_model=PortfolioDeleteResponse,
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     summary="Deactivate portfolio account",
 )
-def delete_account(account_id: int):
+def delete_account(account_id: int) -> PortfolioDeleteResponse:
     service = PortfolioService()
     try:
         ok = service.deactivate_account(account_id)
         if not ok:
             raise api_error(404, "not_found", f"Account not found: {account_id}")
-        return {"deleted": 1}
+        return PortfolioDeleteResponse(deleted=1)
     except HTTPException:
         raise
     except Exception as exc:
@@ -420,7 +421,7 @@ def delete_corporate_action(action_id: int) -> PortfolioDeleteResponse:
 def get_snapshot(
     account_id: Optional[int] = Query(None, description="Optional account id, default returns all accounts"),
     as_of: Optional[date] = Query(None, description="Snapshot date, default today"),
-    cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
+    cost_method: Literal["fifo", "avg"] = Query("fifo", description="Cost method: fifo or avg"),
     include_realtime: bool = Query(
         True,
         description="Whether today's snapshot should try realtime quotes before historical close fallback",
@@ -655,7 +656,7 @@ def refresh_fx_rates(
 def get_risk_report(
     account_id: Optional[int] = Query(None, description="Optional account id"),
     as_of: Optional[date] = Query(None, description="Risk report date, default today"),
-    cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
+    cost_method: Literal["fifo", "avg"] = Query("fifo", description="Cost method: fifo or avg"),
     include_realtime: bool = Query(
         True,
         description="Whether today's risk snapshot should try realtime quotes before historical close fallback",

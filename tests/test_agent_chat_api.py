@@ -672,7 +672,8 @@ def test_litellm_stream_keeps_existing_execution_signature(tmp_path: Path) -> No
     assert "cancel_event" not in executor.execute_turn.call_args.kwargs
 
 
-def test_litellm_non_streaming_error_keeps_legacy_detail(tmp_path: Path) -> None:
+def test_litellm_non_streaming_error_sanitizes_detail(tmp_path: Path) -> None:
+    # 500 错误体不再回传原始异常文本，避免泄露内部细节
     executor = MagicMock()
     executor.chat.side_effect = RuntimeError("legacy failure")
     with patch("api.middlewares.auth.is_auth_enabled", return_value=False), \
@@ -683,7 +684,7 @@ def test_litellm_non_streaming_error_keeps_legacy_detail(tmp_path: Path) -> None
             json={"message": "question", "session_id": "litellm-error"},
         )
     assert response.status_code == 500
-    assert response.json()["message"] == "legacy failure"
+    assert response.json()["message"] == "服务器内部错误"
 
 
 def test_litellm_streaming_error_follows_accepted(tmp_path: Path) -> None:

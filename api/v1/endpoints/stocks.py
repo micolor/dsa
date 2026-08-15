@@ -231,6 +231,11 @@ async def parse_import(request: Request) -> ExtractFromImageResponse:
                 status_code=400,
                 detail={"error": "bad_request", "message": "未提供 text，请使用 {\"text\": \"...\"}"},
             )
+        if len(text.encode("utf-8")) > 100 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "too_large", "message": "文本内容超过 100KB 上限"},
+            )
         try:
             items = parse_import_from_text(text)
         except ValueError as e:
@@ -330,10 +335,10 @@ def get_watchlist(
         codes = _read_watchlist_codes(service)
         return WatchlistResponse(stock_codes=codes, message=f"当前自选 {len(codes)} 只股票")
     except Exception as e:
-        logger.error(f"获取自选队列失败: {e}", exc_info=True)
+        logger.error("获取自选队列失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={"error": "internal_error", "message": f"获取自选队列失败: {str(e)}"},
+            detail={"error": "internal_error", "message": "获取自选队列失败"},
         )
 
 
@@ -363,10 +368,10 @@ def add_to_watchlist(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"加入自选失败: {e}", exc_info=True)
+        logger.error("加入自选失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={"error": "internal_error", "message": f"加入自选失败: {str(e)}"},
+            detail={"error": "internal_error", "message": "加入自选失败"},
         )
 
 
@@ -398,10 +403,10 @@ def remove_from_watchlist(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"从自选删除失败: {e}", exc_info=True)
+        logger.error("从自选删除失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={"error": "internal_error", "message": f"从自选删除失败: {str(e)}"},
+            detail={"error": "internal_error", "message": "从自选删除失败"},
         )
 
 
@@ -433,7 +438,8 @@ def get_stock_quote(stock_code: str) -> StockQuote:
     """
     try:
         service = StockService()
-        
+        stock_code = _validate_and_normalize_stock_code(stock_code)
+
         # 使用 def 而非 async def，FastAPI 自动在线程池中执行
         result = service.get_realtime_quote(stock_code)
         
@@ -464,12 +470,12 @@ def get_stock_quote(stock_code: str) -> StockQuote:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取实时行情失败: {e}", exc_info=True)
+        logger.error("获取实时行情失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"获取实时行情失败: {str(e)}"
+                "message": "获取实时行情失败"
             }
         )
 
@@ -505,7 +511,8 @@ def get_stock_history(
     """
     try:
         service = StockService()
-        
+        stock_code = _validate_and_normalize_stock_code(stock_code)
+
         # 使用 def 而非 async def，FastAPI 自动在线程池中执行
         result = service.get_history_data(
             stock_code=stock_code,
@@ -545,11 +552,11 @@ def get_stock_history(
             }
         )
     except Exception as e:
-        logger.error(f"获取历史行情失败: {e}", exc_info=True)
+        logger.error("获取历史行情失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"获取历史行情失败: {str(e)}"
+                "message": "获取历史行情失败"
             }
         )

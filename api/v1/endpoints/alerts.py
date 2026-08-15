@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from api.v1.errors import api_error
 from api.v1.schemas.alerts import (
     AlertDeleteResponse,
     AlertNotificationListResponse,
@@ -32,25 +33,16 @@ router = APIRouter()
 
 
 def _bad_request(exc: Exception, *, error: str = "validation_error") -> HTTPException:
-    return HTTPException(
-        status_code=400,
-        detail={"error": error, "message": str(exc)},
-    )
+    return api_error(400, error, str(exc))
 
 
 def _not_found(exc: Exception) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={"error": "not_found", "message": str(exc)},
-    )
+    return api_error(404, "not_found", str(exc))
 
 
 def _internal_error(message: str, exc: Exception) -> HTTPException:
     logger.error("%s: %s", message, exc, exc_info=True)
-    return HTTPException(
-        status_code=500,
-        detail={"error": "internal_error", "message": f"{message}: {str(exc)}"},
-    )
+    return api_error(500, "internal_error", message)
 
 
 @router.post(

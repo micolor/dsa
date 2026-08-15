@@ -556,9 +556,10 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(payload["existing_task_id"], "existing-task-1")
         self.assertTrue(queue.submit_tasks_batch.call_args.kwargs["force_refresh"])
 
-    def test_snapshot_invalid_cost_method_returns_400(self) -> None:
+    def test_snapshot_invalid_cost_method_returns_422(self) -> None:
+        # cost_method 现以 Literal 约束，非法值在 schema 层返回 422（早于 service 层 400）
         resp = self.client.get("/api/v1/portfolio/snapshot", params={"cost_method": "bad"})
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 422)
         detail = resp.json()
         self.assertEqual(detail.get("error"), "validation_error")
 

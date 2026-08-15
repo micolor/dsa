@@ -45,7 +45,6 @@ class PaperPositionItem(BaseModel):
     entry_date: Optional[str] = None
     stop_loss: Optional[float] = None
     target_price: Optional[float] = None
-    status: Optional[str] = None
     status: str = "open"
 
 
@@ -99,8 +98,3 @@ class BackfillResponse(BaseModel):
     to_date: str
     signals_replayed: int = 0
     snapshot: PaperSnapshotResponse
-
-
-class RefreshResponse(BaseModel):
-    snapshot: PaperSnapshotResponse
-    valuation: Optional[Dict[str, Any]] = None

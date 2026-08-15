@@ -7,9 +7,10 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_database_manager
+from api.v1.errors import api_error
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.paper import (
     BackfillRequest,
@@ -21,7 +22,6 @@ from api.v1.schemas.paper import (
     PaperSnapshotResponse,
     PaperTradeListResponse,
     PaperValuationResponse,
-    RefreshResponse,
 )
 from src.services.paper_service import PaperService
 from src.storage import DatabaseManager
@@ -48,11 +48,8 @@ def get_account(
         payload = _service(db_manager).get_or_create_account()
         return PaperAccountResponse(**payload)
     except Exception as exc:
-        logger.error(f"获取模拟盘账户失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘账户失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘账户失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘账户失败")
 
 
 @router.get(
@@ -72,11 +69,8 @@ def get_snapshot(
         snapshot = service.get_snapshot(account_id)
         return PaperSnapshotResponse(**snapshot)
     except Exception as exc:
-        logger.error(f"获取模拟盘快照失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘快照失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘快照失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘快照失败")
 
 
 @router.get(
@@ -98,11 +92,8 @@ def get_equity_curve(
         points = service.get_equity_curve(account_id, start=start, end=end)
         return [EquityPoint(**p) for p in points]
     except Exception as exc:
-        logger.error(f"获取模拟盘净值曲线失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘净值曲线失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘净值曲线失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘净值曲线失败")
 
 
 @router.get(
@@ -122,11 +113,8 @@ def get_positions(
         positions = service.get_positions(account_id)
         return [PaperPositionItem(**p) for p in positions]
     except Exception as exc:
-        logger.error(f"获取模拟盘持仓失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘持仓失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘持仓失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘持仓失败")
 
 
 @router.get(
@@ -148,11 +136,8 @@ def get_trades(
         data = service.get_trades(account_id, page=page, limit=limit)
         return PaperTradeListResponse(**data)
     except Exception as exc:
-        logger.error(f"获取模拟盘成交流水失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘成交流水失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘成交流水失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘成交流水失败")
 
 
 @router.get(
@@ -174,11 +159,8 @@ def get_signals(
         data = service.get_signals(account_id, page=page, limit=limit)
         return PaperSignalListResponse(**data)
     except Exception as exc:
-        logger.error(f"获取模拟盘信号记录失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"获取模拟盘信号记录失败: {str(exc)}"},
-        )
+        logger.error("获取模拟盘信号记录失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "获取模拟盘信号记录失败")
 
 
 @router.post(
@@ -199,11 +181,8 @@ def refresh(
         valuation = service.run_daily_valuation(account_id, force=True)
         return PaperValuationResponse(**valuation)
     except Exception as exc:
-        logger.error(f"模拟盘估值失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"模拟盘估值失败: {str(exc)}"},
-        )
+        logger.error("模拟盘估值失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "模拟盘估值失败")
 
 
 @router.post(
@@ -220,6 +199,9 @@ def backfill(
     account_id: int = Query(0, description="账户ID，0 表示默认账户"),
     db_manager: DatabaseManager = Depends(get_database_manager),
 ) -> BackfillResponse:
+    to_date = request.to_date or date.today()
+    if request.from_date > to_date:
+        raise api_error(400, "invalid_params", "回填起始日期不能晚于结束日期")
     try:
         service = _service(db_manager)
         if account_id <= 0:
@@ -227,13 +209,7 @@ def backfill(
         result = service.backfill_history(account_id, request.from_date, request.to_date)
         return BackfillResponse(**result)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "invalid_params", "message": str(exc)},
-        )
+        raise api_error(400, "invalid_params", str(exc))
     except Exception as exc:
-        logger.error(f"模拟盘历史回填失败: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "internal_error", "message": f"模拟盘历史回填失败: {str(exc)}"},
-        )
+        logger.error("模拟盘历史回填失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "模拟盘历史回填失败")

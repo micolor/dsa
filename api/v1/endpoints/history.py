@@ -242,7 +242,7 @@ def get_history_list(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询历史列表失败: {str(e)}"
+                "message": "查询历史列表失败"
             }
         )
 
@@ -296,7 +296,7 @@ def delete_history_by_code(
         logger.error(f"按股票代码删除历史记录失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={"error": "internal_error", "message": f"删除失败: {str(e)}"},
+            detail={"error": "internal_error", "message": "删除失败"},
         )
 
 
@@ -340,7 +340,7 @@ def delete_history_records(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"删除历史记录失败: {str(e)}"
+                "message": "删除历史记录失败"
             }
         )
 
@@ -361,13 +361,20 @@ def get_stock_bar(
     limit: int = Query(200, ge=1, le=500, description="最大返回数量"),
     db_manager: DatabaseManager = Depends(get_database_manager),
 ) -> StockBarResponse:
+    # 提前校验日期格式，非法输入返回 400 而非 500
+    from datetime import date as date_type
     try:
-        from datetime import date as date_type
+        start = date_type.fromisoformat(start_date) if start_date else None
+        end = date_type.fromisoformat(end_date) if end_date else None
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_params", "message": "日期格式应为 YYYY-MM-DD"},
+        )
+    try:
         from src.utils.data_processing import parse_json_field
 
         service = HistoryService(db_manager)
-        start = date_type.fromisoformat(start_date) if start_date else None
-        end = date_type.fromisoformat(end_date) if end_date else None
 
         # Fetch more than limit to compensate for normalization dedup shrinkage
         # (e.g. 002460 + 002460.SZ both initially counted but merged to one)
@@ -459,7 +466,7 @@ def get_stock_bar(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询个股栏失败: {str(e)}",
+                "message": "查询个股栏失败",
             },
         )
 
@@ -628,7 +635,7 @@ def get_history_detail(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询历史详情失败: {str(e)}"
+                "message": "查询历史详情失败"
             }
         )
 
@@ -671,7 +678,7 @@ def get_history_diagnostics(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询运行诊断摘要失败: {str(e)}",
+                "message": "查询运行诊断摘要失败",
             },
         )
 
@@ -714,7 +721,7 @@ def get_history_run_flow(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询运行流快照失败: {str(e)}",
+                "message": "查询运行流快照失败",
             },
         )
 
@@ -773,7 +780,7 @@ def get_history_news(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"查询新闻情报失败: {str(e)}"
+                "message": "查询新闻情报失败"
             }
         )
 
@@ -904,7 +911,7 @@ def get_history_markdown(
             status_code=500,
             detail={
                 "error": "internal_error",
-                "message": f"获取 Markdown 报告失败: {str(e)}"
+                "message": "获取 Markdown 报告失败"
             }
         )
 

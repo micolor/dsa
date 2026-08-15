@@ -247,9 +247,11 @@ async def agent_chat(
         )
             
     except Exception as e:
-        logger.error(f"Agent chat API failed: {e}")
-        logger.exception("Agent chat error details:")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Agent chat API failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": "服务器内部错误"},
+        )
 
 
 class SessionItem(BaseModel):
@@ -468,9 +470,11 @@ async def agent_research(request: ResearchRequest):
             error=result.error if not result.success else None,
         )
     except Exception as e:
-        logger.error("Agent research API failed: %s", e)
-        logger.exception("Agent research error details:")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Agent research API failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": "服务器内部错误"},
+        )
 
 
 @router.post("/chat/stream")
