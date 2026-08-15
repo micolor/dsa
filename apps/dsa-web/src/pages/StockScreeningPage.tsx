@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Bookmark,
@@ -732,6 +732,61 @@ const MiniSparkline: React.FC<{ score?: number | null; selected?: boolean }> = (
   );
 };
 
+const HotspotCard: React.FC<{
+  item: ScreeningHotspot;
+  index: number;
+  selected: boolean;
+  onSelect: (topic: string) => void;
+}> = memo(({ item, index, selected, onSelect }) => {
+  const strength = getHotspotStrength(item, index);
+  const iconMeta = getHotspotIcon(item.name || item.topic);
+  const Icon = iconMeta.icon;
+  return (
+    <button
+      className={`group relative min-h-[116px] overflow-hidden rounded-xl border px-3 py-3 text-left transition-all ${
+        selected
+          ? 'border-orange-400 bg-gradient-to-br from-orange-500/10 via-card to-card shadow-[0_0_0_1px_rgba(249,115,22,0.16),0_18px_44px_rgba(249,115,22,0.14)]'
+          : 'border-subtle bg-card/70 backdrop-blur-md hover:-translate-y-0.5 hover:border-orange-300/70 hover:shadow-soft-card'
+      }`}
+      type="button"
+      onClick={() => onSelect(item.topic)}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
+              index < 3 ? 'bg-orange-500 text-white shadow-[0_8px_24px_rgba(249,115,22,0.24)]' : 'bg-surface text-secondary-text'
+            }`}
+          >
+            {index + 1}
+          </span>
+          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${iconMeta.className}`}>
+            <Icon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-foreground">{item.name || item.topic}</p>
+            <span className={`mt-1 inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${strength.className}`}>
+              {strength.label}
+            </span>
+          </div>
+        </div>
+        <span className="shrink-0 text-2xl font-black leading-none text-orange-500">
+          {formatNumber(item.heatScore, 0)}
+        </span>
+      </div>
+      <div className="mt-4 grid max-w-[72%] gap-1 text-[11px] text-secondary-text">
+        <span>涨跌幅 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.changePct)}%</strong></span>
+        <span>趋势 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.trendScore)}</strong> · 持续 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.persistenceScore)}</strong></span>
+        <span>{getHotspotSampleText(item)} · 龙头 {getHotspotLeadersText(item)}</span>
+      </div>
+      <div className="absolute bottom-3 right-3 opacity-95 transition-transform group-hover:scale-105">
+        <MiniSparkline score={item.heatScore} selected={selected} />
+      </div>
+    </button>
+  );
+});
+HotspotCard.displayName = 'HotspotCard';
+
 const StockScreeningPage: React.FC = () => {
   const navigate = useNavigate();
   const [restoredTask] = useState<PersistedScreenTask | null>(() => readPersistedScreenTask());
@@ -1294,56 +1349,15 @@ const StockScreeningPage: React.FC = () => {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {hotspots.map((item, index) => {
-              const selected = selectedHotspotTopic === item.topic;
-              const strength = getHotspotStrength(item, index);
-              const iconMeta = getHotspotIcon(item.name || item.topic);
-              const Icon = iconMeta.icon;
-              return (
-              <button
+            {hotspots.map((item, index) => (
+              <HotspotCard
                 key={`${item.topic}-${item.rank ?? ''}`}
-                className={`group relative min-h-[116px] overflow-hidden rounded-xl border px-3 py-3 text-left transition-all ${
-                  selected
-                    ? 'border-orange-400 bg-gradient-to-br from-orange-500/10 via-card to-card shadow-[0_0_0_1px_rgba(249,115,22,0.16),0_18px_44px_rgba(249,115,22,0.14)]'
-                    : 'border-subtle bg-card/70 backdrop-blur-md hover:-translate-y-0.5 hover:border-orange-300/70 hover:shadow-soft-card'
-                }`}
-                type="button"
-                onClick={() => handleHotspotSelect(item.topic)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span
-                      className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                        index < 3 ? 'bg-orange-500 text-white shadow-[0_8px_24px_rgba(249,115,22,0.24)]' : 'bg-surface text-secondary-text'
-                      }`}
-                    >
-                      {index + 1}
-                    </span>
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${iconMeta.className}`}>
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-foreground">{item.name || item.topic}</p>
-                      <span className={`mt-1 inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${strength.className}`}>
-                        {strength.label}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-2xl font-black leading-none text-orange-500">
-                    {formatNumber(item.heatScore, 0)}
-                  </span>
-                </div>
-                <div className="mt-4 grid max-w-[72%] gap-1 text-[11px] text-secondary-text">
-                  <span>涨跌幅 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.changePct)}%</strong></span>
-                  <span>趋势 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.trendScore)}</strong> · 持续 <strong className="font-semibold text-foreground">{formatHotspotMetric(item.persistenceScore)}</strong></span>
-                  <span>{getHotspotSampleText(item)} · 龙头 {getHotspotLeadersText(item)}</span>
-                </div>
-                <div className="absolute bottom-3 right-3 opacity-95 transition-transform group-hover:scale-105">
-                  <MiniSparkline score={item.heatScore} selected={selected} />
-                </div>
-              </button>
-              );
-            })}
+                item={item}
+                index={index}
+                selected={selectedHotspotTopic === item.topic}
+                onSelect={handleHotspotSelect}
+              />
+            ))}
           </div>
         )}
 

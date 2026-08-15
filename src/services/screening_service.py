@@ -60,6 +60,9 @@ DSA_SCREENING_HOTSPOT_EVENT_SUMMARY_MAX_CHARS = 90
 DSA_SCREENING_HOTSPOT_PREFETCH_DETAIL_COUNT = 8
 DSA_SCREENING_HOTSPOT_CALL_TIMEOUT_SECONDS = 8
 DSA_SCREENING_HOTSPOT_SEARCH_TIMEOUT_SECONDS = 12
+DSA_SCREENING_HOTSPOT_SEARCH_CACHE_TTL_SECONDS = 10 * 60
+_HOTSPOT_SEARCH_CACHE: Dict[str, Tuple[float, "_HotspotSearchAugmentation"]] = {}
+_HOTSPOT_SEARCH_CACHE_LOCK = threading.RLock()
 DSA_SCREENING_HOTSPOT_UNAVAILABLE_CODE = "eastmoney_hotspot_unavailable"
 DSA_SCREENING_HOTSPOT_UNAVAILABLE_MESSAGE = "热点源连接中断，暂无可用缓存。"
 DSA_SCREENING_HOTSPOT_CONNECTIVITY_ERROR_MARKERS = (
@@ -342,9 +345,31 @@ class _HotspotSearchAugmentation:
 
 
 def _build_hotspot_event_routes_from_search(topic: str) -> _HotspotSearchAugmentation:
+    """Run the opt-in topic news search, memoizing definitive results by topic.
+
+    Repeating "search latest news" clicks on an unchanged topic re-ran the
+    blocking web search (up to ~12s) with no cache. Cache a fresh search result
+    so a cached base detail + repeat request returns instantly instead of
+    re-searching; a TTL bounds staleness for news freshness.
+    """
     topic_text = _env_text(topic)
     if not topic_text:
         return _HotspotSearchAugmentation(routes=[], status="unavailable")
+    with _HOTSPOT_SEARCH_CACHE_LOCK:
+        cached = _HOTSPOT_SEARCH_CACHE.get(topic_text)
+        if cached is not None and (time.monotonic() - cached[0]) < DSA_SCREENING_HOTSPOT_SEARCH_CACHE_TTL_SECONDS:
+            return cached[1]
+    result = _search_hotspot_event_routes(topic_text)
+    # Only cache definitive outcomes ("available" / "no_results"); an
+    # "unavailable" (service down / exception) result stays uncached so the next
+    # click retries rather than serving a stale "search not working" for 10 min.
+    if result.status in ("available", "no_results"):
+        with _HOTSPOT_SEARCH_CACHE_LOCK:
+            _HOTSPOT_SEARCH_CACHE[topic_text] = (time.monotonic(), result)
+    return result
+
+
+def _search_hotspot_event_routes(topic_text: str) -> _HotspotSearchAugmentation:
     try:
         service = _get_dsa_search_service()
         if not getattr(service, "is_available", False):
@@ -2119,8 +2144,12 @@ class DsaEastMoneyHotspotProvider:
         if deadline is None:
             return self._CONSTITUENT_HTTP_TIMEOUT
         remaining = self._remaining_source_timeout(sum(self._CONSTITUENT_HTTP_TIMEOUT))
-        connect = min(self._CONSTITUENT_HTTP_TIMEOUT[0], max(remaining / 2.0, 0.001))
-        read = max(remaining - connect, 0.001)
+        # Cap each socket phase at its configured maximum so a single slow read
+        # cannot consume the whole shared budget (which would leave nothing for
+        # fallback/retry and abort the entire hotspot detail). Only shrink the
+        # timeouts when the remaining budget is smaller than the configured pair.
+        connect = min(self._CONSTITUENT_HTTP_TIMEOUT[0], max(remaining - self._CONSTITUENT_HTTP_TIMEOUT[1], 0.001))
+        read = min(self._CONSTITUENT_HTTP_TIMEOUT[1], max(remaining - connect, 0.001))
         return connect, read
 
     def _sleep_within_source_budget(self, seconds: float) -> None:
@@ -2278,7 +2307,9 @@ class DsaEastMoneyHotspotProvider:
 
         source_deadline = _DSA_HOTSPOT_CALL_DEADLINE.get()
 
-        def run(fetch: Callable[[], Any]) -> Any:
+        def invoke(fetch: Callable[[], Any]) -> Any:
+            # Propagate the shared deadline to the worker thread (or inline caller)
+            # so fallbacks don't each get a fresh full budget.
             token = (
                 _DSA_HOTSPOT_CALL_DEADLINE.set(source_deadline)
                 if source_deadline is not None
@@ -2289,6 +2320,11 @@ class DsaEastMoneyHotspotProvider:
             finally:
                 if token is not None:
                     _DSA_HOTSPOT_CALL_DEADLINE.reset(token)
+
+        def run_worker(fetch: Callable[[], Any]) -> Any:
+            try:
+                return invoke(fetch)
+            finally:
                 self._CONSTITUENT_WORKER_SLOTS.release()
 
         frames_by_source: Dict[str, Any] = {}
@@ -2299,14 +2335,25 @@ class DsaEastMoneyHotspotProvider:
             futures = {}
             for label, fetch in fetchers:
                 if not self._CONSTITUENT_WORKER_SLOTS.acquire(blocking=False):
+                    # Capacity exhausted. Don't drop the source (that would leave
+                    # hotspot concept/industry lists incomplete); run it inline so
+                    # every source still gets merged. This serializes under
+                    # contention but preserves data completeness.
                     logger.info(
-                        "Screening %s constituent source skipped for %s: worker capacity exhausted",
+                        "Screening %s constituent source falls back to inline fetch for %s: worker capacity exhausted",
                         label,
                         topic,
                     )
+                    try:
+                        payload = invoke(fetch)
+                    except BaseException as exc:  # noqa: BLE001 - external source failures are isolated.
+                        logger.info("Screening %s constituent source failed for %s: %s", label, topic, exc)
+                        continue
+                    if payload is not None and not bool(getattr(payload, "empty", False)):
+                        frames_by_source[label] = payload
                     continue
                 try:
-                    futures[executor.submit(run, fetch)] = label
+                    futures[executor.submit(run_worker, fetch)] = label
                 except BaseException:  # noqa: BLE001 - release capacity if submission fails.
                     self._CONSTITUENT_WORKER_SLOTS.release()
                     raise

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 选股热点详情数据源并发时不再静默丢源：概念股/行业成分源共享的并发槽被占满时改为内联补拉（数据完整），单个 HTTP 读取超时不再吞掉整次调用的共享时间预算（按剩余预算拆分 connect/read 超时）；`include_search` 重复请求同一热点新闻搜索改为按主题缓存（TTL 10 分钟，服务不可用的失败结果不缓存），避免重复点击每次都触发阻塞式网络搜索
 - [改进] 基本面诊断卡显示失败原因：当基本面部分可用/失败时，会在该块下以 warning 列出各数据源的实际状态（如 `fundamental_bundle:failed`），区分「接口失败」与「该标的不支持」，不再笼统显示为「缺失」；原始报错字符串不落盘以避免密钥泄露
 - [修复] 筹码分布诊断对美股/港股/ETF 等不支持市场不再误报「缺失」：此前「该标的不支持筹码」的标记（`chip_not_supported`）只被读取、从未写入，现已接入分析上下文，这类标的显示为「该类标的不支持筹码」而非误导性的「缺失」
 - [改进] A 股基本面在 AkShare 数据源无有效成长/盈利内容时自动回退到 Baostock（免费、稳定、无需 token）：通过 `query_profit_data`/`query_growth_data` 补全 ROE、毛利率、净利率、净利润同比与财报关键指标，`source_chain` 会记录真实数据源（`baostock_profit`/`baostock_growth`），缓解基本面「经常不可用」

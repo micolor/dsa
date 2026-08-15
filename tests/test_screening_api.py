@@ -90,6 +90,10 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         Config.reset_instance()
         self.env_patch = patch.dict(os.environ, {"SCREENING_DATA_DIR": ""}, clear=False)
         self.env_patch.start()
+        # `_build_hotspot_event_routes_from_search` memoizes definitive results
+        # by topic; clear it so a prior test's cached topic doesn't leak into
+        # this test's mocked search call counts / outcomes.
+        screening_service._HOTSPOT_SEARCH_CACHE.clear()
 
     def tearDown(self) -> None:
         self.env_patch.stop()
@@ -1540,7 +1544,9 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         self.assertTrue(plain["cache_used"])
         self.assertEqual(cache_write.call_count, 1)
         provider.hotspot_detail.assert_called_once_with("钼")
-        self.assertEqual(search_service.search_topic_news_bounded.call_count, 2)
+        # The second include_search call on the same topic is served from the
+        # in-memory search cache (fix #3), so the web search runs exactly once.
+        self.assertEqual(search_service.search_topic_news_bounded.call_count, 1)
 
     def test_hotspot_search_summary_does_not_call_llm(self) -> None:
         config = Config(screening_enabled=True, litellm_model="openai/gpt-5-mini")
@@ -1907,14 +1913,18 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
                 source="industry",
             )
             self.assertTrue(started.wait(0.3))
-            skipped = second_provider._fetch_constituent_sources("银行", source="industry")
-            self.assertEqual(skipped, [])
+            # Slot is held by the first provider, so capacity is capped: the
+            # second call must NOT spawn a second worker. Fix #1 runs it inline
+            # instead of silently dropping the source, so data is preserved.
+            inline = second_provider._fetch_constituent_sources("银行", source="industry")
+            self.assertEqual(len(inline), 1)
             release.set()
             self.assertEqual(len(first.result(timeout=0.5)), 1)
 
         reused = second_provider._fetch_constituent_sources("银行", source="industry")
         self.assertEqual(len(reused), 1)
-        self.assertEqual(call_count, 2)
+        # worker (first) + inline (during contention) + worker (reused) = 3
+        self.assertEqual(call_count, 3)
 
     def test_hotspot_provider_maps_cross_source_topic_alias_to_ths_concept(self) -> None:
         provider = screening_service.DsaEastMoneyHotspotProvider()
