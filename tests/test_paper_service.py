@@ -205,3 +205,104 @@ def test_backfill_replays_signals(isolated_db, service):
     open_pos = next(p for p in positions if p["status"] == "open")
     assert open_pos["quantity"] == 2000
     assert service.get_equity_curve(account_id)  # curve non-empty
+
+
+def test_backfill_paginates_past_repo_cap(isolated_db, service):
+    # The repo's list() caps page_size at 100; backfill must replay every signal
+    # in the range, not silently drop the tail.
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    for _ in range(150):
+        _make_signal(isolated_db, action="hold", created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    result = service.backfill_history(account_id, from_date=date(2026, 1, 1), to_date=date(2026, 1, 31))
+    assert result["signals_replayed"] == 150
+
+
+def test_add_capped_by_target_weight_and_cash(isolated_db, service):
+    # Repeated buy/add signals must not push a single position past its target
+    # weight nor spend more than the cash on hand.
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "600519", d2, 100, 100, 100, 100)
+    buy_sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+    service.process_signal(buy_sig.id)  # opens at ~20% of net value
+
+    # Many more buy signals on the same name: the position is already at target, so
+    # further adds are "hold" and cash stays put.
+    for _ in range(20):
+        add_sig = _make_signal(isolated_db, action="add", entry_high=100.0, created_at=datetime(2026, 1, 6))
+        service.process_signal(add_sig.id)
+
+    positions = service.get_positions(account_id)
+    open_pos = next(p for p in positions if p["status"] == "open")
+    # 2000 shares @ 100 = 200,000 == target (20% of 1,000,000); no further buys.
+    assert open_pos["quantity"] == 2000
+    assert service.get_snapshot(account_id)["cash"] == 800000.0
+
+
+def test_add_updates_stop_and_target(isolated_db, service):
+    # A buy/add signal can carry a revised stop-loss / take-profit; an add must
+    # update those lines on the open position instead of leaving them pinned to open.
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "AAPL", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "AAPL", d2, 97, 97, 97, 97)
+    buy_sig = _make_signal(isolated_db, action="buy", code="AAPL", market="us",
+                           entry_high=100.0, stop_loss=95.0, target_price=115.0,
+                           created_at=datetime(2026, 1, 5))
+    add_sig = _make_signal(isolated_db, action="add", code="AAPL", market="us",
+                           entry_high=97.0, stop_loss=90.0, target_price=110.0,
+                           created_at=datetime(2026, 1, 6))
+    account_id = service.get_or_create_account()["account_id"]
+
+    service.process_signal(buy_sig.id)
+    # Re-price the position at d2 (97) so its market value drops below the 20%
+    # target; otherwise the position sits exactly at target and the add is capped.
+    service.run_daily_valuation(account_id, as_of_date=d2)
+    result = service.process_signal(add_sig.id)
+    assert result["disposition"] == "added"
+
+    positions = service.get_positions(account_id)
+    open_pos = next(p for p in positions if p["status"] == "open")
+    assert open_pos["quantity"] > 2000
+    assert open_pos["stop_loss"] == 90.0
+    assert open_pos["target_price"] == 110.0
+
+
+def test_no_same_day_stop_out_on_entry(isolated_db, service):
+    # Entry uses the day's high; the same day's low may dip below the stop-loss
+    # without the position actually being stopped out. Exits only apply from the
+    # day after entry.
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    # D1: high 100 (entry), low 90 < stop 95 -> must NOT exit on the entry day.
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 90, 95)
+    _seed_daily(isolated_db, "600519", d2, 90, 90, 90, 90)  # D2 breaches stop.
+    buy_sig = _make_signal(isolated_db, action="buy", entry_high=100.0, stop_loss=95.0,
+                           created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    service.process_signal(buy_sig.id)  # opens on D1; no same-day exit
+    trades_after_open = service.get_trades(account_id)["items"]
+    assert all(t["side"] == "buy" for t in trades_after_open)
+
+    service.run_daily_valuation(account_id, as_of_date=d2)
+    trades = service.get_trades(account_id)["items"]
+    sell_trades = [t for t in trades if t["side"] == "sell"]
+    assert sell_trades and sell_trades[0]["reason"] == "stop_loss"
+
+
+def test_hold_signal_does_not_snapshot(isolated_db, service):
+    # Dispositions that don't touch positions (hold/ignored) must not write a
+    # redundant daily snapshot / pollute the equity curve.
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="hold", created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    service.process_signal(sig.id)
+    assert service.get_equity_curve(account_id) == []

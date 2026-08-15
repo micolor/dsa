@@ -1,5 +1,4 @@
 import type React from 'react';
-import { useState } from 'react';
 import { Badge, EmptyState, Pagination } from '../common';
 import type { PaperSignalRecord, PaperTrade } from '../../types/paper';
 import type { DecisionAction } from '../../types/analysis';
@@ -11,8 +10,11 @@ import {
   getDecisionActionLabel,
   getDecisionActionTone,
 } from '../../utils/decisionAction';
+import { formatDateTime } from '../../utils/format';
 
 type Props = {
+  /** Which list to render; the page owns the top-level tab state. */
+  mode: 'signals' | 'trades';
   signals: PaperSignalRecord[];
   trades: PaperTrade[];
   signalTotal: number;
@@ -26,6 +28,7 @@ type Props = {
 type MetaBadgeVariant = 'success' | 'danger' | 'warning' | 'info' | 'default';
 
 export const PaperRecordsList: React.FC<Props> = ({
+  mode,
   signals,
   trades,
   signalTotal,
@@ -46,31 +49,15 @@ export const PaperRecordsList: React.FC<Props> = ({
     hold: { label: text.dispHold, variant: 'default' },
     ignored: { label: text.dispIgnored, variant: 'default' },
   };
-  const [tab, setTab] = useState<'signal' | 'trade'>('signal');
 
-  const totalPages = Math.max(1, Math.ceil((tab === 'signal' ? signalTotal : tradeTotal) / pageSize));
-  const empty = tab === 'signal' ? signals.length === 0 : trades.length === 0;
+  const totalPages = Math.max(1, Math.ceil((mode === 'signals' ? signalTotal : tradeTotal) / pageSize));
+  const empty = mode === 'signals' ? signals.length === 0 : trades.length === 0;
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-1">
-        {(['signal', 'trade'] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-              tab === key ? 'bg-[var(--nav-active-bg)] text-[hsl(var(--primary))]' : 'text-secondary-text hover:text-foreground'
-            }`}
-          >
-            {key === 'signal' ? text.signalTab : text.tradeTab}
-          </button>
-        ))}
-      </div>
-
       {empty ? (
         <EmptyState title={text.noRecordsTitle} description={text.noRecordsDescription} />
-      ) : tab === 'signal' ? (
+      ) : mode === 'signals' ? (
         <div className="space-y-2">
           {signals.map((record) => {
             const signalAction = record.action as DecisionAction;
@@ -80,19 +67,21 @@ export const PaperRecordsList: React.FC<Props> = ({
             const disposition = dispositionMeta[record.disposition];
             return (
             <div key={record.signalId} className="home-subpanel flex items-center justify-between gap-2 p-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <Badge variant={actionVariant}>{actionLabel}</Badge>
-                <Badge variant={disposition?.variant ?? 'default'}>
-                  {disposition?.label ?? record.disposition}
-                </Badge>
-                {record.stockCode ? (
-                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
-                    {record.stockName || record.stockCode}
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                  {record.stockName || record.stockCode || '—'}
+                  {record.stockCode ? (
                     <span className="ml-1.5 font-mono text-xs text-secondary-text">{record.stockCode}</span>
-                  </span>
-                ) : null}
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Badge variant={actionVariant}>{actionLabel}</Badge>
+                  <Badge variant={disposition?.variant ?? 'default'}>
+                    {disposition?.label ?? record.disposition}
+                  </Badge>
+                </span>
               </div>
-              <span className="shrink-0 text-xs text-secondary-text">{record.processedAt}</span>
+              <span className="shrink-0 text-xs text-secondary-text">{formatDateTime(record.processedAt)}</span>
             </div>
           );
           })}

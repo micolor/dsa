@@ -195,7 +195,8 @@ def refresh(
         service = _service(db_manager)
         if account_id <= 0:
             account_id = service.get_or_create_account()["account_id"]
-        valuation = service.run_daily_valuation(account_id)
+        # Manual refresh always re-prices today, even if a snapshot already exists.
+        valuation = service.run_daily_valuation(account_id, force=True)
         return PaperValuationResponse(**valuation)
     except Exception as exc:
         logger.error(f"模拟盘估值失败: {exc}", exc_info=True)

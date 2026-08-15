@@ -12,7 +12,7 @@ import { formatUiText } from '../i18n/uiText';
 import { PAPER_TRADING_TEXT } from '../locales/featureText';
 import type { PaperAccount, PaperPosition, PaperSignalRecord, PaperSnapshot, PaperTrade } from '../types/paper';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 export const PaperTradingPage: React.FC = () => {
   const { language } = useUiLanguage();
@@ -32,7 +32,7 @@ export const PaperTradingPage: React.FC = () => {
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [backfillFrom, setBackfillFrom] = useState('');
-  const [activeSection, setActiveSection] = useState<'positions' | 'records'>('positions');
+  const [activeSection, setActiveSection] = useState<'positions' | 'signals' | 'trades'>('positions');
 
   useEffect(() => {
     document.title = text.documentTitle;
@@ -68,6 +68,12 @@ export const PaperTradingPage: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleTabChange = useCallback((key: 'positions' | 'signals' | 'trades') => {
+    setActiveSection(key);
+    // Each top-level tab has its own list, so pagination resets when switching.
+    setPage(1);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     setIsActioning(true);
@@ -123,14 +129,6 @@ export const PaperTradingPage: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs leading-5 text-muted-text">{text.description}</p>
-          <ul className="mt-1.5 space-y-1 text-[11px] leading-4 text-muted-text/80">
-            {text.mechanism.map((line) => (
-              <li key={line} className="flex gap-1.5">
-                <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-current/60" aria-hidden="true" />
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <DatePicker
@@ -206,18 +204,18 @@ export const PaperTradingPage: React.FC = () => {
           </div>
 
           <div className="flex w-fit items-center gap-1 rounded-xl border border-subtle bg-base/40 p-1">
-            {(['positions', 'records'] as const).map((key) => (
+            {([['positions', text.positionsTitle], ['signals', text.signalTab], ['trades', text.tradeTab]] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"
-                onClick={() => setActiveSection(key)}
+                onClick={() => handleTabChange(key)}
                 className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                   activeSection === key
                     ? 'bg-[var(--nav-active-bg)] text-[hsl(var(--primary))]'
                     : 'text-secondary-text hover:text-foreground'
                 }`}
               >
-                {key === 'positions' ? text.positionsTitle : text.recordsTitle}
+                {label}
               </button>
             ))}
           </div>
@@ -225,7 +223,6 @@ export const PaperTradingPage: React.FC = () => {
           {activeSection === 'positions' ? (
           <>
           <div className="home-subpanel p-4">
-            <h2 className="mb-3 text-sm font-semibold text-foreground">{text.positionsTitle}</h2>
             {openPositions.length === 0 ? (
               <EmptyState title={text.noPositionsTitle} description={text.noPositionsDescription} />
             ) : (
@@ -358,8 +355,8 @@ export const PaperTradingPage: React.FC = () => {
           </>
           ) : (
           <div className="home-subpanel p-4">
-            <h2 className="mb-3 text-sm font-semibold text-foreground">{text.recordsTitle}</h2>
             <PaperRecordsList
+              mode={activeSection}
               signals={signals}
               trades={trades}
               signalTotal={signalTotal}

@@ -8,6 +8,7 @@ performed, producing positions, a daily equity curve and trade records.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,6 +27,10 @@ DEFAULT_LOOKBACK_DAYS = 365
 _OPEN_ACTIONS = ("buy", "add")
 # Actions that close or reduce a position.
 _CLOSE_ACTIONS = ("sell", "reduce")
+# Dispositions that actually change the portfolio; only these need a follow-up
+# valuation (hold/ignored leave positions untouched, so a daily mark-to-market
+# adds nothing and only pollutes the equity curve with redundant snapshots).
+_PORTFOLIO_CHANGING_DISPOSITIONS = ("opened", "added", "reduced", "closed")
 
 
 class PaperService:
@@ -40,7 +45,10 @@ class PaperService:
         self.db = db_manager or DatabaseManager.get_instance()
         self.paper_repo = paper_repo or PaperRepository(self.db)
         self.decision_repo = decision_repo or DecisionSignalRepository(self.db)
-        self._bar_cache: Dict[str, Dict[date, Dict[str, float]]] = {}
+        # Per-stock bar cache: code -> (earliest loaded date, bars). Guarded by a lock
+        # because the daily-valuation background task and analysis threads share it.
+        self._bar_cache: Dict[str, Tuple[date, Dict[date, Dict[str, float]]]] = {}
+        self._bar_cache_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -63,8 +71,10 @@ class PaperService:
         disposition = self._handle_signal(account, signal, as_of)
         self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
 
-        # Reflect the resulting portfolio state for that day.
-        self._valuate(account, as_of)
+        # Only re-value when the position actually changed; hold/ignored leave the
+        # portfolio untouched.
+        if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
+            self._valuate(account, as_of)
         return {
             "status": "processed",
             "signal_id": signal.id,
@@ -72,11 +82,21 @@ class PaperService:
             "disposition": disposition,
         }
 
-    def run_daily_valuation(self, account_id: int, as_of_date: Optional[date] = None) -> Dict[str, Any]:
-        """Mark-to-market all open positions for a date and record a snapshot."""
+    def run_daily_valuation(
+        self,
+        account_id: int,
+        as_of_date: Optional[date] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """Mark-to-market all open positions for a date and record a snapshot.
+
+        By default the valuation is idempotent per day: an existing snapshot for
+        ``as_of`` short-circuits. Pass ``force=True`` (e.g. from the manual refresh
+        button) to re-price today even if a snapshot already exists.
+        """
         account = self.paper_repo.get_account(account_id) or self.paper_repo.ensure_account()
         as_of = as_of_date or date.today()
-        if self.paper_repo.has_snapshot(account.id, as_of):
+        if not force and self.paper_repo.has_snapshot(account.id, as_of):
             # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
             snap = self.get_snapshot(account.id)
             return {
@@ -109,7 +129,8 @@ class PaperService:
             as_of = self._signal_trade_date(signal)
             disposition = self._handle_signal(account, signal, as_of)
             self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
-            self._valuate(account, as_of)
+            if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
+                self._valuate(account, as_of)
             processed += 1
 
         return {
@@ -232,9 +253,14 @@ class PaperService:
         position = self.paper_repo.get_open_position(account.id, code)
         total = self._net_value(account)
         target_value = total * POSITION_WEIGHT
+        available_cash = max(float(account.cash or 0), 0.0)
 
         if position is None:
-            quantity = self._buy_quantity(target_value, buy_price, market=signal.market)
+            # Cap the buy to what cash actually covers; lot rounding never exceeds this.
+            spend = min(target_value, available_cash)
+            if spend <= 0:
+                return "ignored"
+            quantity = self._buy_quantity(spend, buy_price, market=signal.market)
             if quantity <= 0:
                 return "ignored"
             self.paper_repo.upsert_position(
@@ -269,24 +295,33 @@ class PaperService:
             )
             return "opened"
 
-        # Add to existing position.
-        quantity = self._buy_quantity(target_value, buy_price, market=signal.market)
+        # Add to an existing position: never push past the target weight, and never
+        # spend more than the cash on hand. Both bound runaway `add` accumulation.
+        current_value = float(position.market_value or 0)
+        if current_value >= target_value:
+            return "hold"
+        spend = min(target_value - current_value, available_cash)
+        if spend <= 0:
+            return "hold"
+        quantity = self._buy_quantity(spend, buy_price, market=signal.market)
         if quantity <= 0:
             return "hold"
         prev_qty = float(position.quantity or 0)
         prev_cost = float(position.avg_cost or buy_price)
         new_qty = prev_qty + quantity
         new_cost = (prev_cost * prev_qty + buy_price * quantity) / new_qty
-        self.paper_repo.upsert_position(
-            account.id,
-            code,
-            {
-                "quantity": new_qty,
-                "avg_cost": new_cost,
-                "current_price": buy_price,
-                "market_value": buy_price * new_qty,
-            },
-        )
+        fields: Dict[str, Any] = {
+            "quantity": new_qty,
+            "avg_cost": new_cost,
+            "current_price": buy_price,
+            "market_value": buy_price * new_qty,
+        }
+        # 加仓信号可能带来新的风控线；有则更新，避免止损/目标一直钉死在开仓那天。
+        if signal.stop_loss is not None:
+            fields["stop_loss"] = signal.stop_loss
+        if signal.target_price is not None:
+            fields["target_price"] = signal.target_price
+        self.paper_repo.upsert_position(account.id, code, fields)
         self._apply_cash(account, -buy_price * quantity)
         self.paper_repo.add_trade(
             account.id,
@@ -368,6 +403,22 @@ class PaperService:
                 continue
             close = bar.get("close")
             if close is None or close <= 0:
+                continue
+
+            # A position opened today is valued at today's close but does not also
+            # check today's low/high for a stop-loss / take-profit exit: entry uses
+            # the day's high, so checking the same day's range would systematically
+            # stop out freshly opened positions on wide-range days.
+            is_entry_day = position.entry_date is not None and position.entry_date == as_of
+            if is_entry_day:
+                self.paper_repo.upsert_position(
+                    account.id,
+                    position.stock_code,
+                    {
+                        "current_price": close,
+                        "market_value": close * float(position.quantity or 0),
+                    },
+                )
                 continue
 
             exit_price, exit_reason = self._daily_exit(position, bar)
@@ -509,8 +560,19 @@ class PaperService:
         return bars.get(as_of)
 
     def _load_bars(self, code: str, as_of: date) -> Dict[date, Dict[str, float]]:
-        """Load (and cache) daily bars for a stock, covering as_of through today."""
-        if code not in self._bar_cache:
+        """Load (and cache) daily bars for a stock, covering as_of through today.
+
+        The cache keeps the earliest loaded date per stock; if a later request asks
+        for an even earlier ``as_of`` (e.g. a long backfill replay), it reloads a
+        wider window instead of returning stale/empty bars.
+        """
+        with self._bar_cache_lock:
+            cached = self._bar_cache.get(code)
+            if cached is not None:
+                start, bars = cached
+                if start <= as_of:
+                    return bars
+
             start = as_of - timedelta(days=DEFAULT_LOOKBACK_DAYS)
             # Load through today so later valuation dates stay within the cache.
             end = date.today()
@@ -527,15 +589,27 @@ class PaperService:
                     "low": getattr(row, "low", None),
                     "close": getattr(row, "close", None),
                 }
-            self._bar_cache[code] = bars
-        return self._bar_cache[code]
+            self._bar_cache[code] = (start, bars)
+            return bars
 
     def _signals_in_range(self, from_date: date, to_date: date) -> List[DecisionSignalRecord]:
-        rows, _ = self.decision_repo.list(
-            created_from=datetime.combine(from_date, datetime.min.time()),
-            created_to=datetime.combine(to_date, datetime.max.time()),
-            page_size=100,
-        )
-        rows = list(rows)
+        """Fetch *all* signals in the date range, paginating past the repo's page cap."""
+        from_dt = datetime.combine(from_date, datetime.min.time())
+        to_dt = datetime.combine(to_date, datetime.max.time())
+        rows: List[DecisionSignalRecord] = []
+        page = 1
+        page_size = 100
+        while True:
+            batch, _ = self.decision_repo.list(
+                created_from=from_dt,
+                created_to=to_dt,
+                page=page,
+                page_size=page_size,
+            )
+            rows.extend(batch)
+            # The repo caps page_size at 100; a short page means we've reached the end.
+            if len(batch) < page_size:
+                break
+            page += 1
         rows.sort(key=lambda s: (s.created_at or datetime.min))
         return rows

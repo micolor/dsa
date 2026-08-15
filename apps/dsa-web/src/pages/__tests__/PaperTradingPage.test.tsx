@@ -9,6 +9,7 @@ const {
   mockGetEquityCurve,
   mockGetSignals,
   mockGetTrades,
+  mockGetAccount,
   mockRefresh,
   mockBackfill,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   mockGetEquityCurve: vi.fn(),
   mockGetSignals: vi.fn(),
   mockGetTrades: vi.fn(),
+  mockGetAccount: vi.fn(),
   mockRefresh: vi.fn(),
   mockBackfill: vi.fn(),
 }));
@@ -28,6 +30,7 @@ vi.mock('../../api/paper', () => ({
     getEquityCurve: mockGetEquityCurve,
     getSignals: mockGetSignals,
     getTrades: mockGetTrades,
+    getAccount: mockGetAccount,
     refresh: mockRefresh,
     backfill: mockBackfill,
   },
@@ -43,6 +46,15 @@ const emptySnapshot = {
   openPositionCount: 0,
 };
 
+const mockAccount = {
+  accountId: 1,
+  name: '模拟账户',
+  initialCapital: 1000000,
+  cash: 1000000,
+  status: 'active',
+  snapshot: emptySnapshot,
+};
+
 describe('PaperTradingPage', () => {
   beforeEach(() => {
     mockGetSnapshot.mockResolvedValue(emptySnapshot);
@@ -50,6 +62,7 @@ describe('PaperTradingPage', () => {
     mockGetEquityCurve.mockResolvedValue([]);
     mockGetSignals.mockResolvedValue({ items: [], total: 0 });
     mockGetTrades.mockResolvedValue({ items: [], total: 0 });
+    mockGetAccount.mockResolvedValue(mockAccount);
     mockRefresh.mockResolvedValue({});
     mockBackfill.mockResolvedValue({});
   });
@@ -99,5 +112,55 @@ describe('PaperTradingPage', () => {
     await waitFor(() => expect(screen.getByText('600519')).toBeInTheDocument());
     expect(screen.getByText('2000')).toBeInTheDocument();
     expect(screen.getByText('Open')).toBeInTheDocument();
+  });
+
+  it('switches between positions, signals and trades tabs', async () => {
+    mockGetPositions.mockResolvedValue([
+      {
+        stockCode: '600519',
+        stockName: '贵州茅台',
+        market: 'cn',
+        quantity: 2000,
+        avgCost: 100,
+        currentPrice: 100,
+        marketValue: 200000,
+        entryDate: '2026-01-05',
+        stopLoss: 95,
+        targetPrice: 115,
+        status: 'open',
+      },
+    ]);
+    mockGetSignals.mockResolvedValue({
+      items: [{ signalId: 'sig-1', action: 'buy', disposition: 'opened', stockCode: '600519', stockName: '贵州茅台', processedAt: '2026-01-05 10:00:00' }],
+      total: 1,
+    });
+    mockGetTrades.mockResolvedValue({
+      items: [{ tradeDate: '2026-01-05', stockCode: '600519', side: 'buy', quantity: 2000, price: 100, reason: '测试' }],
+      total: 1,
+    });
+
+    render(
+      <UiLanguageProvider>
+        <PaperTradingPage />
+      </UiLanguageProvider>
+    );
+
+    // Default tab is positions.
+    await waitFor(() => expect(screen.getByText('600519')).toBeInTheDocument());
+
+    // The three top-level tabs are present.
+    expect(screen.getByRole('button', { name: 'Positions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Signals' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trades' })).toBeInTheDocument();
+
+    // Switch to signals (positions are unmounted, so 贵州茅台 now refers to the signal row).
+    screen.getByRole('button', { name: 'Signals' }).click();
+    await waitFor(() => expect(screen.getByText('贵州茅台')).toBeInTheDocument());
+    expect(screen.getByText('Buy')).toBeInTheDocument();
+
+    // Switch to trades.
+    screen.getByRole('button', { name: 'Trades' }).click();
+    await waitFor(() => expect(screen.getByText('测试')).toBeInTheDocument());
+    expect(screen.getByText('Buy')).toBeInTheDocument();
   });
 });
