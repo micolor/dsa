@@ -18,7 +18,8 @@ from src.storage import DatabaseManager, DecisionSignalRecord
 
 logger = logging.getLogger(__name__)
 
-# Default target weight of total assets allocated per opened position.
+# Default target weight of total assets allocated per opened position. Overridable
+# per service instance (e.g. from the `PAPER_POSITION_WEIGHT` config).
 POSITION_WEIGHT = 0.20
 # Default lookback used when loading price bars for live valuation.
 DEFAULT_LOOKBACK_DAYS = 365
@@ -41,14 +42,29 @@ class PaperService:
         db_manager: Optional[DatabaseManager] = None,
         paper_repo: Optional[PaperRepository] = None,
         decision_repo: Optional[DecisionSignalRepository] = None,
+        position_weight: Optional[float] = None,
     ):
         self.db = db_manager or DatabaseManager.get_instance()
         self.paper_repo = paper_repo or PaperRepository(self.db)
         self.decision_repo = decision_repo or DecisionSignalRepository(self.db)
+        # Position weight as a fraction of total assets (e.g. 0.20 == 20%).
+        self.position_weight = position_weight if position_weight is not None else self._default_position_weight()
         # Per-stock bar cache: code -> (earliest loaded date, bars). Guarded by a lock
         # because the daily-valuation background task and analysis threads share it.
         self._bar_cache: Dict[str, Tuple[date, Dict[date, Dict[str, float]]]] = {}
         self._bar_cache_lock = threading.Lock()
+
+    @staticmethod
+    def _default_position_weight() -> float:
+        """Resolve the default position weight from config, falling back to the constant."""
+        try:
+            from src.config import Config
+
+            cfg = Config.get_instance()
+            weight = float(getattr(cfg, "paper_position_weight", POSITION_WEIGHT) or POSITION_WEIGHT)
+            return weight if 0 < weight <= 1.0 else POSITION_WEIGHT
+        except Exception:  # pragma: no cover - defensive fallback
+            return POSITION_WEIGHT
 
     # ------------------------------------------------------------------
     # Public API
@@ -252,7 +268,7 @@ class PaperService:
 
         position = self.paper_repo.get_open_position(account.id, code)
         total = self._net_value(account)
-        target_value = total * POSITION_WEIGHT
+        target_value = total * self.position_weight
         available_cash = max(float(account.cash or 0), 0.0)
 
         if position is None:
@@ -533,17 +549,30 @@ class PaperService:
         return date.today()
 
     @staticmethod
+    def _lot_size(market: Optional[str]) -> int:
+        """Board lot (整手) size per market.
+
+        A 股 (cn) 和港股 (hk) 按整手交易，取常见默认 100 股；港股的整手随个股而异
+        （100/500/1000…），这里用 100 作为保守近似。美股 (us) 无整手限制（可零股），
+        按 1 股逐股买入。其他市场同样按 1 股处理。
+        """
+        if market in ("cn", "hk"):
+            return 100
+        return 1
+
+    @staticmethod
     def _buy_quantity(target_value: float, price: float, market: Optional[str]) -> float:
         quantity = int(target_value / price) if price > 0 else 0
-        # A-share (cn) trades in lots of 100.
-        if market == "cn":
-            quantity = int(quantity / 100) * 100
+        lot = PaperService._lot_size(market)
+        if lot > 1:
+            quantity = int(quantity / lot) * lot
         return max(quantity, 0)
 
     @staticmethod
     def _round_lot(quantity: float, market: Optional[str]) -> float:
-        if market == "cn":
-            return max(int(quantity / 100) * 100, 0)
+        lot = PaperService._lot_size(market)
+        if lot > 1:
+            return max(int(quantity / lot) * lot, 0)
         return quantity
 
     def _entry_price(self, signal: DecisionSignalRecord, as_of: date) -> Optional[float]:

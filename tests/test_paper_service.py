@@ -296,6 +296,36 @@ def test_no_same_day_stop_out_on_entry(isolated_db, service):
     assert sell_trades and sell_trades[0]["reason"] == "stop_loss"
 
 
+def test_custom_position_weight(isolated_db):
+    # A custom position weight must resize the opened position proportionally.
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    service = PaperService(isolated_db, position_weight=0.5)
+
+    service.process_signal(sig.id)
+    account_id = service.get_or_create_account()["account_id"]
+    positions = service.get_positions(account_id)
+    open_pos = next(p for p in positions if p["status"] == "open")
+    # 50% of 1,000,000 / 100 = 5,000 shares (vs 2,000 at the default 20%).
+    assert open_pos["quantity"] == 5000
+
+
+def test_hk_lot_rounding(isolated_db, service):
+    # HK trades in board lots too (approximated as 100), not plain integer shares.
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "00700", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", code="00700", market="hk",
+                       entry_high=100.0, created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    service.process_signal(sig.id)
+    positions = service.get_positions(account_id)
+    open_pos = next(p for p in positions if p["status"] == "open")
+    assert open_pos["quantity"] == 2000  # 20% of 1e6 / 100, rounded to 100-lot
+    assert open_pos["quantity"] % 100 == 0
+
+
 def test_hold_signal_does_not_snapshot(isolated_db, service):
     # Dispositions that don't touch positions (hold/ignored) must not write a
     # redundant daily snapshot / pollute the equity curve.
