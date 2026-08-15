@@ -807,7 +807,16 @@ const StockScreeningPage: React.FC = () => {
     persistScreenFormPrefs({ market, strategy, maxResults });
   }, [market, strategy, maxResults]);
 
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    // Reset in setup: under React <StrictMode> dev double-mounting the cleanup
+    // runs once and useRef(true) never re-initializes, which would otherwise
+    // leave mountedRef.current === false and make async loads (loadStrategies,
+    // loadHotspots) silently skip their setState via the mountedRef guard.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [candidates, setCandidates] = useState<ScreeningCandidate[]>(restoredResult?.candidates ?? []);
   const [hotspots, setHotspots] = useState<ScreeningHotspot[]>([]);
   const [hotspotsUpdatedAt, setHotspotsUpdatedAt] = useState<string | null>(null);
