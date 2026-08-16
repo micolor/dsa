@@ -107,6 +107,10 @@ async function lookupWatchlistHistory(
   return results.filter((entry): entry is WatchlistHistoryLookupResult => entry !== undefined);
 }
 
+// 上海时区日期格式化在热路径（自选行 / 今日列表 memo 的逐条循环）中高频调用，
+// 复用在模块级缓存，避免每次调用都新建 Intl.DateTimeFormat（较重的一次性构造）。
+const SHANGHAI_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' });
+
 function getShanghaiDateKey(value?: string | null): string {
   if (!value) return '';
   const trimmed = value.trim();
@@ -115,7 +119,7 @@ function getShanghaiDateKey(value?: string | null): string {
     : trimmed;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(date);
+  return SHANGHAI_DATE_FORMATTER.format(date);
 }
 
 function getShanghaiTimeValue(value?: string | null): number {

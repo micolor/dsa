@@ -99,7 +99,7 @@ describe('AlertRuleForm', () => {
     fireEvent.change(screen.getByLabelText('标的代码'), { target: { value: 'msft' } });
     await selectByValue('规则类型', 'volume_spike');
     fireEvent.change(screen.getByLabelText('成交量放大倍数'), { target: { value: '2.5' } });
-    fireEvent.click(screen.getByLabelText('创建后立即启用'));
+    fireEvent.click(screen.getByLabelText('启用'));
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     await waitFor(() => {
@@ -236,6 +236,25 @@ describe('AlertRuleForm', () => {
         target: '9',
         alertType: 'portfolio_stop_loss',
         parameters: { mode: 'breach' },
+      }));
+    });
+  });
+
+  it('shows a config-driven hint for portfolio concentration and submits empty params', async () => {
+    render(<AlertRuleForm onSubmit={onSubmit} />);
+
+    await selectByValue('目标范围', 'portfolio_account');
+    await waitFor(() => expect(getAccounts).toHaveBeenCalledWith(false));
+    await selectByValue('规则类型', 'portfolio_concentration');
+    expect(screen.getByText(/风险模块配置控制/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        targetScope: 'portfolio_account',
+        target: 'all',
+        alertType: 'portfolio_concentration',
+        parameters: {},
       }));
     });
   });

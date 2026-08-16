@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useState } from 'react';
-import { Bell, Pencil, Trash2 } from 'lucide-react';
+import { Bell, FlaskConical, Pencil, Trash2 } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, EmptyState, Pagination, Select } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
@@ -22,7 +22,7 @@ import { formatDateTime } from '../../utils/format';
 
 export type AlertRuleEnabledFilter = 'all' | 'enabled' | 'disabled';
 export type AlertTypeFilter = 'all' | AlertType;
-export type AlertRuleBusyAction = 'test' | 'toggle' | 'delete';
+export type AlertRuleBusyAction = 'test' | 'delete';
 
 export interface AlertRuleBusyState {
   id: number;
@@ -66,15 +66,13 @@ function formatParameters(rule: AlertRuleItem, language: UiLanguage): string {
     return rule.parameters.mode === 'breach' ? directionLabels.stopLossBreach : directionLabels.stopLossNear;
   }
   if (rule.alertType === 'portfolio_concentration') {
-    const raw = rule.parameters as unknown as Record<string, unknown>;
-    const value = raw.top_weight_pct;
+    const value = rule.parameters.topWeightPct;
     return typeof value === 'number'
       ? `${ALERT_TYPE_LABELS[language].portfolio_concentration} ${value}%`
       : ALERT_TYPE_LABELS[language].portfolio_concentration;
   }
   if (rule.alertType === 'portfolio_drawdown') {
-    const raw = rule.parameters as unknown as Record<string, unknown>;
-    const value = raw.max_drawdown_pct;
+    const value = rule.parameters.maxDrawdownPct;
     return typeof value === 'number'
       ? `${ALERT_TYPE_LABELS[language].portfolio_drawdown} ${value}%`
       : ALERT_TYPE_LABELS[language].portfolio_drawdown;
@@ -117,7 +115,6 @@ interface AlertRuleListProps {
   onEnabledFilterChange: (value: AlertRuleEnabledFilter) => void;
   onAlertTypeFilterChange: (value: AlertTypeFilter) => void;
   onPageChange: (page: number) => void;
-  onToggleEnabled: (rule: AlertRuleItem) => void;
   onDelete: (rule: AlertRuleItem) => void;
   onTest: (rule: AlertRuleItem) => void;
   onEdit?: (rule: AlertRuleItem) => void;
@@ -137,7 +134,6 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
   onEnabledFilterChange,
   onAlertTypeFilterChange,
   onPageChange,
-  onToggleEnabled,
   onDelete,
   onTest,
   onEdit,
@@ -262,17 +258,8 @@ export const AlertRuleList: React.FC<AlertRuleListProps> = ({
                         loadingText={text.testing}
                         disabled={isRuleBusy(rule) && !isRuleActionBusy(rule, 'test')}
                       >
+                        <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
                         {text.test}
-                      </Button>
-                      <Button
-                        size="xsm"
-                        variant={rule.enabled ? 'secondary' : 'primary'}
-                        onClick={() => onToggleEnabled(rule)}
-                        isLoading={isRuleActionBusy(rule, 'toggle')}
-                        loadingText={rule.enabled ? text.disabling : text.enabling}
-                        disabled={isRuleBusy(rule) && !isRuleActionBusy(rule, 'toggle')}
-                      >
-                        {rule.enabled ? text.disable : text.enable}
                       </Button>
                       <Button
                         size="xsm"

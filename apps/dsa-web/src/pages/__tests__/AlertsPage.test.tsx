@@ -137,9 +137,32 @@ describe('AlertsPage', () => {
 
     await waitFor(() => expect(testRule).toHaveBeenCalledWith(1));
     expect(await screen.findByText('测试结果')).toBeInTheDocument();
-    expect(screen.getByText(/600519 price above 1800/)).toBeInTheDocument();
+    expect(screen.getByText('已触发')).toBeInTheDocument();
     expect(screen.getByText(/观察值：1801/)).toBeInTheDocument();
     expect(screen.queryByText(/realtime_quote/)).not.toBeInTheDocument();
+  });
+
+  it('explains when a dry-run target is skipped for missing realtime data', async () => {
+    testRule.mockResolvedValueOnce({
+      ruleId: 2,
+      targetScope: 'single_symbol',
+      status: 'not_triggered',
+      triggered: false,
+      observedValue: null,
+      message: 'Evaluated 1 targets: 0 triggered, 0 degraded, 1 skipped, 0 failed',
+      evaluatedCount: 1,
+      triggeredCount: 0,
+      degradedCount: 0,
+      skippedCount: 1,
+      targetResults: [],
+    });
+    render(<AlertsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试' }));
+
+    expect(await screen.findByText('未触发')).toBeInTheDocument();
+    expect(screen.getByText(/共评估 1 个目标：触发 0 · 降级 0 · 跳过 1/)).toBeInTheDocument();
+    expect(screen.getByText(/有 1 个目标因缺少实时行情数据被跳过/)).toBeInTheDocument();
   });
 
   it('renders batch dry-run summary and target results', async () => {
@@ -179,9 +202,9 @@ describe('AlertsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '测试' }));
 
-    expect(await screen.findByText(/评估 2 · 触发 1 · 降级 1 · 跳过 0/)).toBeInTheDocument();
+    expect(await screen.findByText(/共评估 2 个目标：触发 1 · 降级 1 · 跳过 0/)).toBeInTheDocument();
     expect(screen.getByText('自选股 - 600519')).toBeInTheDocument();
-    expect(screen.getByText(/not_triggered \/ degraded/)).toBeInTheDocument();
+    expect(screen.getByText(/未触发 \/ 降级/)).toBeInTheDocument();
   });
 
   it('creates a rule through the page form and reloads rules', async () => {

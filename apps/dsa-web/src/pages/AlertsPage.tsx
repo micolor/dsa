@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BellRing } from 'lucide-react';
+import { BellRing, X } from 'lucide-react';
 import { alertsApi } from '../api/alerts';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -15,11 +15,13 @@ import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
 import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import type {
+  AlertDryRunStatus,
   AlertNotificationItem,
   AlertRuleCreateRequest,
   AlertRuleItem,
   AlertRuleTestResponse,
   AlertTriggerItem,
+  AlertTriggerStatus,
   AlertType,
 } from '../types/alerts';
 import { formatDateTime } from '../utils/format';
@@ -41,22 +43,46 @@ function testVariant(result: AlertRuleTestResponse): 'success' | 'warning' | 'da
   return result.triggered ? 'success' : 'warning';
 }
 
+/** 试跑整体状态码 → 中文标签（not_triggered 只是「未触发」，不代表数据完整）。 */
+function formatDryRunStatus(status: AlertDryRunStatus): string {
+  switch (status) {
+    case 'triggered': return '已触发';
+    case 'not_triggered': return '未触发';
+    case 'evaluation_error': return '求值出错';
+    default: return status;
+  }
+}
+
+/** 目标级记录状态码 → 中文标签（skipped = 缺数据跳过，不是求值失败）。 */
+function formatRecordStatus(status: AlertTriggerStatus | null | undefined): string {
+  switch (status) {
+    case 'triggered': return '已触发';
+    case 'skipped': return '已跳过';
+    case 'degraded': return '降级';
+    case 'failed': return '失败';
+    default: return '';
+  }
+}
+
 function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode {
   const targetResults = result.targetResults ?? [];
+  const hasCounts = typeof result.evaluatedCount === 'number';
+  const skippedCount = result.skippedCount ?? 0;
   return (
     <div className="space-y-2">
-      <div>
-        {result.message}
-        {' · 状态：'}
-        {result.status}
-        {' · 触发：'}
-        {result.triggered ? '是' : '否'}
-        {' · 观察值：'}
-        {result.observedValue == null ? '--' : String(result.observedValue)}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="font-medium">{formatDryRunStatus(result.status)}</span>
+        <span className="text-secondary-text">触发：{result.triggered ? '是' : '否'}</span>
+        <span className="text-secondary-text">观察值：{result.observedValue == null ? '--' : String(result.observedValue)}</span>
       </div>
-      {result.evaluatedCount != null && result.evaluatedCount > 1 ? (
-        <div className="text-xs">
-          评估 {result.evaluatedCount} · 触发 {result.triggeredCount ?? 0} · 降级 {result.degradedCount ?? 0} · 跳过 {result.skippedCount ?? 0}
+      {hasCounts ? (
+        <div className="text-xs text-secondary-text">
+          共评估 {result.evaluatedCount} 个目标：触发 {result.triggeredCount ?? 0} · 降级 {result.degradedCount ?? 0} · 跳过 {skippedCount}
+        </div>
+      ) : null}
+      {skippedCount > 0 ? (
+        <div className="rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
+          有 {skippedCount} 个目标因缺少实时行情数据被跳过，未能参与判断——这不代表「未触发」，常见于非交易时段、停牌或实时报价缺失时。
         </div>
       ) : null}
       {targetResults.length > 1 ? (
@@ -65,8 +91,8 @@ function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode
             <div key={`${item.target}-${item.status}`} className="flex flex-wrap justify-between gap-2">
               <span>{item.displayTarget ?? item.target}</span>
               <span>
-                {item.status}
-                {item.recordStatus ? ` / ${item.recordStatus}` : ''}
+                {formatDryRunStatus(item.status)}
+                {item.recordStatus ? ` / ${formatRecordStatus(item.recordStatus)}` : ''}
               </span>
             </div>
           ))}
@@ -137,6 +163,23 @@ const AlertsPage: React.FC = () => {
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
   const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
   const rulesRequestIdRef = useRef(0);
+  const triggersRequestIdRef = useRef(0);
+  const notificationsRequestIdRef = useRef(0);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // 测试结果为右上角 toast，几秒后自动消失。
+  useEffect(() => {
+    if (!testResult) return;
+    const timer = window.setTimeout(() => setTestResult(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [testResult]);
 
   const loadRules = useCallback(async (pageOverride?: number) => {
     const requestId = rulesRequestIdRef.current + 1;
@@ -151,12 +194,12 @@ const AlertsPage: React.FC = () => {
     setRulesLoading(true);
     try {
       let response = await alertsApi.listRules({ ...baseQuery, page: requestedPage });
-      if (!isLatestRequest()) return null;
+      if (!mountedRef.current || !isLatestRequest()) return null;
       const lastPage = Math.max(1, Math.ceil(response.total / PAGE_SIZE));
       if (response.items.length === 0 && response.total > 0 && requestedPage > lastPage) {
         setRulesPage(lastPage);
         response = await alertsApi.listRules({ ...baseQuery, page: lastPage });
-        if (!isLatestRequest()) return null;
+        if (!mountedRef.current || !isLatestRequest()) return null;
       } else if (pageOverride !== undefined && pageOverride !== rulesPage) {
         setRulesPage(pageOverride);
       }
@@ -166,39 +209,53 @@ const AlertsPage: React.FC = () => {
       setRulesLoaded(true);
       return response;
     } catch (error) {
-      if (!isLatestRequest()) return null;
+      if (!mountedRef.current || !isLatestRequest()) return null;
       setRulesError(getParsedApiError(error));
       return null;
     } finally {
-      if (isLatestRequest()) {
+      if (mountedRef.current && isLatestRequest()) {
         setRulesLoading(false);
       }
     }
   }, [alertTypeFilter, enabledFilter, rulesPage]);
 
   const loadTriggers = useCallback(async () => {
+    const requestId = triggersRequestIdRef.current + 1;
+    triggersRequestIdRef.current = requestId;
+    const isLatestRequest = () => triggersRequestIdRef.current === requestId;
     setTriggersLoading(true);
     try {
       const response = await alertsApi.listTriggers({ page: 1, pageSize: PAGE_SIZE });
+      if (!mountedRef.current || !isLatestRequest()) return;
       setTriggers(response.items);
       setTriggersError(null);
     } catch (error) {
+      if (!mountedRef.current || !isLatestRequest()) return;
       setTriggersError(getParsedApiError(error));
     } finally {
-      setTriggersLoading(false);
+      if (mountedRef.current && isLatestRequest()) {
+        setTriggersLoading(false);
+      }
     }
   }, []);
 
   const loadNotifications = useCallback(async () => {
+    const requestId = notificationsRequestIdRef.current + 1;
+    notificationsRequestIdRef.current = requestId;
+    const isLatestRequest = () => notificationsRequestIdRef.current === requestId;
     setNotificationsLoading(true);
     try {
       const response = await alertsApi.listNotifications({ page: 1, pageSize: PAGE_SIZE });
+      if (!mountedRef.current || !isLatestRequest()) return;
       setNotifications(response.items);
       setNotificationsError(null);
     } catch (error) {
+      if (!mountedRef.current || !isLatestRequest()) return;
       setNotificationsError(getParsedApiError(error));
     } finally {
-      setNotificationsLoading(false);
+      if (mountedRef.current && isLatestRequest()) {
+        setNotificationsLoading(false);
+      }
     }
   }, []);
 
@@ -240,22 +297,6 @@ const AlertsPage: React.FC = () => {
     setCreateOpen(true);
   };
 
-  const handleToggleEnabled = async (rule: AlertRuleItem) => {
-    setBusyRule({ id: rule.id, action: 'toggle' });
-    try {
-      if (rule.enabled) {
-        await alertsApi.disableRule(rule.id);
-      } else {
-        await alertsApi.enableRule(rule.id);
-      }
-      await loadRules();
-    } catch (error) {
-      setRulesError(getParsedApiError(error));
-    } finally {
-      setBusyRule(null);
-    }
-  };
-
   const handleDeleteRule = async (rule: AlertRuleItem) => {
     setBusyRule({ id: rule.id, action: 'delete' });
     try {
@@ -285,15 +326,42 @@ const AlertsPage: React.FC = () => {
     <AppPage className="space-y-5">
       {createSuccess ? (
         <InlineAlert
+          elevated
           title="创建成功"
           message={createSuccess}
           variant="success"
           action={(
-            <button type="button" className="text-sm underline" onClick={() => setCreateSuccess(null)}>
-              关闭
+            <button
+              type="button"
+              onClick={() => setCreateSuccess(null)}
+              className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+              aria-label="关闭"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
         />
+      ) : null}
+      {testResult ? (
+        <div className="pointer-events-none fixed right-5 top-5 z-50 w-[360px] max-w-[calc(100vw-24px)]">
+          <InlineAlert
+            elevated
+            title="测试结果"
+            variant={testVariant(testResult)}
+            message={renderTestResultMessage(testResult)}
+            className="pointer-events-auto"
+            action={(
+              <button
+                type="button"
+                onClick={() => setTestResult(null)}
+                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          />
+        </div>
       ) : null}
       <div className="flex min-h-full flex-col gap-4">
         <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
@@ -336,7 +404,6 @@ const AlertsPage: React.FC = () => {
                 setRulesPage(1);
               }}
               onPageChange={setRulesPage}
-              onToggleEnabled={(rule) => void handleToggleEnabled(rule)}
               onDelete={(rule) => void handleDeleteRule(rule)}
               onTest={(rule) => void handleTestRule(rule)}
               onEdit={handleEditRule}
@@ -346,13 +413,6 @@ const AlertsPage: React.FC = () => {
               }}
               busyRule={busyRule}
             />
-            {testResult ? (
-              <InlineAlert
-                title="测试结果"
-                variant={testVariant(testResult)}
-                message={renderTestResultMessage(testResult)}
-              />
-            ) : null}
           </>
         ) : null}
 

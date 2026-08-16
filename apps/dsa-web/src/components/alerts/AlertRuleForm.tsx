@@ -789,6 +789,10 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
           />
         ) : null}
 
+        {alertType === 'portfolio_concentration' || alertType === 'portfolio_drawdown' || alertType === 'portfolio_price_stale' ? (
+          <p className="text-xs text-secondary-text">{text.configDrivenPortfolioHint}</p>
+        ) : null}
+
         {alertType === 'market_light_status' ? (
           <div className="space-y-2">
             <div className="text-sm font-medium text-foreground">{text.triggerStatus}</div>

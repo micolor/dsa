@@ -56,7 +56,6 @@ describe('AlertRuleList', () => {
   const onEnabledFilterChange = vi.fn();
   const onAlertTypeFilterChange = vi.fn();
   const onPageChange = vi.fn();
-  const onToggleEnabled = vi.fn();
   const onDelete = vi.fn();
   const onTest = vi.fn();
 
@@ -77,7 +76,6 @@ describe('AlertRuleList', () => {
         onEnabledFilterChange={onEnabledFilterChange}
         onAlertTypeFilterChange={onAlertTypeFilterChange}
         onPageChange={onPageChange}
-        onToggleEnabled={onToggleEnabled}
         onDelete={onDelete}
         onTest={onTest}
         {...overrides}
@@ -99,7 +97,6 @@ describe('AlertRuleList', () => {
           onEnabledFilterChange={onEnabledFilterChange}
           onAlertTypeFilterChange={onAlertTypeFilterChange}
           onPageChange={onPageChange}
-          onToggleEnabled={onToggleEnabled}
           onDelete={onDelete}
           onTest={onTest}
           {...overrides}
@@ -221,6 +218,40 @@ describe('AlertRuleList', () => {
     expect(screen.queryByText('组合回撤')).not.toBeInTheDocument();
   });
 
+  it('shows the concentration/drawdown threshold value from camelCase parameters', () => {
+    renderList({
+      rules: [
+        {
+          id: 9,
+          name: '集中度规则',
+          targetScope: 'portfolio_account',
+          target: 'all',
+          alertType: 'portfolio_concentration',
+          parameters: { topWeightPct: 45 },
+          severity: 'warning',
+          enabled: true,
+          source: 'api',
+          cooldownActive: false,
+        },
+        {
+          id: 10,
+          name: '回撤规则',
+          targetScope: 'portfolio_account',
+          target: 'all',
+          alertType: 'portfolio_drawdown',
+          parameters: { maxDrawdownPct: 15 },
+          severity: 'warning',
+          enabled: true,
+          source: 'api',
+          cooldownActive: false,
+        },
+      ],
+    });
+
+    expect(screen.getByText('组合集中度 45%')).toBeInTheDocument();
+    expect(screen.getByText('组合回撤 15%')).toBeInTheDocument();
+  });
+
   it('renders market scope labels, filters, and parameters', async () => {
     renderList({
       rules: [
@@ -263,22 +294,19 @@ describe('AlertRuleList', () => {
     expect(onAlertTypeFilterChange).toHaveBeenCalledWith('market_light_score_drop');
   });
 
-  it('runs test and toggles enabled state', () => {
+  it('runs the test action', () => {
     renderList();
 
     fireEvent.click(screen.getAllByRole('button', { name: '测试' })[0]);
-    fireEvent.click(screen.getAllByRole('button', { name: '停用' })[0]);
 
     expect(onTest).toHaveBeenCalledWith(rules[0]);
-    expect(onToggleEnabled).toHaveBeenCalledWith(rules[0]);
   });
 
   it('shows loading text only for the active rule operation', () => {
-    renderList({ busyRule: { id: 1, action: 'toggle' } });
+    renderList({ busyRule: { id: 1, action: 'test' } });
 
-    expect(screen.getAllByRole('button', { name: '测试' })[0]).toBeDisabled();
-    expect(screen.getByRole('button', { name: '停用中' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.queryByRole('button', { name: '测试中' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '测试中' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByLabelText('删除 茅台价格突破')).toBeDisabled();
   });
 
   it('confirms deletion before calling onDelete', async () => {

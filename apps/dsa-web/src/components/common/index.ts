@@ -31,6 +31,6 @@ export * from './ConfirmDialog';
 export * from '../layout/Shell';
 export * from '../layout/SidebarNav';
 export * from '../theme/ThemeProvider';
-export * from '../theme/ThemeToggle';
+export * from '../theme/ThemeTabs';
 export * from './ParticleBackground';
 export * from './SentimentBadge';
