@@ -240,4 +240,27 @@ describe('NotificationTestPanel', () => {
     expect(screen.getByText('https://qyapi.example.com/cgi-bin/webhook/send?key=***')).toBeInTheDocument();
     expect(timeoutEntries[0]).toHaveClass('text-warning');
   });
+
+  it('reflects a controlled channel and reports channel changes to the parent', async () => {
+    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, 'zh');
+    const onChannelChange = vi.fn();
+
+    render(
+      <NotificationTestPanel
+        items={[{ key: 'WECHAT_WEBHOOK_URL', value: 'https://qyapi.example.com/cgi-bin/webhook/send?key=secret' }]}
+        maskToken="******"
+        channel="feishu"
+        onChannelChange={onChannelChange}
+      />,
+    );
+
+    // 受控 channel 使下拉展示父组件传入的渠道
+    const channelTrigger = screen.getByLabelText('渠道');
+    expect(channelTrigger).toHaveTextContent('飞书');
+
+    // 用户更改渠道 → 回调父组件（而非内部状态）
+    fireEvent.click(channelTrigger);
+    fireEvent.click(await screen.findByRole('option', { name: '钉钉' }));
+    expect(onChannelChange).toHaveBeenCalledWith('dingtalk');
+  });
 });

@@ -271,15 +271,18 @@ vi.mock('../../components/settings', () => ({
   SettingsSectionCard: ({
     title,
     description,
+    actions,
     children,
   }: {
     title: string;
     description?: string;
+    actions?: React.ReactNode;
     children: React.ReactNode;
   }) => (
     <section>
       <h2>{title}</h2>
       {description ? <p>{description}</p> : null}
+      {actions}
       {children}
     </section>
   ),
@@ -2310,13 +2313,18 @@ describe('SettingsPage', () => {
     expect(screen.queryByTestId('settings-field-LLM_MY_PROXY_MODELS')).not.toBeInTheDocument();
   });
 
-  it('renders notification test panel before notification fields', () => {
+  it('opens notification test panel in a dialog via the test button', async () => {
     useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'notification' }));
 
     render(<SettingsPage />);
 
-    expect(screen.getByText('通知测试面板:WECHAT_WEBHOOK_URL')).toBeInTheDocument();
+    // 默认内联不渲染测试面板，需点击「测试」按钮弹框
+    expect(screen.queryByText(/通知测试面板:/)).not.toBeInTheDocument();
     expect(screen.getByText('WECHAT_WEBHOOK_URL')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /测试/ }));
+
+    expect(await screen.findByText('通知测试面板:WECHAT_WEBHOOK_URL')).toBeInTheDocument();
     expect(settingsPanelErrorBoundary).toHaveBeenCalledWith('通知测试');
     expect(settingsPanelErrorBoundary).toHaveBeenCalledWith('通知设置');
   });
@@ -2625,5 +2633,58 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '重启安装' }));
 
     await waitFor(() => expect(desktopInstallDownloadedUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it('filters notification fields by the selected channel and separates general/report into its own section', async () => {
+    const notificationItem = (key: string) => ({
+      key,
+      value: `v-${key}`,
+      rawValueExists: true,
+      isMasked: false,
+      schema: {
+        key,
+        category: 'notification',
+        dataType: 'string',
+        uiControl: 'text',
+        isSensitive: false,
+        isRequired: false,
+        isEditable: true,
+        options: [],
+        validation: {},
+        displayOrder: 99,
+      },
+    });
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'notification',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        notification: [
+          ...buildSystemConfigState().itemsByCategory.notification,
+          notificationItem('FEISHU_APP_ID'),
+          notificationItem('FEISHU_CHAT_ID'),
+          notificationItem('NOTIFICATION_DEDUP_TTL_SECONDS'),
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    // 默认自动选中「当前使用」渠道：feishu 配置字段最多（2）> wechat（1），故默认显示飞书字段、企微隐藏
+    expect(await screen.findByText('FEISHU_APP_ID')).toBeInTheDocument();
+    expect(screen.queryByText('WECHAT_WEBHOOK_URL')).not.toBeInTheDocument();
+
+    // 通用/报告字段不属于渠道，始终在「通用 / 报告」分区展示（与所选渠道无关）
+    expect(screen.getByText('通用 / 报告')).toBeInTheDocument();
+    expect(screen.getByText('NOTIFICATION_DEDUP_TTL_SECONDS')).toBeInTheDocument();
+
+    // 渠道下拉不再提供「全部渠道」，只有具体渠道
+    fireEvent.click(screen.getByLabelText('通知渠道'));
+    expect(screen.queryByRole('option', { name: '全部渠道' })).not.toBeInTheDocument();
+
+    // 选「企业微信」→ 只剩企微字段，飞书隐藏；通用字段仍展示
+    fireEvent.click(await screen.findByRole('option', { name: '企业微信' }));
+    expect(screen.getByText('WECHAT_WEBHOOK_URL')).toBeInTheDocument();
+    expect(screen.queryByText('FEISHU_APP_ID')).not.toBeInTheDocument();
+    expect(screen.getByText('NOTIFICATION_DEDUP_TTL_SECONDS')).toBeInTheDocument();
   });
 });

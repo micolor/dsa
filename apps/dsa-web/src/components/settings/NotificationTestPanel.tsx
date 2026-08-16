@@ -10,31 +10,22 @@ import type {
   SystemConfigUpdateItem,
 } from '../../types/systemConfig';
 import { ApiErrorAlert, Badge, Button, InlineAlert, Input, Select } from '../common';
-import { SettingsSectionCard } from './SettingsSectionCard';
+import { NOTIFICATION_CHANNEL_OPTIONS } from './notificationChannels';
 
 function getChannelOptions(language: 'zh' | 'en'): Array<{ value: NotificationTestChannel; label: string }> {
-  return [
-    { value: 'wechat', label: language === 'en' ? 'WeCom' : '企业微信' },
-    { value: 'feishu', label: language === 'en' ? 'Feishu Webhook' : '飞书 Webhook' },
-    { value: 'dingtalk', label: language === 'en' ? 'DingTalk' : '钉钉' },
-    { value: 'telegram', label: 'Telegram' },
-    { value: 'email', label: language === 'en' ? 'Email' : '邮件' },
-    { value: 'pushover', label: 'Pushover' },
-    { value: 'ntfy', label: 'ntfy' },
-    { value: 'gotify', label: 'Gotify' },
-    { value: 'pushplus', label: 'PushPlus' },
-    { value: 'serverchan3', label: 'ServerChan3' },
-    { value: 'custom', label: language === 'en' ? 'Custom Webhook' : '自定义 Webhook' },
-    { value: 'discord', label: 'Discord' },
-    { value: 'slack', label: 'Slack' },
-    { value: 'astrbot', label: 'AstrBot' },
-  ];
+  return NOTIFICATION_CHANNEL_OPTIONS.map(({ value, labelZh, labelEn }) => ({
+    value,
+    label: language === 'en' ? labelEn : labelZh,
+  }));
 }
 
 interface NotificationTestPanelProps {
   items: SystemConfigUpdateItem[];
   maskToken: string;
   disabled?: boolean;
+  /** 受控渠道（可选）。传入后由父组件统一驱动「通知分类」顶部渠道筛选与测试渠道；不传则使用内部状态（独立用法）。 */
+  channel?: NotificationTestChannel;
+  onChannelChange?: (channel: NotificationTestChannel) => void;
 }
 
 function clampTimeout(value: string): number {
@@ -47,9 +38,20 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
   items,
   maskToken,
   disabled = false,
+  channel: controlledChannel,
+  onChannelChange,
 }) => {
   const { language, t } = useUiLanguage();
-  const [channel, setChannel] = useState<NotificationTestChannel>('wechat');
+  const [internalChannel, setInternalChannel] = useState<NotificationTestChannel>('wechat');
+  const isChannelControlled = controlledChannel !== undefined;
+  const channel = isChannelControlled ? controlledChannel : internalChannel;
+  const handleChannelChange = (value: NotificationTestChannel) => {
+    if (isChannelControlled) {
+      onChannelChange?.(value);
+    } else {
+      setInternalChannel(value);
+    }
+  };
   const [title, setTitle] = useState(t('settings.notificationTestTitleValue'));
   const [content, setContent] = useState(t('settings.notificationTestContent'));
   const [timeoutSeconds, setTimeoutSeconds] = useState('20');
@@ -95,31 +97,14 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
   };
 
   return (
-    <SettingsSectionCard
-      title={t('settings.notificationTest')}
-      description={t('settings.notificationTestDescription')}
-      actions={(
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          onClick={() => void runTest()}
-          disabled={disabled || isTesting}
-          isLoading={isTesting}
-          loadingText={t('settings.notificationTesting')}
-        >
-          <Send className="h-4 w-4" />
-          {t('settings.notificationTestSend')}
-        </Button>
-      )}
-    >
+    <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_120px]">
         <Select
           label={t('settings.notificationTestChannel')}
           value={channel}
           options={getChannelOptions(language)}
           disabled={disabled || isTesting}
-          onChange={(value) => setChannel(value as NotificationTestChannel)}
+          onChange={(value) => handleChannelChange(value as NotificationTestChannel)}
         />
         <Input
           label={t('settings.notificationTestTitle')}
@@ -157,6 +142,21 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
           className="input-surface input-focus-glow min-h-[112px] w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-sm leading-6 text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
       </label>
+
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={() => void runTest()}
+          disabled={disabled || isTesting}
+          isLoading={isTesting}
+          loadingText={t('settings.notificationTesting')}
+        >
+          <Send className="h-4 w-4" />
+          {t('settings.notificationTestSend')}
+        </Button>
+      </div>
 
       {error ? <ApiErrorAlert error={error} /> : null}
 
@@ -214,6 +214,6 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
           ) : null}
         </div>
       ) : null}
-    </SettingsSectionCard>
+    </div>
   );
 };

@@ -1,13 +1,15 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, FlaskConical, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, ConfirmDialog, EmptyState, InlineAlert, ToastViewport } from '../components/common';
+import { ApiErrorAlert, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Select, ToastViewport } from '../components/common';
+import { UiLanguageToggle } from '../components/i18n/UiLanguageToggle';
+import { ThemeTabs } from '../components/theme/ThemeTabs';
 import {
   AgentBackendStatusPanel,
   AuthSettingsCard,
@@ -23,11 +25,13 @@ import {
   SettingsPanelErrorBoundary,
   SettingsSectionCard,
 } from '../components/settings';
+import { NOTIFICATION_CHANNEL_OPTIONS } from '../components/settings/notificationChannels';
 import { WEB_BUILD_INFO } from '../utils/constants';
 import { parseStockListValue } from '../utils/stockList';
 import { getCategoryDescription, getCategoryTitle } from '../utils/systemConfigI18n';
 import type {
   ConfigValidationIssue,
+  NotificationTestChannel,
   SchedulerStatusResponse,
   SetupStatusCheck,
   SetupStatusResponse,
@@ -36,6 +40,74 @@ import type {
   SystemConfigUpdateItem,
 } from '../types/systemConfig';
 import type { UiLanguage, UiTextKey } from '../i18n/uiText';
+
+// 通知分类下各渠道对应的配置字段。字段 key 取自后端 config_registry 的
+// category="notification" 字段；「全部」之外未命中任何渠道分组的字段会兜底到
+// general（通用/报告），避免字段在按渠道筛选时丢失。
+const NOTIFICATION_CHANNEL_FIELDS: Record<string, Set<string>> = {
+  feishu: new Set([
+    'FEISHU_WEBHOOK_URL',
+    'FEISHU_WEBHOOK_SECRET',
+    'FEISHU_WEBHOOK_KEYWORD',
+    'FEISHU_APP_ID',
+    'FEISHU_APP_SECRET',
+    'FEISHU_STREAM_ENABLED',
+    'FEISHU_CHAT_ID',
+    'FEISHU_RECEIVE_ID_TYPE',
+    'FEISHU_DOMAIN',
+  ]),
+  wechat: new Set(['WECHAT_WEBHOOK_URL']),
+  dingtalk: new Set([
+    'DINGTALK_APP_KEY',
+    'DINGTALK_APP_SECRET',
+    'DINGTALK_STREAM_ENABLED',
+    'DINGTALK_WEBHOOK_URL',
+    'DINGTALK_SECRET',
+  ]),
+  pushplus: new Set(['PUSHPLUS_TOKEN', 'PUSHPLUS_TOPIC']),
+  custom: new Set([
+    'CUSTOM_WEBHOOK_URLS',
+    'CUSTOM_WEBHOOK_BEARER_TOKEN',
+    'CUSTOM_WEBHOOK_BODY_TEMPLATE',
+    'WEBHOOK_VERIFY_SSL',
+  ]),
+  telegram: new Set(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_MESSAGE_THREAD_ID']),
+  email: new Set(['EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECEIVERS']),
+  discord: new Set([
+    'DISCORD_WEBHOOK_URL',
+    'DISCORD_BOT_TOKEN',
+    'DISCORD_MAIN_CHANNEL_ID',
+    'DISCORD_INTERACTIONS_PUBLIC_KEY',
+  ]),
+  slack: new Set(['SLACK_BOT_TOKEN', 'SLACK_CHANNEL_ID', 'SLACK_WEBHOOK_URL']),
+  pushover: new Set(['PUSHOVER_USER_KEY', 'PUSHOVER_API_TOKEN']),
+  ntfy: new Set(['NTFY_URL', 'NTFY_TOKEN']),
+  gotify: new Set(['GOTIFY_URL', 'GOTIFY_TOKEN']),
+  serverchan3: new Set(['SERVERCHAN3_SENDKEY']),
+  astrbot: new Set(['ASTRBOT_URL', 'ASTRBOT_TOKEN']),
+  general: new Set([
+    'SINGLE_STOCK_NOTIFY',
+    'REPORT_TYPE',
+    'REPORT_LANGUAGE',
+    'REPORT_TEMPLATES_DIR',
+    'REPORT_RENDERER_ENABLED',
+    'REPORT_INTEGRITY_ENABLED',
+    'REPORT_INTEGRITY_RETRY',
+    'REPORT_HISTORY_COMPARE_N',
+    'REPORT_SUMMARY_ONLY',
+    'REPORT_SHOW_LLM_MODEL',
+    'MERGE_EMAIL_NOTIFICATION',
+    'NOTIFICATION_REPORT_CHANNELS',
+    'NOTIFICATION_ALERT_CHANNELS',
+    'NOTIFICATION_SYSTEM_ERROR_CHANNELS',
+    'NOTIFICATION_DEDUP_TTL_SECONDS',
+    'NOTIFICATION_COOLDOWN_SECONDS',
+    'NOTIFICATION_QUIET_HOURS',
+    'NOTIFICATION_TIMEZONE',
+    'NOTIFICATION_MIN_SEVERITY',
+    'NOTIFICATION_DAILY_DIGEST_ENABLED',
+  ]),
+};
 
 type DesktopWindow = Window & {
   dsaDesktop?: {
@@ -879,6 +951,8 @@ const SettingsPage: React.FC = () => {
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [isCheckingDesktopUpdate, setIsCheckingDesktopUpdate] = useState(false);
   const [schedulerStatusRefreshToken, setSchedulerStatusRefreshToken] = useState(0);
+  const [activeNotificationChannel, setActiveNotificationChannel] = useState<string>('auto');
+  const [notificationTestOpen, setNotificationTestOpen] = useState(false);
   const [schedulerRuntimeEnabled, setSchedulerRuntimeEnabled] = useState<boolean | null>(null);
   const [schedulerOverrideFromUi, setSchedulerOverrideFromUi] = useState<boolean | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
@@ -929,6 +1003,12 @@ const SettingsPage: React.FC = () => {
     maskToken,
     llmModelProviders,
   } = useSystemConfig();
+
+  // 切换分类时重置通知渠道筛选与测试弹框，避免切走再切回时保留旧状态。
+  useEffect(() => {
+    setActiveNotificationChannel('auto');
+    setNotificationTestOpen(false);
+  }, [activeCategory]);
 
   const currentChangedItems = getChangedItems();
   const currentChangedItemsFingerprint = JSON.stringify(currentChangedItems);
@@ -1121,6 +1201,22 @@ const SettingsPage: React.FC = () => {
     'SCREENING_ENABLED',
   ]);
   const AGENT_HIDDEN_KEYS = new Set(['AGENT_GENERATION_BACKEND']);
+  // 通知渠道默认值：`activeNotificationChannel === 'auto'`（初始/切分类后）时，
+  // 自动选中第一个已配置了字段值的具体渠道，避免默认平铺 63 个字段；一个都没配置则回退到企业微信。
+  // 用户一旦选中具体渠道即短路，不再重复计算。
+  // 默认取「当前使用」渠道：已配置字段最多的具体渠道（更能代表当前在用的渠道）；全都没配置则回退企业微信。
+  const resolvedNotificationChannel =
+    activeNotificationChannel !== 'auto'
+      ? activeNotificationChannel
+      : NOTIFICATION_CHANNEL_OPTIONS
+          .map(({ value }) => ({
+            value,
+            configuredCount: [...(NOTIFICATION_CHANNEL_FIELDS[value] ?? new Set())].filter((key) =>
+              rawActiveItems.some((item) => item.key === key && String(item.value ?? '').trim() !== ''),
+            ).length,
+          }))
+          .sort((a, b) => b.configuredCount - a.configuredCount)[0]?.value ?? 'wechat';
+
   const activeItems =
     activeCategory === 'base'
       ? rawActiveItems.filter((item) => !BASE_HIDDEN_KEYS.has(item.key))
@@ -1138,14 +1234,21 @@ const SettingsPage: React.FC = () => {
         ? rawActiveItems.filter((item) => !SYSTEM_HIDDEN_KEYS.has(item.key))
       : activeCategory === 'agent'
         ? rawActiveItems.filter((item) => !AGENT_HIDDEN_KEYS.has(item.key))
+      : activeCategory === 'notification'
+        ? rawActiveItems.filter((item) => (NOTIFICATION_CHANNEL_FIELDS[resolvedNotificationChannel] ?? new Set()).has(item.key))
       : rawActiveItems;
+  // 通用 / 报告字段（`NOTIFICATION_*` 路由/去重/静默时段、`REPORT_*`、`SINGLE_STOCK_NOTIFY` 等）不属于任何具体渠道，
+  // 从渠道筛选里拆出来，始终在「通用 / 报告」独立分区展示。
+  const generalNotificationItems = activeCategory === 'notification'
+    ? rawActiveItems.filter((item) => NOTIFICATION_CHANNEL_FIELDS.general.has(item.key))
+    : [];
   const promptCacheAdvancedItems = activeCategory === 'ai_model'
     ? activeItems.filter(isPromptCacheAdvancedSetting)
     : [];
   const visibleActiveItems = activeCategory === 'ai_model'
     ? activeItems.filter((item) => !isPromptCacheAdvancedSetting(item))
     : activeItems;
-  const hasActiveConfigItems = visibleActiveItems.length > 0 || promptCacheAdvancedItems.length > 0;
+  const hasActiveConfigItems = visibleActiveItems.length > 0 || promptCacheAdvancedItems.length > 0 || generalNotificationItems.length > 0;
   const isEnvBackupAllowed = isDesktopRuntime || authEnabled;
   const envBackupActionDisabled = isLoading || isSaving || isExportingEnv || isImportingEnv || !isEnvBackupAllowed;
 
@@ -1425,11 +1528,41 @@ const SettingsPage: React.FC = () => {
     expected: 'single',
     actual: selectedAgentArch,
   };
+  // 「通知测试」面板只能测试具体渠道；共享下拉里的「全部渠道 / 通用·报告」不是可测试渠道，
+  // 此时让测试面板回退到其自身状态（不传受控 channel），仅当选中具体渠道时受控同步。
+  const notificationChannelIsConcrete =
+    activeCategory === 'notification' && resolvedNotificationChannel !== 'all' && resolvedNotificationChannel !== 'general';
   const activeConfigPanel = hasActiveConfigItems ? (
     <SettingsSectionCard
       title={activeCategoryTitle}
       description={activeCategoryDescription || t('settings.activePanelDescription')}
+      actions={activeCategory === 'notification' ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isSaving || isLoading}
+          onClick={() => setNotificationTestOpen(true)}
+        >
+          <FlaskConical className="h-4 w-4" aria-hidden="true" />
+          {uiLanguage === 'en' ? 'Test' : '测试'}
+        </Button>
+      ) : undefined}
     >
+      {activeCategory === 'notification' ? (
+        <div className="mb-4">
+          <Select
+            label={uiLanguage === 'en' ? 'Notification channel' : '通知渠道'}
+            value={resolvedNotificationChannel}
+            options={NOTIFICATION_CHANNEL_OPTIONS.map(({ value, labelZh, labelEn }) => ({
+              value,
+              label: uiLanguage === 'en' ? labelEn : labelZh,
+            }))}
+            onChange={(value) => setActiveNotificationChannel(value)}
+            disabled={isSaving}
+          />
+        </div>
+      ) : null}
       {visibleActiveItems.length ? (
         <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/60 bg-elevated">
           {visibleActiveItems.map((item) => {
@@ -1448,6 +1581,25 @@ const SettingsPage: React.FC = () => {
             );
           })}
         </div>
+      ) : null}
+      {generalNotificationItems.length ? (
+        <section className="mt-4">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">
+            {uiLanguage === 'en' ? 'General / Report' : '通用 / 报告'}
+          </h3>
+          <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/60 bg-elevated">
+            {generalNotificationItems.map((item) => (
+              <SettingsField
+                key={item.key}
+                item={item}
+                value={item.value}
+                disabled={isSaving}
+                onChange={setDraftValue}
+                issues={issueByKey[item.key] || []}
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
       {promptCacheAdvancedItems.length ? (
         <details className="group/prompt-cache overflow-hidden rounded-lg border border-border/60 bg-elevated transition-colors duration-200 hover:bg-hover">
@@ -1543,7 +1695,7 @@ const SettingsPage: React.FC = () => {
         <SettingsLoading />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="lg:sticky lg:top-4 lg:self-start">
+          <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-5.5rem)] lg:self-start">
             <SettingsCategoryNav
               categories={categories}
               itemsByCategory={itemsByCategory}
@@ -1553,6 +1705,33 @@ const SettingsPage: React.FC = () => {
           </aside>
 
           <section className="space-y-4">
+            {activeCategory === 'system' ? (
+              <SettingsSectionCard
+                title={t('settings.preferences')}
+                description={t('settings.preferencesDescription')}
+              >
+                <div data-testid="preferences-card" className="space-y-3">
+                  <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{t('settings.theme')}</p>
+                      <p className="mt-1 text-xs leading-6 text-muted-text">{t('settings.themeDescription')}</p>
+                    </div>
+                    <div className="shrink-0">
+                      <ThemeTabs />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{t('settings.language')}</p>
+                      <p className="mt-1 text-xs leading-6 text-muted-text">{t('settings.languageDescription')}</p>
+                    </div>
+                    <div className="shrink-0">
+                      <UiLanguageToggle />
+                    </div>
+                  </div>
+                </div>
+              </SettingsSectionCard>
+            ) : null}
             {shouldShowFirstRunSetup ? (
               <FirstRunSetupCard
                 status={setupStatus}
@@ -1833,11 +2012,23 @@ const SettingsPage: React.FC = () => {
                 resetKey={`notification-test:${configVersion}`}
                 diagnosticHint={settingsPanelDiagnosticHint}
               >
-                <NotificationTestPanel
-                  items={rawActiveItems.map((item) => ({ key: item.key, value: String(item.value ?? '') }))}
-                  maskToken={maskToken}
-                  disabled={isSaving || isLoading}
-                />
+                <Dialog
+                  isOpen={notificationTestOpen}
+                  onClose={() => setNotificationTestOpen(false)}
+                  title={t('settings.notificationTest')}
+                  ariaLabel={t('settings.notificationTest')}
+                  eyebrow={uiLanguage === 'en' ? 'Notification' : '通知'}
+                  widthClassName="sm:max-w-2xl"
+                  maxHeightClassName="max-h-[88vh]"
+                >
+                  <NotificationTestPanel
+                    items={rawActiveItems.map((item) => ({ key: item.key, value: String(item.value ?? '') }))}
+                    maskToken={maskToken}
+                    disabled={isSaving || isLoading}
+                    channel={notificationChannelIsConcrete ? (resolvedNotificationChannel as NotificationTestChannel) : undefined}
+                    onChannelChange={(c) => setActiveNotificationChannel(c)}
+                  />
+                </Dialog>
               </SettingsPanelErrorBoundary>
             ) : null}
             {activeCategory === 'agent' ? (
@@ -1879,7 +2070,23 @@ const SettingsPage: React.FC = () => {
       {toast ? (
         <ToastViewport>
           {toast.type === 'success'
-            ? <InlineAlert variant="success" title={t('settings.actionSuccess')} message={toast.message} className="pointer-events-auto" />
+            ? <InlineAlert
+                elevated
+                variant="success"
+                title={t('settings.actionSuccess')}
+                message={toast.message}
+                action={(
+                  <button
+                    type="button"
+                    onClick={clearToast}
+                    className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                    aria-label={t('common.close')}
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                )}
+                className="pointer-events-auto"
+              />
             : <ApiErrorAlert error={toast.error} className="pointer-events-auto" />}
         </ToastViewport>
       ) : null}

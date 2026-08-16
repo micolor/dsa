@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type React from 'react';
 import { Bell, Bot, Database, Layers3, LineChart, Settings2, SlidersHorizontal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -31,10 +32,25 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
   onSelect,
 }) => {
   const { language, t } = useUiLanguage();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // 当选中分类变化时，把左侧菜单里的当前项滚动进可视区（横向、纵向溢出时均适用）。
+  useEffect(() => {
+    const container = scrollRef.current;
+    const active = container?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!container || !active) return;
+    const containerRect = container.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    if (activeRect.top < containerRect.top) {
+      container.scrollTop += activeRect.top - containerRect.top;
+    } else if (activeRect.bottom > containerRect.bottom) {
+      container.scrollTop += activeRect.bottom - containerRect.bottom;
+    }
+  }, [activeCategory]);
 
   return (
     <nav
-      className="h-full glass-card !border-transparent p-2"
+      className="flex h-full flex-col glass-card !border-transparent p-2"
       aria-label={t('settings.categoryNavTitle')}
     >
       <div className="hidden px-2 pb-3 pt-2 lg:block">
@@ -42,7 +58,10 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
         <p className="mt-1 text-[11px] leading-relaxed text-muted-text">{t('settings.categoryNavDescription')}</p>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-1.5 lg:overflow-visible lg:pb-0">
+      <div
+        ref={scrollRef}
+        className="flex gap-2 overflow-x-auto pb-1 lg:block lg:min-h-0 lg:flex-1 lg:space-y-1.5 lg:overflow-y-auto lg:pb-0"
+      >
         {categories.map((category) => {
           const isActive = category.category === activeCategory;
           const count = (itemsByCategory[category.category] || []).length;
