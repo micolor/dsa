@@ -9,6 +9,8 @@ import {
   type ParsedApiError,
 } from '../api/error';
 import { generateUUID } from '../utils/uuid';
+import { toCamelCase } from '../api/utils';
+import type { AlertProposal, AlertRuleCreateRequest } from '../types/alerts';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
@@ -50,6 +52,8 @@ export interface Message {
   skillName?: string;
   thinkingSteps?: ProgressStep[];
   backend?: string;
+  /** Alert rule proposed by the assistant, pending user confirmation. */
+  alertProposal?: AlertProposal;
 }
 
 export interface StreamMeta {
@@ -368,6 +372,9 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       let receivedDoneEvent = false;
       let acceptedEvent: StreamAcceptedEvent | null = null;
       const currentProgressSteps: ProgressStep[] = [];
+      // Alert proposal surfaced via an alert_proposal event; attached to the
+      // committed assistant message at done so we avoid mid-stream mutation races.
+      let pendingAlertProposal: AlertProposal | undefined;
       // Streaming text accumulation. content_delta events append here and the
       // assistant message is updated on a ~40ms throttle to avoid re-rendering
       // the full Markdown on every token.
@@ -504,6 +511,18 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           );
         }
 
+        if (event.type === 'alert_proposal') {
+          const proposal = (event as { proposal?: unknown }).proposal;
+          const summary = (event as { summary?: unknown }).summary;
+          if (proposal && typeof summary === 'string') {
+            pendingAlertProposal = {
+              payload: toCamelCase<AlertRuleCreateRequest>(proposal),
+              summary,
+            };
+          }
+          return;
+        }
+
         currentProgressSteps.push(event);
         const { progressSteps: liveSteps } = get();
         const nextSteps =
@@ -571,6 +590,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 content: committedContent,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
+                alertProposal: pendingAlertProposal,
               };
               return { messages };
             }
@@ -590,6 +610,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 skillName,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
+                alertProposal: pendingAlertProposal,
               },
             ],
           }));

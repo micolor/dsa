@@ -9,8 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 问股支持生成告警提案：AI 识别到值得监控的价格上穿/下穿、涨跌幅、成交量异动或技术指标（均线/RSI/MACD/KDJ/CCI）信号时，在对话中提出「告警提案」卡片，用户确认后才真正创建告警规则（复用现有 `POST /api/v1/alerts/rules` 校验/权限/通知链路），取消则丢弃
 - [修复] 设置中心左侧分类菜单滚动联动：此前左侧菜单被 sticky 固定且无内部滚动，分类较多时底部项被裁出视口，必须把右侧滚动到底才够得着；现左侧菜单限制在视口高度内独立纵向滚动，切换分类时自动把当前选中项滚动进可视区
 - [改进] 设置中心「通知」分类新增渠道筛选器：顶部提供渠道下拉（企业微信 / 飞书 / 钉钉 / PushPlus / 自定义 Webhook / Telegram / 邮件 / Discord / Slack / Pushover / ntfy / Gotify / ServerChan3 / AstrBot，不再提供「全部渠道」），选中某渠道只显示该渠道的配置字段；默认自动选中「当前使用」渠道（已配置字段最多的具体渠道，无配置则回退企业微信），避免一进来就平铺 63 个字段；通用与报告选项（`NOTIFICATION_*` 路由 / 去重 / 静默时段、`REPORT_*`、`SINGLE_STOCK_NOTIFY` 等）不属于任何具体渠道，从渠道下拉中拆出，始终在下方独立「通用 / 报告」分区展示，不受渠道筛选影响；此渠道下拉同时驱动「通知测试」面板的测试渠道（共享同一选择），避免两处渠道选择不一致；渠道选项抽到 `notificationChannels.ts` 单一真源，设置页筛选与测试面板下拉的 value、顺序、中英文 label 完全统一；此前 63 个通知字段平铺在一长串里难以定位目标渠道，现按字段前缀归组；纯前端展示过滤，不改保存 / 刷新 / 诊断语义。同时「通知测试」面板改为点「测试」按钮在弹窗中打开（不再内联常驻），由通知分类顶部同一渠道下拉驱动测试渠道
+- [改进] 设置页「偏好设置」卡片（主题 / 语言）改为仅在「系统设置」分类下显示：此前该卡片在任何分类下都常驻渲染，与系统设置分类下的其他系统级卡片（鉴权、调度、版本信息）门控方式不一致；现统一为 `activeCategory === 'system'` 时渲染，选中「系统设置」分类即可看到主题与语言切换
+- [改进] 告警规则列表「测试」按钮新增试管制图标（`FlaskConical`），与「编辑」「删除」图标保持一致，图标 `aria-hidden` 不影响按钮可访问名
+- [改进] 告警中心「测试结果」提示更明确：试跑状态由原始状态码改为中文标签（已触发/未触发/求值出错），单目标与多目标统一展示「共评估 N 个目标：触发 · 降级 · 跳过」统计；当有目标因缺少实时行情被跳过时，新增警示说明「这不代表未触发，常见于非交易时段、停牌或实时报价缺失」，目标级记录状态（已触发/已跳过/降级/失败）同步用中文呈现
+- [改进] 首页上海时区日期格式化复用模块级 `Intl.DateTimeFormat` 缓存：`getShanghaiDateKey` 在自选行 / 今日列表 memo 的逐条循环中被高频调用，此前每次调用都新建格式化器（较重的一次性构造），现复用在模块级常量，行为不变
+- [改进] 告警规则列表移除「操作」列的停用/启用切换按钮：启停状态改为在编辑规则对话框内通过「启用」开关调整（编辑/新建表单的开关标签由「创建后立即启用」简化为「启用」），列表仅保留编辑/测试/删除操作；相关 `onToggleEnabled` 回调与后端 `enable`/`disable` 调用随之从列表与页面移除，测试同步更新
+- [改进] Toast 弹框改为 iPhone 液态玻璃（Liquid Glass）质感并可读性增强：设置页、对话页与告警中心（创建成功 / 测试结果）的 toast 不再使用半透明色块（`bg-*/10`），改用中性磨砂玻璃表面（70% 不透明 + `backdrop-blur-2xl` + `backdrop-saturate-150`）+ 顶部 specular 高光线 + 表面顶部渐变反光 + 深柔投影，状态由彩色文字表达；关闭按钮由文字字符改为 lucide `X` 小图标（设置页 toast 新增关闭按钮）
+- [改进] 界面主题与语言切换从左侧导航菜单移入设置页「偏好设置」分类：侧边栏不再渲染主题/语言入口，改为设置页常驻的「偏好设置」卡片，每项含说明文案；主题改为横向分段 Tab 控件（浅色/深色/跟随系统直接展示，替代原下拉菜单，原 `ThemeToggle` 组件移除），语言保持切换按钮；侧边栏相关测试同步更新
+- [修复] 告警中心组合集中度/回撤规则列表不显示阈值参数值：`AlertRuleList` 此前读取 snake_case 键（`top_weight_pct`/`max_drawdown_pct`），前端参数对象实际为 camelCase（`topWeightPct`/`maxDrawdownPct`），导致值缺失只显示规则名；改为读取 camelCase 键并展示阈值百分比
+- [改进] 告警中心测试按钮结果改为右上角 toast 展示（5 秒自动消失 + 关闭按钮），替代此前内联在规则列表顶部的大段结果块
+- [改进] 告警中心触发历史组件 `AlertTriggerHistory` 全部硬编码中文接入 i18n：表头/状态标签/空态/阶段与数据质量渲染改为语言感知（含英文），`renderPhaseQuality` 不再写死 `zh`，阶段徽章复用语言感知的去前缀辅助函数
+- [改进] 告警规则创建表单对「组合集中度 / 组合回撤 / 组合价格状态」三类规则展示配置驱动提示：这三类规则的阈值由风险模块配置控制（非规则参数），表单无需也不能设置参数；此前选中后表单静默为空且提交 `{}`，现明确说明以消除误导
+- [修复] 告警中心 `AlertsPage` 触发历史与通知记录加载缺少并发/卸载守卫：`loadTriggers`/`loadNotifications` 与规则列表一致加入 `mountedRef` + 请求 id 守卫，避免 StrictMode 二次挂载后请求返回被静默跳过
+- [改进] 任务面板统一不再显示「运行诊断」traceId 折叠块（此前分析任务有、选股任务没有导致不一致），任务条目布局一致，运行流按钮仍保留用于深入排查
+- [修复] 选股任务在全局任务图标重复显示：同一选股任务经 SSE 以英文标题混入分析任务列表、又经选股页写入 `screeningTaskStore` 以中文标题展示，运行期间图标出现两条（带 `screen:` 前缀的副本因非真实 taskId，点击提示「不存在 / 已过期」）；现面板聚合时剔除分析列表中的重复条目，仅保留中文标题选股条目并透传真实 taskId，点击可正常进入执行详情
 - [改进] 首页审计修复：今日标签刷新按钮现会重新加载今日排行（此前为空操作）；导入/自动分析路径显式传入股票代码作为原始查询，避免提交空 `originalQuery`；大盘复盘提示统一走同步 ref 的更新入口，避免陈旧 ref 漏更新；`useHomeDashboardState` 裁剪 19 个未使用 store 字段与 2 个冗余 Set，减少无关 store 更新引发的整页重渲染；自选增删回调改用 ref 守卫以保住行 memo、提交被跳过时不再清空输入框；`StockAutocomplete` 提交回调上提为 `useCallback` 恢复 memo；今日日期键改 `useMemo`；自选提示文案接入 i18n（新增 `watchlist.addedMessage`/`removedMessage`/`actionFailed`）；大盘复盘轮询魔法数字上提为命名常量；SSE 断线日志附带错误对象便于排查
 - [修复] 修复 AI 建议页状态更新/反馈无反应（同类 StrictMode `mountedRef` 缺陷）：`DecisionSignalsPage` 卸载清理仅把 `mountedRef.current` 置 `false` 而未在挂载时重置，开发模式 `<StrictMode>` 二次挂载后该值为 `false`，`handleStatusUpdate`/`handleFeedbackSubmit` 的 `if (!mountedRef.current) return` 守卫在请求成功后静默跳过 `setState`，界面不刷新；改为在 effect 挂载时重置 `mountedRef.current = true`
 - [修复] 修复选股页策略下拉无值：`mountedRef` 卸载清理把 `mountedRef.current` 置 `false` 后，React `<StrictMode>` 开发模式二次挂载不会重新初始化为 `true`，导致 `loadStrategies`/`loadHotspots` 的 `if (!mountedRef.current) return` 守卫在请求返回后静默跳过 `setState`，策略列表与热点始终为空（接口 200 但下拉无值）；改为在 effect 挂载时重置 `mountedRef.current = true`（对齐 `HomePage` 既有正确写法）

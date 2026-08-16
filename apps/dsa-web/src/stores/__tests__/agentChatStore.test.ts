@@ -345,6 +345,37 @@ describe('agentChatStore.startStream', () => {
     expect(state.messages[1].content).toBe('权威终稿');
   });
 
+  it('attaches an alert_proposal event to the committed assistant message', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        accepted('request-alert-proposal'),
+        'data: {"type":"alert_proposal","proposal":{"name":"600519 price above 1800","target_scope":"single_symbol","target":"600519","alert_type":"price_cross","parameters":{"direction":"above","price":1800},"severity":"info"},"summary":"「600519」价格上穿 ¥1800"}',
+        'data: {"type":"done","success":true,"content":"建议关注该价格位","backend":"litellm"}',
+      ]),
+    );
+
+    await useAgentChatStore.getState().startStream({
+      message: '茅台价格会突破吗',
+      session_id: 'session-test',
+      request_id: 'request-alert-proposal',
+    });
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages).toHaveLength(2);
+    const assistant = state.messages[1];
+    expect(assistant.alertProposal).toMatchObject({
+      summary: '「600519」价格上穿 ¥1800',
+      payload: {
+        name: '600519 price above 1800',
+        targetScope: 'single_symbol',
+        target: '600519',
+        alertType: 'price_cross',
+        parameters: { direction: 'above', price: 1800 },
+        severity: 'info',
+      },
+    });
+  });
+
   it('keeps streamed text when the stream fails after content_delta', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([

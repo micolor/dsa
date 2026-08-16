@@ -602,6 +602,39 @@ def run_agent_loop(
 # Internal tool execution
 # ============================================================
 
+_ALERT_PROPOSAL_TOOL_NAME = "propose_alert"
+
+
+def _maybe_emit_alert_proposal(
+    tc,
+    result_str: str,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    step: int,
+) -> str:
+    """Surface a ``propose_alert`` result to the client and simplify the LLM view.
+
+    If the executed tool is ``propose_alert`` and its result is an
+    ``{"proposal": ..., "summary": ...}`` dict, emit an ``alert_proposal`` SSE
+    event via ``progress_callback`` and rewrite the LLM-facing ``result_str`` to a
+    short confirmation note (so the raw proposal JSON is not leaked into the
+    conversation). Returns the (possibly rewritten) ``result_str``.
+    """
+    if tc.name != _ALERT_PROPOSAL_TOOL_NAME or not progress_callback:
+        return result_str
+    try:
+        payload = json.loads(result_str)
+    except (TypeError, ValueError):
+        return result_str
+    if not isinstance(payload, dict):
+        return result_str
+    proposal = payload.get("proposal")
+    summary = payload.get("summary")
+    if not isinstance(proposal, dict) or not isinstance(summary, str):
+        return result_str
+    progress_callback(stream_event("alert_proposal", proposal=proposal, summary=summary))
+    return json.dumps({"message": summary}, ensure_ascii=False)
+
+
 def _execute_tools(
     tool_calls,
     tool_registry: ToolRegistry,
@@ -658,6 +691,7 @@ def _execute_tools(
             _, result_str, success, dur, cached, guard_result = _exec_single(tc)
         if progress_callback:
             progress_callback(stream_event("tool_done", step=step, tool=tc.name, success=success, duration=dur))
+        result_str = _maybe_emit_alert_proposal(tc, result_str, progress_callback, step)
         log_entry = {
             "step": step, "tool": tc.name, "arguments": tc.arguments,
             "success": success, "duration": dur, "result_length": len(result_str),
@@ -696,6 +730,7 @@ def _execute_tools(
                 tc_item, result_str, success, dur, cached, guard_result = future.result()
                 if progress_callback:
                     progress_callback(stream_event("tool_done", step=step, tool=tc_item.name, success=success, duration=dur))
+                result_str = _maybe_emit_alert_proposal(tc_item, result_str, progress_callback, step)
                 log_entry = {
                     "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
                     "success": success, "duration": dur, "result_length": len(result_str),

@@ -39,6 +39,8 @@ export interface AlertRuleParameters {
   kPeriod?: number;
   dPeriod?: number;
   mode?: PortfolioStopLossMode;
+  topWeightPct?: number;
+  maxDrawdownPct?: number;
   statuses?: MarketLightStatus[];
   minDrop?: number;
 }
@@ -77,6 +79,14 @@ export interface AlertRuleCreateRequest {
   parameters: AlertRuleParameters;
   severity: AlertSeverity;
   enabled?: boolean;
+}
+
+/** An alert rule proposed by the 问股 assistant, awaiting user confirmation. */
+export interface AlertProposal {
+  /** camelCase payload ready for `alertsApi.createRule`. */
+  payload: AlertRuleCreateRequest;
+  /** Human-readable Chinese summary shown on the confirmation card. */
+  summary: string;
 }
 
 export interface AlertDeleteResponse {

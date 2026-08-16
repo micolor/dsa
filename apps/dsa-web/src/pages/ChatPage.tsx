@@ -2,12 +2,14 @@ import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User } from 'lucide-react';
+import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
+import { alertsApi } from '../api/alerts';
+import type { AlertProposal } from '../types/alerts';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
 import {
@@ -34,6 +36,8 @@ import { useUiLanguage } from '../contexts/UiLanguageContext';
 
 // Quick question examples shown on empty state
 type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>;
+
+type AlertProposalStatus = 'pending' | 'creating' | 'created' | 'error' | 'cancelled';
 
 const QUICK_QUESTIONS: Array<{
   label: string;
@@ -244,6 +248,7 @@ const ChatPage: React.FC = () => {
   const [agentStatus, setAgentStatus] = useState<AgentStatusResponse | null>(null);
   const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
   const [agentStatusChecking, setAgentStatusChecking] = useState(true);
+  const [alertProposalStatus, setAlertProposalStatus] = useState<Record<string, AlertProposalStatus>>({});
   const { index: stockIndex } = useStockIndex(
     agentStatus?.backend === 'codex_app_server',
   );
@@ -353,6 +358,27 @@ const ChatPage: React.FC = () => {
     },
     [isWatchlistActioning, watchlistCodes],
   );
+
+  const handleCreateAlertProposal = useCallback(
+    async (msgId: string, proposal: AlertProposal) => {
+      setAlertProposalStatus((s) => ({ ...s, [msgId]: 'creating' }));
+      try {
+        await alertsApi.createRule(proposal.payload);
+        if (isMountedRef.current) {
+          setAlertProposalStatus((s) => ({ ...s, [msgId]: 'created' }));
+        }
+      } catch {
+        if (isMountedRef.current) {
+          setAlertProposalStatus((s) => ({ ...s, [msgId]: 'error' }));
+        }
+      }
+    },
+    [],
+  );
+
+  const handleCancelAlertProposal = useCallback((msgId: string) => {
+    setAlertProposalStatus((s) => ({ ...s, [msgId]: 'cancelled' }));
+  }, []);
 
   const {
     messages,
@@ -1001,6 +1027,58 @@ const ChatPage: React.FC = () => {
     </div>
   );
 
+  const renderAlertProposalCard = (msg: Message) => {
+    const proposal = msg.alertProposal;
+    if (!proposal) return null;
+    const status = alertProposalStatus[msg.id] || 'pending';
+    if (status === 'cancelled') return null;
+
+    const created = status === 'created';
+    const creating = status === 'creating';
+    const failed = status === 'error';
+
+    return (
+      <div className="mb-3 mt-2">
+        <InlineAlert
+          variant={created ? 'success' : failed ? 'danger' : 'info'}
+          title={created ? t('chat.alertProposalCreated') : t('chat.alertProposalTitle')}
+          message={(
+            <span className="flex flex-col gap-3">
+              <span className="font-medium">{proposal.summary}</span>
+              {!created && !failed && (
+                <span className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    isLoading={creating}
+                    disabled={creating}
+                    loadingText={t('chat.alertProposalCreating')}
+                    onClick={() => void handleCreateAlertProposal(msg.id, proposal)}
+                  >
+                    {t('chat.alertProposalCreate')}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="danger-subtle"
+                    disabled={creating}
+                    onClick={() => handleCancelAlertProposal(msg.id)}
+                  >
+                    {t('chat.alertProposalCancel')}
+                  </Button>
+                </span>
+              )}
+              {failed && (
+                <span className="text-xs">{t('chat.alertProposalFailed')}</span>
+              )}
+            </span>
+          )}
+        />
+      </div>
+    );
+  };
+
   const sidebarContent = (
     <>
       <div className="border-b border-subtle px-3 py-3">
@@ -1399,6 +1477,7 @@ const ChatPage: React.FC = () => {
                       expandedThinking.has(msg.id) &&
                       msg.thinkingSteps &&
                       renderThinkingDetails(msg.thinkingSteps)}
+                    {msg.role === 'assistant' && renderAlertProposalCard(msg)}
                     {msg.role === 'assistant' ? (
                       <div className="relative">
                         <div className="chat-message-actions">
@@ -1738,6 +1817,7 @@ const ChatPage: React.FC = () => {
     <ToastViewport>
       {sendToast ? (
         <InlineAlert
+          elevated
           variant={sendToast.type === 'success' ? 'success' : 'danger'}
           title={sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')}
           message={sendToast.message}
@@ -1745,10 +1825,10 @@ const ChatPage: React.FC = () => {
             <button
               type="button"
               onClick={dismissSendToast}
-              className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
-              aria-label="关闭提示"
+              className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
+              aria-label={t('common.close')}
             >
-              ✕
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
           className="pointer-events-auto"

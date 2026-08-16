@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.events import (
     EventMonitor,
@@ -98,6 +98,55 @@ class UnsupportedAlertTypeError(AlertServiceError):
     """Raised when the API receives a future/non-runtime alert type."""
 
     error_code = "unsupported_alert_type"
+
+
+def normalize_alert_parameters(alert_type: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """Pure validation/normalization of alert ``parameters``.
+
+    Shared by ``AlertService._normalize_parameters`` and the agent's
+    ``propose_alert`` tool so both produce identical, create-able parameter
+    dicts without requiring a DB/engine (the tool never persists).
+    """
+    if not isinstance(parameters, dict):
+        raise AlertServiceError("parameters must be an object")
+
+    if alert_type == "price_cross":
+        direction = str(parameters.get("direction") or "above").strip().lower()
+        if direction not in {"above", "below"}:
+            raise AlertServiceError(f"invalid direction: {direction}")
+        return {"direction": direction, "price": AlertService._positive_float(parameters.get("price"), "price")}
+
+    if alert_type == "price_change_percent":
+        direction = str(parameters.get("direction") or "up").strip().lower()
+        if direction not in {"up", "down"}:
+            raise AlertServiceError(f"invalid direction: {direction}")
+        return {
+            "direction": direction,
+            "change_pct": AlertService._positive_float(parameters.get("change_pct"), "change_pct"),
+        }
+
+    if alert_type == "volume_spike":
+        return {"multiplier": AlertService._positive_float(parameters.get("multiplier"), "multiplier")}
+
+    if alert_type in TECHNICAL_ALERT_TYPES:
+        try:
+            return normalize_indicator_parameters(alert_type, parameters)
+        except ValueError as exc:
+            raise AlertServiceError(str(exc)) from exc
+
+    if alert_type in PORTFOLIO_ALERT_TYPES:
+        try:
+            return normalize_portfolio_alert_parameters(alert_type, parameters)
+        except ValueError as exc:
+            raise AlertServiceError(str(exc)) from exc
+
+    if alert_type in MARKET_ALERT_TYPES:
+        try:
+            return normalize_market_alert_parameters(alert_type, parameters)
+        except ValueError as exc:
+            raise AlertServiceError(str(exc)) from exc
+
+    raise UnsupportedAlertTypeError(f"unsupported alert_type for Alert API: {alert_type}")
 
 
 class AlertService:
@@ -208,17 +257,18 @@ class AlertService:
         rule,
         monitor: EventMonitor,
         daily_cache: Optional[Dict[Any, Any]] = None,
+        report_cache: Optional[Dict[Tuple[Optional[int], str], Any]] = None,
     ) -> Dict[str, Any]:
         if isinstance(rule, PriceAlert):
             return await self._evaluate_price(rule, monitor)
         if isinstance(rule, PriceChangeAlert):
             return await self._evaluate_price_change(rule, monitor)
         if isinstance(rule, VolumeAlert):
-            return await self._evaluate_volume(rule)
+            return await self._evaluate_volume(rule, daily_cache=daily_cache)
         if isinstance(rule, TechnicalIndicatorAlert):
             return await self._evaluate_technical_indicator(rule, daily_cache=daily_cache)
         if isinstance(rule, PortfolioRiskAlert):
-            return await asyncio.to_thread(evaluate_portfolio_risk_alert, rule)
+            return await asyncio.to_thread(evaluate_portfolio_risk_alert, rule, report_cache=report_cache)
         if isinstance(rule, MarketLightAlert):
             return await asyncio.to_thread(evaluate_market_light_alert, rule, cache=daily_cache)
         if isinstance(rule, StaticAlertEvaluation):
@@ -232,12 +282,13 @@ class AlertService:
     ) -> List[Dict[str, Any]]:
         semaphore = asyncio.Semaphore(8)
         daily_cache: Dict[Any, Any] = {}
+        report_cache: Dict[Tuple[Optional[int], str], Any] = {}
 
         async def _evaluate_one(payload: RuntimeAlertPayload) -> Dict[str, Any]:
             async with semaphore:
                 try:
                     result = await asyncio.wait_for(
-                        self._evaluate_rule(payload.rule, monitor, daily_cache=daily_cache),
+                        self._evaluate_rule(payload.rule, monitor, daily_cache=daily_cache, report_cache=report_cache),
                         timeout=DRY_RUN_TARGET_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
@@ -434,14 +485,26 @@ class AlertService:
             data_timestamp=self._extract_quote_datetime(quote),
         )
 
-    async def _evaluate_volume(self, rule: VolumeAlert) -> Dict[str, Any]:
+    async def _evaluate_volume(
+        self,
+        rule: VolumeAlert,
+        *,
+        daily_cache: Optional[Dict[tuple[str, int], Any]] = None,
+    ) -> Dict[str, Any]:
+        cache_key = (rule.stock_code, 20)
+
         def _fetch_daily_data():
             from data_provider import DataFetcherManager
 
             return DataFetcherManager().get_daily_data(rule.stock_code, days=20)
 
         try:
-            result = await asyncio.to_thread(_fetch_daily_data)
+            if daily_cache is not None and cache_key in daily_cache:
+                result = daily_cache[cache_key]
+            else:
+                result = await asyncio.to_thread(_fetch_daily_data)
+                if daily_cache is not None:
+                    daily_cache[cache_key] = result
         except Exception as exc:
             return self._evaluation_error(rule, exc, data_source="daily_data")
         if result is None:
@@ -950,46 +1013,7 @@ class AlertService:
             raise AlertServiceError(str(exc)) from exc
 
     def _normalize_parameters(self, alert_type: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(parameters, dict):
-            raise AlertServiceError("parameters must be an object")
-
-        if alert_type == "price_cross":
-            direction = str(parameters.get("direction") or "above").strip().lower()
-            if direction not in {"above", "below"}:
-                raise AlertServiceError(f"invalid direction: {direction}")
-            return {"direction": direction, "price": self._positive_float(parameters.get("price"), "price")}
-
-        if alert_type == "price_change_percent":
-            direction = str(parameters.get("direction") or "up").strip().lower()
-            if direction not in {"up", "down"}:
-                raise AlertServiceError(f"invalid direction: {direction}")
-            return {
-                "direction": direction,
-                "change_pct": self._positive_float(parameters.get("change_pct"), "change_pct"),
-            }
-
-        if alert_type == "volume_spike":
-            return {"multiplier": self._positive_float(parameters.get("multiplier"), "multiplier")}
-
-        if alert_type in TECHNICAL_ALERT_TYPES:
-            try:
-                return normalize_indicator_parameters(alert_type, parameters)
-            except ValueError as exc:
-                raise AlertServiceError(str(exc)) from exc
-
-        if alert_type in PORTFOLIO_ALERT_TYPES:
-            try:
-                return normalize_portfolio_alert_parameters(alert_type, parameters)
-            except ValueError as exc:
-                raise AlertServiceError(str(exc)) from exc
-
-        if alert_type in MARKET_ALERT_TYPES:
-            try:
-                return normalize_market_alert_parameters(alert_type, parameters)
-            except ValueError as exc:
-                raise AlertServiceError(str(exc)) from exc
-
-        raise UnsupportedAlertTypeError(f"unsupported alert_type for Alert API: {alert_type}")
+        return normalize_alert_parameters(alert_type, parameters)
 
     @staticmethod
     def _positive_float(value: Any, field_name: str) -> float:
@@ -1047,11 +1071,15 @@ class AlertService:
                 ]
 
             payloads: List[RuntimeAlertPayload] = []
+            seen_targets: set = set()
             for target in targets:
-                child_data = dict(data)
-                child_data["target"] = target.symbol
-                rule = self._to_runtime_rule(row, child_data)
                 effective_target = target.symbol
+                if effective_target in seen_targets:
+                    continue
+                seen_targets.add(effective_target)
+                child_data = dict(data)
+                child_data["target"] = effective_target
+                rule = self._to_runtime_rule(row, child_data)
                 payloads.append(
                     RuntimeAlertPayload(
                         key=f"{parent_key}|{effective_target}",

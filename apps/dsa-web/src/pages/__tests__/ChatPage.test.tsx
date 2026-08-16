@@ -33,6 +33,7 @@ const {
   mockDownloadSession,
   mockFormatSessionAsMarkdown,
   mockStockIndex,
+  mockCreateAlertRule,
 } = vi.hoisted(() => ({
   mockGetSkills: vi.fn(),
   mockGetStatus: vi.fn(),
@@ -45,6 +46,7 @@ const {
   mockRemoveFromWatchlist: vi.fn(),
   mockDownloadSession: vi.fn(),
   mockFormatSessionAsMarkdown: vi.fn(),
+  mockCreateAlertRule: vi.fn(),
   mockStockIndex: [
     { canonicalCode: '600519.SH', displayCode: '600519', nameZh: '贵州茅台', aliases: ['茅台'], market: 'CN', assetType: 'stock', active: true },
     { canonicalCode: '300750.SZ', displayCode: '300750', nameZh: '宁德时代', aliases: [], market: 'CN', assetType: 'stock', active: true },
@@ -111,6 +113,12 @@ vi.mock('../../api/systemConfig', () => ({
 vi.mock('../../utils/chatExport', () => ({
   downloadSession: mockDownloadSession,
   formatSessionAsMarkdown: mockFormatSessionAsMarkdown,
+}));
+
+vi.mock('../../api/alerts', () => ({
+  alertsApi: {
+    createRule: mockCreateAlertRule,
+  },
 }));
 
 vi.mock('../../api/history', () => ({
@@ -190,6 +198,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.removeItem(UI_LANGUAGE_STORAGE_KEY);
+  mockCreateAlertRule.mockReset();
   mockGetStatus.mockReset();
   mockStoreState.messages = [];
   mockStoreState.selectedSkillIds = null;
@@ -2329,5 +2338,87 @@ describe('watchlist button with code variants', () => {
       expect(mockRemoveFromWatchlist).toHaveBeenCalledWith('00700');
     });
     expect(mockAddToWatchlist).not.toHaveBeenCalled();
+  });
+
+  it('renders an alert proposal card and creates the rule on confirm', async () => {
+    mockCreateAlertRule.mockResolvedValue({
+      id: 1,
+      name: '600519 price above 1800',
+      targetScope: 'single_symbol',
+      target: '600519',
+      alertType: 'price_cross',
+      parameters: { direction: 'above', price: 1800 },
+      severity: 'info',
+      enabled: true,
+      source: 'api',
+    });
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '分析 600519' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '建议关注该价格位',
+        alertProposal: {
+          summary: '「600519」价格上穿 ¥1800',
+          payload: {
+            name: '600519 price above 1800',
+            targetScope: 'single_symbol',
+            target: '600519',
+            alertType: 'price_cross',
+            parameters: { direction: 'above', price: 1800 },
+            severity: 'info',
+          },
+        },
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('「600519」价格上穿 ¥1800')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+
+    await waitFor(() => expect(mockCreateAlertRule).toHaveBeenCalledTimes(1));
+    expect(mockCreateAlertRule).toHaveBeenCalledWith(
+      expect.objectContaining({ target: '600519', alertType: 'price_cross' }),
+    );
+    expect(await screen.findByText('告警规则已创建')).toBeInTheDocument();
+  });
+
+  it('dismisses an alert proposal card on cancel', async () => {
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '分析 600519' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '建议关注该价格位',
+        alertProposal: {
+          summary: '「600519」价格上穿 ¥1800',
+          payload: {
+            name: '600519 price above 1800',
+            targetScope: 'single_symbol',
+            target: '600519',
+            alertType: 'price_cross',
+            parameters: { direction: 'above', price: 1800 },
+            severity: 'info',
+          },
+        },
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('「600519」价格上穿 ¥1800')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByText('「600519」价格上穿 ¥1800')).not.toBeInTheDocument();
+    expect(mockCreateAlertRule).not.toHaveBeenCalled();
   });
 });
