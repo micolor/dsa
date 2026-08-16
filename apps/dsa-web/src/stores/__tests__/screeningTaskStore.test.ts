@@ -36,10 +36,10 @@ describe('useScreeningTaskStore', () => {
 });
 
 describe('toScreenTaskInfo', () => {
-  it('maps a screening task onto the TaskInfo contract with a screen: prefix', () => {
+  it('maps a screening task onto the TaskInfo contract passing the real taskId', () => {
     const info = toScreenTaskInfo(sampleTask);
 
-    expect(info.taskId).toBe('screen:task-1');
+    expect(info.taskId).toBe('task-1');
     expect(info.status).toBe('processing');
     expect(info.progress).toBe(42);
     expect(info.message).toBe('正在执行因子评分');
@@ -50,9 +50,9 @@ describe('toScreenTaskInfo', () => {
     expect(info.analysisPhase).toBeUndefined();
   });
 
-  it('keeps the screening taskId distinct from a real analysis taskId', () => {
+  it('passes the real screening taskId through for a clickable run flow', () => {
     const info = toScreenTaskInfo({ ...sampleTask, taskId: 'abc-123' });
-    expect(info.taskId).toBe('screen:abc-123');
+    expect(info.taskId).toBe('abc-123');
   });
 
   it('omits traceId when absent and falls back the title', () => {

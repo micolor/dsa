@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import PortfolioService
@@ -233,18 +233,34 @@ def evaluate_portfolio_risk_alert(
     *,
     portfolio_service: Optional[PortfolioService] = None,
     risk_service: Optional[PortfolioRiskService] = None,
+    report_cache: Optional[Dict[Tuple[Optional[int], str], Any]] = None,
 ) -> Dict[str, Any]:
-    """Evaluate an account-level portfolio alert."""
+    """Evaluate an account-level portfolio alert.
+
+    ``report_cache`` deduplicates the (expensive) risk report / snapshot lookup
+    across rules that share the same account within one worker cycle; pass a
+    dict owned by the cycle and reuse it for every portfolio rule.
+    """
 
     account_id = None if rule.target == "all" else _positive_int_target(rule.target)
     service = portfolio_service or PortfolioService()
     risk = risk_service or PortfolioRiskService(portfolio_service=service)
 
     if rule.alert_type == "portfolio_price_stale":
-        snapshot = service.get_portfolio_snapshot(account_id=account_id, cost_method="fifo")
+        snapshot_key = (account_id, "snapshot")
+        snapshot = report_cache.get(snapshot_key) if report_cache is not None else None
+        if snapshot is None:
+            snapshot = service.get_portfolio_snapshot(account_id=account_id, cost_method="fifo")
+            if report_cache is not None:
+                report_cache[snapshot_key] = snapshot
         return _evaluate_price_stale(rule, snapshot)
 
-    report = risk.get_risk_report(account_id=account_id, cost_method="fifo")
+    report_key = (account_id, "report")
+    report = report_cache.get(report_key) if report_cache is not None else None
+    if report is None:
+        report = risk.get_risk_report(account_id=account_id, cost_method="fifo")
+        if report_cache is not None:
+            report_cache[report_key] = report
     if rule.alert_type == "portfolio_stop_loss":
         return _evaluate_stop_loss(rule, report)
     if rule.alert_type == "portfolio_concentration":

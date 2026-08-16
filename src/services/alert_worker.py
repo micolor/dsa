@@ -142,23 +142,14 @@ class AlertWorker:
 
         monitor = EventMonitor()
         daily_cache: Dict[Any, Any] = {}
+        report_cache: Dict[Any, Any] = {}
         self._analysis_visibility_cache = {}
-        for runtime_rule in runtime_rules:
+        # Evaluate all rules in a single event loop (bounded concurrency) rather
+        # than creating/closing a loop per rule, then run the synchronous
+        # record/notify post-processing sequentially below.
+        results = asyncio.run(self._evaluate_rules_batch(runtime_rules, monitor, daily_cache, report_cache))
+        for runtime_rule, result in zip(runtime_rules, results):
             stats["evaluated"] += 1
-            try:
-                result = asyncio.run(self.service._evaluate_rule(runtime_rule.rule, monitor, daily_cache=daily_cache))
-            except Exception as exc:
-                result = {
-                    "rule_id": self.service._runtime_rule_id(runtime_rule.rule),
-                    "record_status": "failed",
-                    "triggered": False,
-                    "observed_value": None,
-                    "threshold": self.service._threshold_for_rule(runtime_rule.rule),
-                    "data_source": self.service._data_source_for_rule(runtime_rule.rule),
-                    "data_timestamp": None,
-                    "reason": self.service._sanitize_text(str(exc) or "Alert evaluation failed"),
-                    "message": self.service._sanitize_text(str(exc) or "Alert evaluation failed"),
-                }
 
             record_status = result.get("record_status")
             if record_status == "triggered":
@@ -199,6 +190,47 @@ class AlertWorker:
                         stats["notified"] += 1
 
         return stats
+
+    async def _evaluate_rules_batch(
+        self,
+        runtime_rules: List[RuntimeAlertRule],
+        monitor: EventMonitor,
+        daily_cache: Dict[Any, Any],
+        report_cache: Dict[Any, Any],
+    ) -> List[Dict[str, Any]]:
+        """Evaluate all runtime rules in one event loop with bounded concurrency.
+
+        Avoids creating/closing an event loop per rule (the prior `asyncio.run`
+        per-rule approach serialized loop setup). Bounded by a semaphore so quote
+        and daily-data lookups overlap; `daily_cache`/`report_cache` are
+        intentionally shared, as in the existing dry-run path.
+        """
+        semaphore = asyncio.Semaphore(8)
+
+        async def _evaluate_one(runtime_rule: RuntimeAlertRule) -> Dict[str, Any]:
+            async with semaphore:
+                try:
+                    return await self.service._evaluate_rule(
+                        runtime_rule.rule,
+                        monitor,
+                        daily_cache=daily_cache,
+                        report_cache=report_cache,
+                    )
+                except Exception as exc:
+                    return {
+                        "rule_id": self.service._runtime_rule_id(runtime_rule.rule),
+                        "record_status": "failed",
+                        "triggered": False,
+                        "observed_value": None,
+                        "threshold": self.service._threshold_for_rule(runtime_rule.rule),
+                        "data_source": self.service._data_source_for_rule(runtime_rule.rule),
+                        "data_timestamp": None,
+                        "reason": self.service._sanitize_text(str(exc) or "Alert evaluation failed"),
+                        "message": self.service._sanitize_text(str(exc) or "Alert evaluation failed"),
+                    }
+
+        tasks = [asyncio.create_task(_evaluate_one(runtime_rule)) for runtime_rule in runtime_rules]
+        return await asyncio.gather(*tasks)
 
     def _load_runtime_rules(self, config: Any) -> List[RuntimeAlertRule]:
         runtime_rules: List[RuntimeAlertRule] = []

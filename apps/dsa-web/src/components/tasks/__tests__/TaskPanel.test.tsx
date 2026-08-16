@@ -45,7 +45,6 @@ describe('TaskPanel', () => {
         tasks={[
           {
             ...baseTask,
-            traceId: 'trace-task-1',
           },
           {
             ...baseTask,
@@ -65,8 +64,6 @@ describe('TaskPanel', () => {
     expect(screen.getByText('贵州茅台')).toBeInTheDocument();
     expect(screen.getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByLabelText('任务状态：分析中')).toBeInTheDocument();
-    expect(screen.getByText('运行诊断')).toBeInTheDocument();
-    expect(screen.getAllByText('trace-task-1')).toHaveLength(2);
     expect(screen.queryByText(/请求阶段:/)).not.toBeInTheDocument();
     expect(container.querySelector('.home-panel-card')).toBeTruthy();
     expect(container.querySelector('.home-subpanel')).toBeTruthy();
@@ -110,7 +107,7 @@ describe('TaskPanel', () => {
     expect(screen.getAllByTestId('task-panel-item')).toHaveLength(2);
   });
 
-  it('keeps narrow sidebar task metadata in rows instead of squeezing diagnostics vertically', () => {
+  it('keeps narrow sidebar task metadata in rows', () => {
     render(
       <TaskPanel
         tasks={[
@@ -121,7 +118,6 @@ describe('TaskPanel', () => {
             progress: 32,
             message: '长飞光纤: 请求阶段: 自动阶段',
             analysisPhase: 'auto',
-            traceId: 'c5b9665a64e3b9f42ad9f',
           },
         ]}
         onOpenRunFlow={vi.fn()}
@@ -134,11 +130,6 @@ describe('TaskPanel', () => {
     expect(screen.getByText('长飞光纤')).toHaveClass('truncate');
     expect(screen.getByText('601869.SH')).toHaveClass('shrink-0');
     expect(screen.getByText('32%')).toBeInTheDocument();
-
-    const diagnosticsSummary = screen.getByTestId('task-panel-diagnostics-summary');
-    expect(diagnosticsSummary).toHaveClass('grid-cols-[auto_minmax(0,1fr)_auto]');
-    expect(screen.getByText('运行诊断')).toHaveClass('whitespace-nowrap');
-    expect(screen.getByText('c5b9665a64...')).toHaveClass('truncate');
     expect(screen.getByRole('button', { name: '查看 长飞光纤 运行流' })).toBeInTheDocument();
   });
 

@@ -33,12 +33,13 @@ export const useScreeningTaskStore = create<ScreeningTaskState>((set) => ({
 
 /**
  * 把选股任务的活跃态归一化到 TaskInfo，复用 FloatingTaskPanel / TaskPanel 的现有契约。
- * - taskId 加 `screen:` 前缀，避免与分析任务（真实 taskId）key 冲突；
+ * - taskId 透传真实 taskId（不加前缀），保证点击可正常打开执行详情；面板聚合时由 GlobalTaskCenter
+ *   剔除同一选股任务经 SSE 混入分析任务列表的重复条目，避免同一任务重复展示；
  * - analysisPhase 不设 → TaskItem 的 phase badge 不渲染（getRequestedPhaseLabel 对空值返回 null）；
  * - status 仅透传活跃态（pending / processing），完成/失败由选股页直接 clear。
  */
 export const toScreenTaskInfo = (task: ScreenProgressTask): TaskInfo => ({
-  taskId: `screen:${task.taskId}`,
+  taskId: task.taskId,
   stockCode: '选股',
   stockName: task.title || '选股',
   status: task.status,

@@ -114,7 +114,13 @@ export const GlobalTaskCenter: React.FC = () => {
     if (!activeScreenTask) {
       return activeTasks;
     }
-    return [...activeTasks, toScreenTaskInfo(activeScreenTask)];
+    // 同一选股任务也会经 SSE 以真实 taskId 混入 activeTasks（分析任务列表，英文 stock_name 标题）。
+    // 这里剔除该重复条目，只保留 screeningTaskStore 的中文标题条目；该条目透传真实 taskId，
+    // 点击可正常进入执行详情（此前 `screen:` 前缀会被后端判为「不存在 / 已过期」）。
+    const withoutScreenDuplicate = activeTasks.filter(
+      (task) => task.taskId !== activeScreenTask.taskId,
+    );
+    return [...withoutScreenDuplicate, toScreenTaskInfo(activeScreenTask)];
   }, [activeScreenTask, activeTasks]);
 
   return (

@@ -32,7 +32,6 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
   const statusVariant = isCancelRequested ? 'warning' : isProcessing ? 'info' : 'default';
   const statusTone = isCancelRequested ? 'warning' : isProcessing ? 'info' : 'neutral';
   const progress = Math.max(0, Math.min(100, task.progress || 0));
-  const traceId = (task.traceId || '').trim();
   const requestedPhaseLabel = getRequestedPhaseLabel(task.analysisPhase, language);
   const requestedPhaseVariant = task.analysisPhase === 'auto' ? 'default' : 'info';
 
@@ -122,26 +121,6 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
         </span>
       </div>
 
-      {traceId ? (
-        <details className="group/task text-xs">
-          <summary
-            className="grid cursor-pointer list-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 text-muted-text"
-            data-testid="task-panel-diagnostics-summary"
-          >
-            <span className="whitespace-nowrap">{t('taskPanel.diagnostics')}</span>
-            <span className="min-w-0 truncate font-mono text-[11px] text-secondary-text">
-              {traceId.length > 18 ? `${traceId.slice(0, 10)}...` : traceId}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open/task:rotate-180" aria-hidden="true" />
-          </summary>
-          <div className="mt-1 rounded-lg border border-subtle bg-base/50 px-2 py-1.5 text-muted-text">
-            <span className="mr-1">Trace:</span>
-            <code className="break-all font-mono text-[11px] text-secondary-text">
-              {traceId}
-            </code>
-          </div>
-        </details>
-      ) : null}
     </div>
   );
 };

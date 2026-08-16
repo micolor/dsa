@@ -31,7 +31,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +183,11 @@ class EventMonitor:
     and can be forwarded to the notification system.
     """
 
-    def __init__(self):
+    def __init__(self, quote_cache_ttl_seconds: int = 60):
         self.rules: List[AlertRule] = []
         self._callbacks: List[Callable[[TriggeredAlert], None]] = []
+        self._quote_cache: Dict[str, Tuple[float, Any]] = {}
+        self.quote_cache_ttl_seconds = max(1, int(quote_cache_ttl_seconds))
 
     def add_alert(self, rule: AlertRule) -> None:
         """Register a new alert rule."""
@@ -266,7 +268,20 @@ class EventMonitor:
         return DataFetcherManager().get_realtime_quote(stock_code)
 
     async def _get_realtime_quote(self, stock_code: str) -> Any:
-        return await asyncio.to_thread(self._fetch_realtime_quote, stock_code)
+        """Fetch a realtime quote, deduplicating per instance within the TTL.
+
+        The worker and dry-run paths build one ``EventMonitor`` per cycle, so this
+        cache is effectively per-cycle: multiple price rules on the same symbol
+        share a single network fetch instead of each hitting the quote source.
+        """
+        now = time.time()
+        cached = self._quote_cache.get(stock_code)
+        if cached is not None and now - cached[0] < self.quote_cache_ttl_seconds:
+            return cached[1]
+        quote = await asyncio.to_thread(self._fetch_realtime_quote, stock_code)
+        if quote is not None:
+            self._quote_cache[stock_code] = (now, quote)
+        return quote
 
     async def _check_price(self, rule: PriceAlert) -> Optional[TriggeredAlert]:
         """Check price alert against realtime quote."""

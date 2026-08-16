@@ -2586,27 +2586,32 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(triggered)
         self.assertEqual(triggered.current_value, 2.35)
 
-    async def test_realtime_rules_create_fetcher_manager_per_quote_check(self):
+    async def test_realtime_rules_share_single_quote_fetch_per_symbol(self):
+        """Multiple rules on the same symbol reuse the per-cycle quote cache.
+
+        The worker and dry-run paths build one ``EventMonitor`` per cycle, so a
+        price rule and a price-change rule on the same symbol share a single
+        realtime quote fetch within the quote cache TTL instead of each hitting
+        the data source.
+        """
         from src.agent.events import EventMonitor, PriceAlert, PriceChangeAlert
 
         monitor = EventMonitor()
         monitor.add_alert(PriceAlert(stock_code="600519", direction="above", price=1800.0))
         monitor.add_alert(PriceChangeAlert(stock_code="600519", direction="up", change_pct=3.0))
-        managers = [MagicMock(), MagicMock()]
-        for manager in managers:
-            manager.get_realtime_quote.return_value = SimpleNamespace(price=1810.0, change_pct=3.25)
+        manager = MagicMock()
+        manager.get_realtime_quote.return_value = SimpleNamespace(price=1810.0, change_pct=3.25)
 
         async def _run_inline(func, *args, **kwargs):
             return func(*args, **kwargs)
 
-        with patch("data_provider.DataFetcherManager", side_effect=managers) as manager_factory, patch(
+        with patch("data_provider.DataFetcherManager", side_effect=[manager]) as manager_factory, patch(
             "src.agent.events.asyncio.to_thread", new=_run_inline
         ):
             triggered = await monitor.check_all()
 
-        self.assertEqual(manager_factory.call_count, 2)
-        for manager in managers:
-            manager.get_realtime_quote.assert_called_once_with("600519")
+        self.assertEqual(manager_factory.call_count, 1)
+        manager.get_realtime_quote.assert_called_once_with("600519")
         self.assertEqual(len(triggered), 2)
 
     async def test_check_volume_safe_when_fetch_returns_none(self):
