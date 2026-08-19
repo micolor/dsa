@@ -1070,40 +1070,42 @@
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
-/* Liquid Glass 统一表面工具（承载层：侧边栏/顶栏/卡片/弹窗/工具栏/Toast） */
-.glass-surface,
-.glass-surface-strong {
-  position: relative;
-  border: 1px solid var(--glass-border);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 12px 30px var(--glass-shadow);
-}
-.glass-surface,
-.glass-surface-strong {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-.glass-surface {
-  background: var(--glass-bg);
-}
-/* 更强玻璃：弹窗/抽屉等浮层，更实底 + 更大模糊 */
-.glass-surface-strong {
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
-}
-/* 顶部镜面高光带 */
-.glass-surface::before,
-.glass-surface-strong::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
-  pointer-events: none;
+@layer components {
+  /* Liquid Glass 统一表面工具（承载层：侧边栏/顶栏/卡片/弹窗/工具栏/Toast） */
+  .glass-surface,
+  .glass-surface-strong {
+    position: relative;
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      0 12px 30px var(--glass-shadow);
+  }
+  .glass-surface,
+  .glass-surface-strong {
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  .glass-surface {
+    background: var(--glass-bg);
+  }
+  /* 更强玻璃：弹窗/抽屉等浮层，更实底 + 更大模糊 */
+  .glass-surface-strong {
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+  }
+  /* 顶部镜面高光带 */
+  .glass-surface::before,
+  .glass-surface-strong::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+    pointer-events: none;
+  }
 }
 
 /* ============ Utilities ============ */
