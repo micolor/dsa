@@ -19,7 +19,7 @@ const variantMap: Record<NonNullable<SettingsAlertProps['variant']>, 'danger' | 
 };
 
 const toastHighlightStyle = [
-  'relative overflow-hidden bg-card/95 text-foreground shadow-soft-card-strong backdrop-blur-sm',
+  'relative overflow-hidden glass-surface-strong text-foreground shadow-soft-card-strong',
   'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-1.5',
   'before:bg-gradient-to-r before:from-cyan/80 before:via-primary/70 before:to-purple/70',
 ].join(' ');

@@ -214,7 +214,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 aria-labelledby={titleId}
                 tabIndex={-1}
                 className={cn(
-                  'relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong',
+                  'relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl glass-surface-strong shadow-soft-card-strong',
                   'sm:max-w-2xl sm:rounded-2xl',
                 )}
               >
