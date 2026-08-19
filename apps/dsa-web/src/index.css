@@ -1054,20 +1054,27 @@
 }
 
 /* ============ Glassmorphism Panels ============ */
-.glass-panel {
-  @apply rounded-2xl shadow-soft-card transition-all;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
-.glass-panel-lg {
-  @apply rounded-3xl shadow-soft-card transition-all;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+@layer components {
+  .glass-panel {
+    @apply rounded-2xl transition-all;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-soft-card);
+  }
+  .glass-panel-lg {
+    @apply rounded-3xl transition-all;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-soft-card);
+  }
 }
 
 @layer components {
@@ -1248,7 +1255,9 @@ a {
   --terminal-card-gradient-start: var(--terminal-card-border-hover);
   transform: translateY(-1px);
   border-color: var(--terminal-card-border-hover);
-  box-shadow: var(--terminal-card-shadow-hover);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--terminal-card-shadow-hover);
 }
 
 .gradient-border-card {
