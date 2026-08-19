@@ -6,7 +6,7 @@ import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User, X } f
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
+import { ApiErrorAlert, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import { alertsApi } from '../api/alerts';
 import type { AlertProposal } from '../types/alerts';
@@ -221,7 +221,7 @@ const ChatPage: React.FC = () => {
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [mobileSkillPickerOpen, setMobileSkillPickerOpen] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteToastId, setDeleteToastId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
@@ -258,6 +258,7 @@ const ChatPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const sendToastTimerRef = useRef<number | null>(null);
+  const pendingDeleteRef = useRef<{ id: string; timer: number } | null>(null);
   const introToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
@@ -688,20 +689,42 @@ const ChatPage: React.FC = () => {
     setSidebarOpen(false);
   }, [requestScrollToBottom, sessionId, switchSession, clearAllCopyTimers]);
 
-  const confirmDelete = useCallback(() => {
-    if (!deleteConfirmId) return;
-    agentApi.deleteChatSession(deleteConfirmId)
-      .then(() => {
-        loadSessions();
-        if (deleteConfirmId === sessionId) {
-          handleStartNewChat();
+  const requestDeleteSession = useCallback(
+    (sessionIdToDelete: string) => {
+      // 取消上一个未执行的删除（若仍在撤销窗口内）
+      if (pendingDeleteRef.current) {
+        window.clearTimeout(pendingDeleteRef.current.timer);
+      }
+      const timer = window.setTimeout(() => {
+        pendingDeleteRef.current = null;
+        if (isMountedRef.current) {
+          setDeleteToastId(null);
         }
-      })
-      .catch((error) => {
-        console.error('Failed to delete chat session:', error);
-      });
-    setDeleteConfirmId(null);
-  }, [deleteConfirmId, sessionId, loadSessions, handleStartNewChat]);
+        agentApi
+          .deleteChatSession(sessionIdToDelete)
+          .then(() => {
+            loadSessions();
+            if (sessionIdToDelete === sessionId) {
+              handleStartNewChat();
+            }
+          })
+          .catch((error) => {
+            console.error('Failed to delete chat session:', error);
+          });
+      }, 6000);
+      pendingDeleteRef.current = { id: sessionIdToDelete, timer };
+      setDeleteToastId(sessionIdToDelete);
+    },
+    [sessionId, loadSessions, handleStartNewChat],
+  );
+
+  const undoDelete = useCallback(() => {
+    if (pendingDeleteRef.current) {
+      window.clearTimeout(pendingDeleteRef.current.timer);
+      pendingDeleteRef.current = null;
+    }
+    setDeleteToastId(null);
+  }, []);
 
   // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
   useEffect(() => {
@@ -1154,7 +1177,7 @@ const ChatPage: React.FC = () => {
                       )}
                     </>
                   )}
-                  onDelete={() => setDeleteConfirmId(s.session_id)}
+                  onDelete={() => requestDeleteSession(s.session_id)}
                   deleteAriaLabel={`删除对话 ${s.title}`}
                 />
               );
@@ -1315,18 +1338,6 @@ const ChatPage: React.FC = () => {
               </div>
             </div>
           )}
-
-          {/* Delete confirmation dialog */}
-          <ConfirmDialog
-            isOpen={Boolean(deleteConfirmId)}
-            title="删除对话"
-            message="删除后，该对话将不可恢复，确认删除吗？"
-            confirmText="删除"
-            cancelText="取消"
-            isDanger
-            onConfirm={confirmDelete}
-            onCancel={() => setDeleteConfirmId(null)}
-          />
 
           {/* Main chat area */}
           <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
@@ -1615,14 +1626,6 @@ const ChatPage: React.FC = () => {
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
               ) : null}
-              {agentStatusChecking ? (
-                <InlineAlert
-                  variant="info"
-                  title={t('chat.statusCheckingTitle')}
-                  message={t('chat.statusCheckingMessage')}
-                  className="rounded-xl px-3 py-2 text-xs shadow-none"
-                />
-              ) : null}
               {isFollowUpContextLoading ? (
                 <InlineAlert
                   variant="info"
@@ -1829,6 +1832,24 @@ const ChatPage: React.FC = () => {
               aria-label={t('common.close')}
             >
               <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+          className="pointer-events-auto"
+        />
+      ) : null}
+      {deleteToastId ? (
+        <InlineAlert
+          elevated
+          variant="success"
+          title="会话已删除"
+          message="如需恢复，请在 6 秒内点击撤销。"
+          action={(
+            <button
+              type="button"
+              onClick={undoDelete}
+              className="ml-3 shrink-0 self-center rounded-lg bg-primary/15 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
+            >
+              撤销
             </button>
           )}
           className="pointer-events-auto"
