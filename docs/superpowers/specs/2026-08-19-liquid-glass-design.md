@@ -51,21 +51,19 @@
 
 | 令牌 | 现状 | 改后（暗色示例） |
 |---|---|---|
-| `--card` | 实心 `0 0% 100%`（暗色为深灰） | 半透明 `hsla(230 28% 14% / 0.55)` |
-| `--popover` | 实心 | 半透明 `hsla(230 28% 16% / 0.7)`（弹窗稍实保证可读） |
-| `--surface-1/2/3` | 实心色 | 对应 alpha 递减的半透明表面 |
-| `--elevated` / `--hover` | 实心 | 半透明叠加态 |
+| `--card` / `--popover` / `--elevated` / `--hover` | 实心（纯 HSL） | **保持纯 HSL 不变**：全库 46 处 `bg-card/N` 透明度修饰符依赖其无内联 alpha（内联 alpha 会编译成 `hsl(A / a / a)` 双重 alpha 失效）。玻璃透明度由 `--glass-bg` / `--glass-bg-strong` 承担 |
+| `--surface-1/2/3` | 实心色 | 保持结构，玻璃表面统一走 `--glass-bg` 族 |
 | `--background` | 纯色 | 渐变色相（配合背景层），`--bg-base` 同步 |
 | `--border` | 单色 | 玻璃边框 `hsla(0 0% 100% / 0.14)`（暗色） |
 | `--shadow-soft-card` 等 | 单层投影 | 双层：`inset 0 1px 0 高光` + 底部环境投影 |
-| 新增 | — | `--glass-blur`（默认 24px）、`--glass-saturate`（默认 1.6）、`--glass-highlight`（高光色）、`--glass-shadow`（投影色）、`--glass-bg`（玻璃底色，暗/亮各一套）、`--glass-border`（玻璃边框色） |
+| 新增 | — | `--glass-blur`（默认 24px）、`--glass-saturate`（默认 1.6）、`--glass-highlight`（高光色）、`--glass-shadow`（投影色）、`--glass-bg` / `--glass-bg-strong`（玻璃底色，暗/亮各一套）、`--glass-border`（玻璃边框色） |
 
 - 亮色主题令牌同步配一套：卡片 `hsla(210 40% 98% / 0.6)`、边框 `hsla(230 30% 20% / 0.1)` 等
 - 现有 `--home-action-ai-bg` 等零散半透明变量统一并入玻璃令牌，减少重复
 
-### 3.2 自动传播
+### 3.2 传播方式
 
-已用 `hsl(var(--card))` / `var(--surface-*)` 等令牌的通用组件（`Card`、`Dialog`、`SectionCard`、`StatCard` 等）无需改代码即可获得半透明底色；真正的 `backdrop-filter` 由第 4 节容器规则补上。
+`--card` 等令牌保持纯 HSL 保证 `bg-card/N` 兼容；玻璃半透明底色与模糊由第 4 节 `.glass-surface` 规则在承载层容器上显式应用（组件 className 加 `glass-surface`/`glass-surface-strong`）。已带玻璃质的现有类（`.terminal-card`、`.glass-card`、`.glass-panel`）改为复用同一套 `--glass-*` 令牌，视觉统一。
 
 ## 4. 玻璃容器规则与组件改造清单
 

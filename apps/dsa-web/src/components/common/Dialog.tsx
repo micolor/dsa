@@ -56,7 +56,7 @@ export const Dialog: React.FC<DialogProps> = ({
         aria-modal="true"
         aria-label={ariaLabel}
         onClick={(e) => e.stopPropagation()}
-        className={`relative flex w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong sm:rounded-2xl ${widthClassName} ${maxHeightClassName}`}
+        className={`relative flex w-full flex-col overflow-hidden rounded-t-2xl glass-surface-strong shadow-soft-card-strong sm:rounded-2xl ${widthClassName} ${maxHeightClassName}`}
       >
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div className="min-w-0">

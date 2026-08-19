@@ -195,7 +195,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
     <Card
       variant="bordered"
       padding="none"
-      className={`home-panel-card bg-card/95 shrink-0 overflow-hidden ${className}`}
+      className={`home-panel-card glass-surface shrink-0 overflow-hidden ${className}`}
     >
       <div className="px-3 py-3">
         <DashboardPanelHeader

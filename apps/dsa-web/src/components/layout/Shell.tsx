@@ -81,10 +81,10 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
     <div className="min-h-screen bg-transparent text-foreground">
       <header
         className={
-          'sticky top-1 z-40 backdrop-blur-xl backdrop-saturate-150 transition-[border-color] duration-200 ' +
+          'sticky top-1 z-40 glass-surface transition-[border-color] duration-200 ' +
           (scrolled
-            ? 'border-b border-border/40 bg-transparent'
-            : 'border-b border-transparent bg-transparent')
+            ? 'border-b border-border/40 border-x-transparent border-t-transparent'
+            : 'border-b border-transparent')
         }
       >
         <div
@@ -103,7 +103,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
           </button>
 
           {menuOpen ? (
-            <div className="absolute left-2 top-full mt-1.5 w-60 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border border-subtle bg-card/95 p-2.5 shadow-soft-card backdrop-blur-2xl backdrop-saturate-150">
+            <div className="absolute left-2 top-full mt-1.5 w-60 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl glass-surface-strong p-2.5 shadow-soft-card">
               <SidebarNav onNavigate={closeMenu} />
             </div>
           ) : null}

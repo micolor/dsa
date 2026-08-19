@@ -300,6 +300,21 @@
   --login-input-toggle-active-text: hsl(205 88% 28%);
   --login-grid-line: hsl(214 20% 55% / 0.08);
   --login-grid-mask: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+
+  /* Liquid Glass tokens (Light theme) */
+  --glass-blur: 24px;
+  --glass-saturate: 1.6;
+  --glass-bg: hsl(214 40% 98% / 0.55);
+  --glass-bg-strong: hsl(214 40% 98% / 0.72);
+  --glass-border: hsl(230 30% 20% / 0.12);
+  --glass-highlight: hsl(0 0% 100% / 0.8);
+  --glass-shadow: hsl(230 25% 40% / 0.18);
+
+  /* 背景光斑（Light theme，玻璃的底衬） */
+  --bg-orb-1: hsl(247 84% 58% / 0.16);
+  --bg-orb-2: hsl(247 84% 66% / 0.14);
+  --bg-orb-3: hsl(190 95% 45% / 0.1);
+  --bg-orb-4: hsl(152 69% 45% / 0.08);
 }
 
 .dark {
@@ -566,6 +581,21 @@
   --login-input-toggle-active-text: hsl(var(--primary) / 0.96);
   --login-grid-line: hsl(0 0% 50% / 0.04);
   --login-grid-mask: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+
+  /* Liquid Glass tokens (Dark theme) */
+  --glass-blur: 24px;
+  --glass-saturate: 1.6;
+  --glass-bg: hsl(230 26% 12% / 0.5);
+  --glass-bg-strong: hsl(230 26% 14% / 0.68);
+  --glass-border: hsl(0 0% 100% / 0.14);
+  --glass-highlight: hsl(0 0% 100% / 0.6);
+  --glass-shadow: hsl(228 30% 4% / 0.5);
+
+  /* 背景光斑（Dark theme，玻璃的底衬，暗色更强） */
+  --bg-orb-1: hsl(247 84% 58% / 0.28);
+  --bg-orb-2: hsl(247 84% 72% / 0.24);
+  --bg-orb-3: hsl(190 95% 45% / 0.16);
+  --bg-orb-4: hsl(152 69% 45% / 0.12);
 }
 
 /* =========================================
@@ -581,9 +611,10 @@
     min-width: 320px;
     min-height: 100vh;
     background:
-      radial-gradient(66rem 48rem at 12% -8%, hsl(247 84% 58% / 0.22), transparent 60%),
-      radial-gradient(58rem 44rem at 108% 112%, hsl(247 84% 66% / 0.22), transparent 60%),
-      radial-gradient(46rem 36rem at 80% 8%, hsl(247 84% 60% / 0.13), transparent 58%),
+      radial-gradient(66rem 48rem at 12% -8%, var(--bg-orb-1), transparent 60%),
+      radial-gradient(58rem 44rem at 108% 112%, var(--bg-orb-2), transparent 60%),
+      radial-gradient(46rem 36rem at 80% 8%, var(--bg-orb-3), transparent 58%),
+      radial-gradient(40rem 32rem at 55% 120%, var(--bg-orb-4), transparent 60%),
       hsl(var(--background));
     color: hsl(var(--foreground));
   }
@@ -1020,15 +1051,80 @@
   .animate-pulse-glow {
     animation: none;
   }
+
+  /* 隐藏静态镜面高光，减少视觉噪声（超出纯动效范围的有意取舍） */
+  .glass-surface::before,
+  .glass-surface-strong::before,
+  .terminal-card::before,
+  .gradient-border-card-inner::before,
+  .glass-card::after,
+  .dashboard-card::after,
+  .home-report-hero::after,
+  .home-rail-card::after {
+    display: none;
+  }
 }
 
 /* ============ Glassmorphism Panels ============ */
-.glass-panel {
-  @apply rounded-2xl border border-border/60 bg-card/70 shadow-soft-card backdrop-blur-md transition-all;
+@layer components {
+  .glass-panel {
+    @apply rounded-2xl transition-all;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-soft-card);
+  }
+  .glass-panel-lg {
+    @apply rounded-3xl transition-all;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-soft-card);
+  }
 }
 
-.glass-panel-lg {
-  @apply rounded-3xl border border-border/60 bg-card/70 shadow-soft-card backdrop-blur-md transition-all;
+@layer components {
+  /* Liquid Glass 统一表面工具（承载层：侧边栏/顶栏/卡片/弹窗/工具栏/Toast） */
+  .glass-surface,
+  .glass-surface-strong {
+    position: relative;
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      0 12px 30px var(--glass-shadow);
+  }
+  .glass-surface,
+  .glass-surface-strong {
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  .glass-surface {
+    background: var(--glass-bg);
+  }
+  /* 更强玻璃：弹窗/抽屉等浮层，更实底 + 更大模糊 */
+  .glass-surface-strong {
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+  }
+  /* 顶部镜面高光带 */
+  .glass-surface::before,
+  .glass-surface-strong::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+    pointer-events: none;
+  }
 }
 
 /* ============ Utilities ============ */
@@ -1155,7 +1251,9 @@ a {
   );
   backdrop-filter: blur(18px) saturate(190%);
   -webkit-backdrop-filter: blur(18px) saturate(190%);
-  box-shadow: var(--terminal-card-shadow);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--terminal-card-shadow);
 }
 
 .terminal-card-hover {
@@ -1169,7 +1267,9 @@ a {
   --terminal-card-gradient-start: var(--terminal-card-border-hover);
   transform: translateY(-1px);
   border-color: var(--terminal-card-border-hover);
-  box-shadow: var(--terminal-card-shadow-hover);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--terminal-card-shadow-hover);
 }
 
 .gradient-border-card {
@@ -1186,6 +1286,7 @@ a {
 }
 
 .gradient-border-card-inner {
+  position: relative;
   height: 100%;
   border-radius: calc(1rem - 1px);
   background: linear-gradient(
@@ -1197,18 +1298,30 @@ a {
   -webkit-backdrop-filter: blur(18px) saturate(190%);
 }
 
+.terminal-card::before,
+.gradient-border-card-inner::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .glass-card {
   position: relative;
   overflow: hidden;
   border-radius: 1.25rem;
-  border: 1px solid var(--border-card);
-  background: hsl(var(--card) / 0.32);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   box-shadow:
-    0 2px 4px hsl(220 24% 20% / 0.04),
-    0 20px 48px hsl(220 24% 20% / 0.08),
-    inset 0 1px 0 hsl(0 0% 100% / 0.07);
+    inset 0 1px 0 var(--glass-highlight),
+    0 20px 48px var(--glass-shadow);
 }
 
 .glass-card::after {
