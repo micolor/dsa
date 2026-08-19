@@ -23,8 +23,8 @@ const ACTION_AI_STYLES = 'bg-[var(--home-action-ai-bg)] border border-[var(--hom
 const ACTION_REPORT_STYLES = 'bg-[var(--home-action-report-bg)] border border-[var(--home-action-report-border)] text-[var(--home-action-report-text)] hover:bg-[var(--home-action-report-hover-bg)]';
 
 const BUTTON_VARIANT_STYLES = {
-  primary: 'border border-cyan/30 bg-primary-gradient text-primary-foreground shadow-soft-card hover:brightness-105',
-  secondary: 'border border-border/60 bg-card/55 text-foreground shadow-soft-card backdrop-blur-md hover:bg-card/70',
+  primary: 'border border-primary/30 bg-primary/15 text-primary shadow-inner hover:bg-primary/20',
+  secondary: 'border border-border/50 bg-transparent text-secondary-text hover:bg-hover hover:text-foreground',
   'settings-primary': 'border settings-button-primary hover:brightness-105 hover:shadow-xl',
   'settings-secondary': 'border settings-button-secondary pointer-fine:hover:translate-y-[-1px]',
   outline: 'border border-border/70 bg-transparent text-foreground hover:bg-hover',

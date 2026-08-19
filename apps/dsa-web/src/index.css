@@ -162,7 +162,7 @@
   --home-strategy-secondary: hsl(var(--primary));
   --home-strategy-stop: hsl(346 100% 63%);
   --home-strategy-take: hsl(38 100% 52%);
-  --home-panel-border: hsl(218 24% 82% / 0.55);
+  --home-panel-border: hsl(218 24% 88% / 0.3);
   --home-panel-border-hover: hsl(247 84% 58% / 0.2);
   --home-panel-border-selected: hsl(247 84% 58% / 0.34);
   --home-panel-gradient-start: hsl(247 84% 58% / 0.1);
@@ -180,21 +180,21 @@
   --home-divider-border: hsl(var(--foreground) / 0.08);
   --home-surface-button-bg: hsl(214 36% 97% / 0.98);
   --home-surface-button-bg-hover: hsl(214 40% 95% / 0.99);
-  --home-surface-button-border: hsl(218 24% 84% / 0.94);
+  --home-surface-button-border: hsl(218 24% 88% / 0.55);
   --home-surface-button-border-hover: hsl(247 84% 58% / 0.22);
   --home-state-icon-muted: hsl(var(--muted-text) / 0.85);
-  --home-prose-border: hsl(var(--foreground) / 0.1);
-  --home-prose-border-strong: hsl(var(--foreground) / 0.16);
+  --home-prose-border: hsl(var(--foreground) / 0.07);
+  --home-prose-border-strong: hsl(var(--foreground) / 0.09);
   --home-prose-blockquote-border: hsl(247 84% 66% / 0.28);
   --home-prose-blockquote-bg: hsl(247 84% 66% / 0.08);
-  --home-panel-shadow: 0 1px 2px hsl(220 22% 34% / 0.05), 0 8px 20px hsl(220 22% 34% / 0.07);
-  --home-panel-shadow-hover: 0 2px 4px hsl(220 24% 32% / 0.06), 0 12px 28px hsl(220 24% 32% / 0.1);
+  --home-panel-shadow: 0 1px 2px hsl(220 22% 34% / 0.04);
+  --home-panel-shadow-hover: 0 1px 3px hsl(220 24% 32% / 0.05);
   --home-hero-border: hsl(247 84% 58% / 0.32);
   --home-hero-gradient-start: hsl(247 84% 58% / 0.24);
   --home-hero-gradient-mid: hsl(247 84% 66% / 0.14);
   --home-hero-gradient-end: hsl(218 22% 82% / 0.14);
   --home-hero-shadow: 0 18px 44px hsl(220 24% 34% / 0.12), 0 8px 18px hsl(220 20% 30% / 0.06);
-  --home-rail-border: hsl(218 24% 82% / 0.55);
+  --home-rail-border: hsl(218 24% 88% / 0.3);
   --home-rail-bg: linear-gradient(180deg, hsl(0 0% 100% / 0.98), hsl(214 36% 97% / 0.98));
   --home-rail-shadow: 0 14px 30px hsl(220 22% 34% / 0.09), 0 4px 10px hsl(220 18% 28% / 0.05);
   --home-history-glow: hsl(247 84% 58% / 0.14);
@@ -229,7 +229,7 @@
   --settings-skeleton-strong: hsl(218 20% 84% / 0.92);
   --settings-skeleton-soft: hsl(218 22% 92% / 0.96);
   --input-surface-bg: var(--bg-card);
-  --input-surface-border: hsl(218 24% 80% / 0.92);
+  --input-surface-border: hsl(218 24% 88% / 0.65);
   --input-surface-border-hover: hsl(218 20% 70% / 0.92);
   --input-surface-border-focus: hsl(var(--primary) / 0.38);
   --input-surface-focus-ring: 0 0 0 4px hsl(var(--primary) / 0.15);
@@ -303,18 +303,27 @@
 
   /* Liquid Glass tokens (Light theme) */
   --glass-blur: 24px;
-  --glass-saturate: 1.6;
-  --glass-bg: hsl(214 40% 98% / 0.55);
-  --glass-bg-strong: hsl(214 40% 98% / 0.72);
-  --glass-border: hsl(230 30% 20% / 0.12);
-  --glass-highlight: hsl(0 0% 100% / 0.8);
-  --glass-shadow: hsl(230 25% 40% / 0.18);
+  --glass-saturate: 1.7;
+  --glass-bg: linear-gradient(
+    180deg,
+    hsl(214 40% 100% / 0.66) 0%,
+    hsl(214 40% 97% / 0.6) 100%
+  );
+  --glass-bg-strong: linear-gradient(
+    180deg,
+    hsl(214 40% 100% / 0.8) 0%,
+    hsl(214 40% 96% / 0.76) 100%
+  );
+  --glass-border: hsl(218 24% 86% / 0.55);
+  --glass-sheen-1: hsl(0 0% 100% / 0.5);
+  --glass-sheen-2: hsl(0 0% 100% / 0.15);
+  --glass-shadow: hsl(230 25% 40% / 0.09);
 
   /* 背景光斑（Light theme，玻璃的底衬） */
-  --bg-orb-1: hsl(247 84% 58% / 0.16);
-  --bg-orb-2: hsl(247 84% 66% / 0.14);
-  --bg-orb-3: hsl(190 95% 45% / 0.1);
-  --bg-orb-4: hsl(152 69% 45% / 0.08);
+  --bg-orb-1: hsl(247 84% 58% / 0.2);
+  --bg-orb-2: hsl(247 84% 66% / 0.18);
+  --bg-orb-3: hsl(190 95% 45% / 0.13);
+  --bg-orb-4: hsl(152 69% 45% / 0.1);
 }
 
 .dark {
@@ -584,18 +593,27 @@
 
   /* Liquid Glass tokens (Dark theme) */
   --glass-blur: 24px;
-  --glass-saturate: 1.6;
-  --glass-bg: hsl(230 26% 12% / 0.5);
-  --glass-bg-strong: hsl(230 26% 14% / 0.68);
-  --glass-border: hsl(0 0% 100% / 0.14);
-  --glass-highlight: hsl(0 0% 100% / 0.6);
+  --glass-saturate: 1.7;
+  --glass-bg: linear-gradient(
+    180deg,
+    hsl(230 26% 15% / 0.55) 0%,
+    hsl(230 24% 11% / 0.5) 100%
+  );
+  --glass-bg-strong: linear-gradient(
+    180deg,
+    hsl(230 26% 18% / 0.72) 0%,
+    hsl(230 24% 12% / 0.68) 100%
+  );
+  --glass-border: hsl(0 0% 100% / 0.08);
+  --glass-sheen-1: hsl(0 0% 100% / 0.1);
+  --glass-sheen-2: hsl(0 0% 100% / 0.03);
   --glass-shadow: hsl(228 30% 4% / 0.5);
 
   /* 背景光斑（Dark theme，玻璃的底衬，暗色更强） */
-  --bg-orb-1: hsl(247 84% 58% / 0.28);
-  --bg-orb-2: hsl(247 84% 72% / 0.24);
-  --bg-orb-3: hsl(190 95% 45% / 0.16);
-  --bg-orb-4: hsl(152 69% 45% / 0.12);
+  --bg-orb-1: hsl(247 84% 60% / 0.34);
+  --bg-orb-2: hsl(247 84% 74% / 0.3);
+  --bg-orb-3: hsl(190 95% 48% / 0.2);
+  --bg-orb-4: hsl(152 69% 48% / 0.16);
 }
 
 /* =========================================
@@ -1073,9 +1091,7 @@
     background: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    box-shadow:
-      inset 0 1px 0 var(--glass-highlight),
-      var(--shadow-soft-card);
+    box-shadow: var(--shadow-soft-card);
   }
   .glass-panel-lg {
     @apply rounded-3xl transition-all;
@@ -1083,9 +1099,7 @@
     background: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    box-shadow:
-      inset 0 1px 0 var(--glass-highlight),
-      var(--shadow-soft-card);
+    box-shadow: var(--shadow-soft-card);
   }
 }
 
@@ -1095,9 +1109,7 @@
   .glass-surface-strong {
     position: relative;
     border: 1px solid var(--glass-border);
-    box-shadow:
-      inset 0 1px 0 var(--glass-highlight),
-      0 12px 30px var(--glass-shadow);
+    box-shadow: 0 12px 30px var(--glass-shadow);
   }
   .glass-surface,
   .glass-surface-strong {
@@ -1113,7 +1125,7 @@
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
     backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
   }
-  /* 顶部镜面高光带 */
+  /* 顶部柔和受光带（模拟玻璃被上方光源照亮） */
   .glass-surface::before,
   .glass-surface-strong::before {
     content: "";
@@ -1121,8 +1133,14 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+    height: 24px;
+    background: linear-gradient(
+      180deg,
+      var(--glass-sheen-1) 0%,
+      var(--glass-sheen-2) 45%,
+      transparent 100%
+    );
+    border-radius: inherit;
     pointer-events: none;
   }
 }
@@ -1251,9 +1269,7 @@ a {
   );
   backdrop-filter: blur(18px) saturate(190%);
   -webkit-backdrop-filter: blur(18px) saturate(190%);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    var(--terminal-card-shadow);
+  box-shadow: var(--terminal-card-shadow);
 }
 
 .terminal-card-hover {
@@ -1267,9 +1283,7 @@ a {
   --terminal-card-gradient-start: var(--terminal-card-border-hover);
   transform: translateY(-1px);
   border-color: var(--terminal-card-border-hover);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    var(--terminal-card-shadow-hover);
+  box-shadow: var(--terminal-card-shadow-hover);
 }
 
 .gradient-border-card {
@@ -1305,8 +1319,14 @@ a {
   top: 0;
   left: 0;
   right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+  height: 24px;
+  background: linear-gradient(
+    180deg,
+    var(--glass-sheen-1) 0%,
+    var(--glass-sheen-2) 45%,
+    transparent 100%
+  );
+  border-radius: inherit;
   pointer-events: none;
   z-index: 1;
 }
@@ -1319,25 +1339,23 @@ a {
   background: var(--glass-bg);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 20px 48px var(--glass-shadow);
+  box-shadow: none;
 }
 
 .glass-card::after {
   content: "";
   position: absolute;
   top: 0;
-  left: 10%;
-  right: 10%;
-  height: 1px;
+  left: 0;
+  right: 0;
+  height: 24px;
   background: linear-gradient(
-    90deg,
-    transparent 0%,
-    hsl(var(--foreground) / 0.07) 50%,
+    180deg,
+    var(--glass-sheen-1) 0%,
+    var(--glass-sheen-2) 45%,
     transparent 100%
   );
-  opacity: 0.25;
+  border-radius: inherit;
   pointer-events: none;
 }
 
@@ -1392,24 +1410,23 @@ select option:checked {
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   box-shadow:
     0 2px 4px hsl(220 24% 20% / 0.04),
-    0 20px 48px hsl(220 24% 20% / 0.08),
-    inset 0 1px 0 hsl(0 0% 100% / 0.07);
+    0 20px 48px hsl(220 24% 20% / 0.08);
 }
 
 .dashboard-card::after {
   content: "";
   position: absolute;
   top: 0;
-  left: 14%;
-  right: 14%;
-  height: 1px;
+  left: 0;
+  right: 0;
+  height: 24px;
   background: linear-gradient(
-    90deg,
-    transparent 0%,
-    hsl(var(--foreground) / 0.06) 50%,
+    180deg,
+    var(--glass-sheen-1) 0%,
+    var(--glass-sheen-2) 45%,
     transparent 100%
   );
-  opacity: 0.3;
+  border-radius: inherit;
   pointer-events: none;
 }
 
@@ -1801,6 +1818,14 @@ select option:checked {
   box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.12);
 }
 
+/* 全站统一加载圆环（主色 + 轨道） */
+.spinner-ring {
+  border-style: solid;
+  border-radius: 9999px;
+  border-color: hsl(var(--primary) / 0.2);
+  border-top-color: hsl(var(--primary));
+}
+
 .home-spinner {
   border-style: solid;
   border-radius: 9999px;
@@ -1825,16 +1850,17 @@ select option:checked {
 .home-rail-card::after {
   content: "";
   position: absolute;
-  left: 1.25rem;
-  right: 1.25rem;
   top: 0;
-  height: 1px;
+  left: 0;
+  right: 0;
+  height: 24px;
   background: linear-gradient(
-    90deg,
-    transparent 0%,
-    hsl(var(--primary) / 0.18) 50%,
+    180deg,
+    var(--glass-sheen-1) 0%,
+    var(--glass-sheen-2) 45%,
     transparent 100%
   );
+  border-radius: inherit;
   pointer-events: none;
 }
 
@@ -2095,8 +2121,8 @@ select option:checked {
   justify-content: center;
   cursor: pointer;
   gap: 0.5rem;
-  border-radius: 0.9rem;
-  padding: 0.7rem 1.1rem;
+  border-radius: 0.55rem;
+  padding: 0.6rem 1rem;
   font-weight: 600;
   transition:
     transform 0.2s ease,
@@ -2106,33 +2132,34 @@ select option:checked {
     color 0.2s ease;
 }
 
+/* 柔和主色胶囊（与个股栏 tab 激活态一致：浅主色底 + 主色文字 + 内高光） */
 .btn-primary {
-  border: 1px solid hsl(247 84% 62% / 0.4);
-  background: linear-gradient(
-    135deg,
-    hsl(247 84% 58%),
-    hsl(247 84% 46%)
-  );
-  color: #fff;
-  box-shadow: 0 10px 24px hsl(247 84% 58% / 0.2);
+  border: 1px solid hsl(var(--primary) / 0.28);
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.45),
+    0 4px 12px hsl(var(--primary) / 0.1);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow: 0 16px 30px hsl(247 84% 58% / 0.24);
+  background: hsl(var(--primary) / 0.2);
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.55),
+    0 6px 16px hsl(var(--primary) / 0.14);
 }
 
 .btn-secondary {
   border: 1px solid var(--border-subtle);
-  background: var(--bg-subtle);
+  background: transparent;
   color: var(--text-secondary-text);
 }
 
 .btn-secondary:hover {
   transform: translateY(-1px);
-  border-color: var(--border-accent);
-  background: var(--bg-subtle-hover);
+  border-color: var(--border-subtle-hover);
+  background: var(--hover);
   color: var(--text-primary);
 }
 
@@ -2147,26 +2174,24 @@ select option:checked {
 :root:not(.dark) .portfolio-page .btn-primary:not(:disabled),
 :root:not(.dark) .portfolio-page .btn-secondary:not(:disabled) {
   box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.7),
-    0 3px 8px hsl(220 18% 30% / 0.045),
-    0 10px 20px hsl(220 18% 30% / 0.075);
+    inset 0 1px 0 hsl(0 0% 100% / 0.5),
+    0 4px 12px hsl(var(--primary) / 0.08);
 }
 
 :root:not(.dark) .portfolio-page .btn-secondary:not(:disabled) {
-  border-color: hsl(218 22% 82% / 0.92);
+  border-color: hsl(218 22% 88% / 0.55);
 }
 
 :root:not(.dark) .portfolio-page .btn-secondary:hover:not(:disabled) {
   box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.76),
-    0 5px 12px hsl(220 18% 30% / 0.06),
-    0 14px 26px hsl(220 18% 30% / 0.1);
+    inset 0 1px 0 hsl(0 0% 100% / 0.6),
+    0 6px 14px hsl(220 18% 30% / 0.07);
 }
 
 :root:not(.dark) .portfolio-page .btn-primary:hover:not(:disabled) {
   box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.18),
-    0 16px 30px hsl(247 84% 58% / 0.24);
+    inset 0 1px 0 hsl(0 0% 100% / 0.55),
+    0 6px 16px hsl(247 84% 58% / 0.14);
 }
 
 .bg-hover {

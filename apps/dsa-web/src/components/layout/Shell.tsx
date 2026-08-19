@@ -81,7 +81,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
     <div className="min-h-screen bg-transparent text-foreground">
       <header
         className={
-          'sticky top-1 z-40 glass-surface transition-[border-color] duration-200 ' +
+          'sticky top-0 z-40 glass-surface transition-[border-color] duration-200 ' +
           (scrolled
             ? 'border-b border-border/40 border-x-transparent border-t-transparent'
             : 'border-b border-transparent')
