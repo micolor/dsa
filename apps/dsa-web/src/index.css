@@ -1051,6 +1051,14 @@
   .animate-pulse-glow {
     animation: none;
   }
+
+  /* Reduced-motion: hide glass mirror highlight bands for a quieter static surface */
+  .glass-surface::before,
+  .glass-surface-strong::before,
+  .terminal-card::before,
+  .gradient-border-card-inner::before {
+    display: none;
+  }
 }
 
 /* ============ Glassmorphism Panels ============ */
