@@ -13,6 +13,8 @@ dist-ssr
 *.local
 playwright-report
 test-results
+# 一次性验收截图（liquid glass 视觉回归），不入库
+.liquid-glass-shots/
 
 # Editor directories and files
 .vscode/*

@@ -141,6 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 前端 API 错误解析补全 FastAPI 422 / 429 分支：`isRecord` 不再把数组当对象（修复 422 校验详情 `detail` 数组被误判为单一对象而整段 JSON 化），422 渲染为逐字段可读错误、429 归为「请求过于频繁」；CSV 导入上传不再手动写死 `multipart/form-data` Content-Type（由浏览器自动携带 boundary），避免上传请求被拒
 - [改进] 调度跨进程互斥：API 运行时调度器与 CLI `--schedule` 定时路径共用基于 `fcntl` 文件锁的跨进程互斥（锁文件锚定在共享 SQLite 数据库旁），避免 API 与 CLI 或多个 uvicorn worker 并发跑同一天分析产生重复报告/通知；另一进程已持锁时本进程跳过并记录 `analysis_running_elsewhere`
 - [改进] 定时分析失败可观测与限次重试：运行时调度器记录 `last_failed_at` 与连续失败次数并暴露到 `/scheduler/status`，整轮失败不再被静默吞掉；失败后最多重试 3 次（间隔 5 分钟，成功即清零计数），防止单次故障静默丢当日报告
+- [改进] Web 前端整体改造为液态玻璃（Liquid Glass）风格：半透明玻璃承载层、背景光斑、顶部镜面高光；暗/亮双主题同步；内容层保持可读
 
 ## [3.29.0] - 2026-08-02
 
