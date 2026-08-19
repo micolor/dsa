@@ -1052,11 +1052,15 @@
     animation: none;
   }
 
-  /* Reduced-motion: hide glass mirror highlight bands for a quieter static surface */
+  /* 隐藏静态镜面高光，减少视觉噪声（超出纯动效范围的有意取舍） */
   .glass-surface::before,
   .glass-surface-strong::before,
   .terminal-card::before,
-  .gradient-border-card-inner::before {
+  .gradient-border-card-inner::before,
+  .glass-card::after,
+  .dashboard-card::after,
+  .home-report-hero::after,
+  .home-rail-card::after {
     display: none;
   }
 }
