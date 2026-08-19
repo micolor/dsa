@@ -72,6 +72,7 @@ export const ParticleBackground = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
       initParticles();
+      if (prefersReducedMotion) animate();
     };
 
     const initParticles = () => {
