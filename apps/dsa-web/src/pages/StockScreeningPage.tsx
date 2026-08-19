@@ -795,6 +795,7 @@ const StockScreeningPage: React.FC = () => {
   const [restoredResult] = useState<ScreeningScreenResponse | null>(() => readScreenResult());
   const [enabled, setEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
+  const [statusChecked, setStatusChecked] = useState(false);
   // 当前仅支持 A 股场景：market 为固定值，页面没有市场切换控件，setter 从未使用。
   // 若未来要支持多市场，需补市场选择控件与 setter，再把这里改回 state。
   const market = formPrefs?.market ?? restoredTask?.market ?? 'cn';
@@ -865,7 +866,6 @@ const StockScreeningPage: React.FC = () => {
       : ['智能重排未完成，当前候选继续使用确定性因子评分。']
     : screenMessages;
   const isScreeningEnabled = enabled && available;
-  const statusText = isScreeningEnabled ? '选股已开启' : '选股未开启';
 
   const applyScreenResult = useCallback((result: ScreeningScreenResponse) => {
     const nextCandidates = result.candidates || [];
@@ -1106,6 +1106,7 @@ const StockScreeningPage: React.FC = () => {
         }
         setEnabled(status.enabled);
         setAvailable(status.available);
+        setStatusChecked(true);
         if (status.enabled && status.available) {
           void loadStrategies();
           void loadHotspots(false);
@@ -1115,6 +1116,7 @@ const StockScreeningPage: React.FC = () => {
         if (active) {
           setEnabled(false);
           setAvailable(false);
+          setStatusChecked(true);
         }
       });
     return () => {
@@ -1304,14 +1306,7 @@ const StockScreeningPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-6 pb-12 pt-6">
-      <div className="flex items-center">
-        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1.5 text-xs shadow-soft-card backdrop-blur-md">
-          <span className={`h-2 w-2 rounded-full ${isScreeningEnabled ? 'bg-success' : 'bg-warning'}`} />
-          <span className="font-medium text-secondary-text">{statusText}</span>
-        </div>
-      </div>
-
-      {!enabled ? (
+      {statusChecked && !enabled ? (
         <InlineAlert
           variant="info"
           title="选股未开启"
@@ -1324,7 +1319,7 @@ const StockScreeningPage: React.FC = () => {
         />
       ) : null}
 
-      {enabled && !available ? (
+      {statusChecked && enabled && !available ? (
         <InlineAlert
           variant="warning"
           title="选股功能不可用"
