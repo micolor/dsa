@@ -81,7 +81,7 @@ export const Drawer: React.FC<DrawerProps> = ({
           aria-modal="true"
           aria-labelledby={titleId}
           className={cn(
-            'relative flex w-full flex-col bg-card',
+            'relative flex w-full flex-col glass-surface-strong',
             borderClass,
             side === 'right' ? 'border-border/80' : 'border-border/70 shadow-2xl',
             side === 'left' ? 'animate-slide-in-left' : 'animate-slide-in-right'
