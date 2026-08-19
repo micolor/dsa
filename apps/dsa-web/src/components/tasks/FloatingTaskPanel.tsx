@@ -91,7 +91,7 @@ export const FloatingTaskPanel: React.FC<FloatingTaskPanelProps> = ({ tasks, onO
       </button>
 
       {open ? (
-        <div className="w-[34rem] max-h-[min(24rem,calc(100vh-12rem))] overflow-hidden rounded-2xl">
+        <div className="w-[34rem] max-h-[min(24rem,calc(100vh-12rem))] overflow-hidden rounded-2xl glass-surface-strong">
           <TaskPanel tasks={tasks} onOpenRunFlow={onOpenRunFlow} />
         </div>
       ) : null}
