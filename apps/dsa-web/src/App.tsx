@@ -34,6 +34,11 @@ const AppContent: React.FC = () => {
     useAgentChatStore.getState().setCurrentRoute(location.pathname);
   }, [location.pathname]);
 
+  // 路由切换时回到顶部，避免上一页滚动位置残留造成跳变
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   if (isLoading) {
     return <PageLoadingFallback />;
   }

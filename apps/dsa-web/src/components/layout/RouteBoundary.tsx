@@ -12,11 +12,11 @@ export const PageLoadingFallback: React.FC<PageLoadingFallbackProps> = ({ fullPa
   <div
     className={
       fullPage
-        ? 'flex min-h-screen items-center justify-center bg-base'
-        : 'flex min-h-[60vh] items-center justify-center'
+        ? 'flex min-h-screen items-center justify-center bg-base animate-fade-in'
+        : 'flex min-h-[calc(100vh-5rem)] items-center justify-center animate-fade-in'
     }
   >
-    <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan/20 border-t-cyan" />
+    <div className="spinner-ring h-8 w-8 animate-spin border-2" />
   </div>
 );
 
