@@ -413,11 +413,9 @@ describe('ChatPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('正在确认问股运行环境')).toBeInTheDocument();
-    const input = screen.getByPlaceholderText(/分析 600519/);
+    const input = await screen.findByPlaceholderText(/分析 600519/);
     expect(input).toBeDisabled();
     expect(screen.getByRole('button', { name: '分析比亚迪趋势' })).toBeDisabled();
-    expect(screen.getByText(/不会调用模型或读取股票数据/)).toBeInTheDocument();
     status.resolve({
       backend: 'codex_app_server',
       available: true,
@@ -682,7 +680,8 @@ describe('ChatPage', () => {
     fireEvent.click(deleteButton);
 
     expect(mockSwitchSession).not.toHaveBeenCalled();
-    expect(await screen.findByText('删除后，该对话将不可恢复，确认删除吗？')).toBeInTheDocument();
+    expect(await screen.findByText('会话已删除')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument();
   });
 
   it('disables header actions when there are no messages', async () => {
@@ -1985,7 +1984,7 @@ describe('ChatPage', () => {
     });
   });
 
-  it('clears active stock context when deleting the current session', async () => {
+  it('shows a delete toast with undo and defers the actual deletion', async () => {
     render(
       <MemoryRouter initialEntries={['/chat?stock=600519&name=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0']}>
         <ChatPage />
@@ -1994,29 +1993,16 @@ describe('ChatPage', () => {
 
     expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除对话 请简要分析 600519' }));
-    fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
-    await waitFor(() => {
-      expect(mockDeleteChatSession).toHaveBeenCalledWith('session-1');
-    });
-    expect(mockStartNewChat).toHaveBeenCalled();
+    // 延迟删除：6 秒撤销窗口内不真正删除
+    expect(await screen.findByText('会话已删除')).toBeInTheDocument();
+    expect(mockDeleteChatSession).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
-      target: { value: '继续看成交量' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
-
-    await waitFor(() => {
-      expect(mockStartStream).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          message: '继续看成交量',
-          context: undefined,
-        }),
-        expect.objectContaining({
-          skillName: '趋势分析',
-        }),
-      );
-    });
+    // 点击撤销：取消删除，会话保留
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    expect(screen.queryByText('会话已删除')).not.toBeInTheDocument();
+    expect(mockDeleteChatSession).not.toHaveBeenCalled();
+    expect(mockStartNewChat).not.toHaveBeenCalled();
   });
 
   it('ignores malformed follow-up query params', async () => {

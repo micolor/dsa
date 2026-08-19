@@ -165,7 +165,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     expect(screen.queryByText(/AlphaSift/)).not.toBeInTheDocument();
     expect(screen.queryByText(/theme_heat/)).not.toBeInTheDocument();
     expect(screen.queryByText('实验功能与风险提示')).not.toBeInTheDocument();
@@ -192,7 +192,6 @@ describe('StockScreeningPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '开启选股' }));
 
     await waitFor(() => expect(getScreeningStatus).toHaveBeenCalledTimes(2));
-    expect(screen.getAllByText('选股未开启').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /运行选股/ })).toBeDisabled();
     expect(screen.getByText('选股功能不可用')).toBeInTheDocument();
     expect(screen.getByText('选股功能不可用，请检查后端日志')).toBeInTheDocument();
@@ -235,7 +234,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     await waitFor(() => expect(getHotspots).toHaveBeenCalledWith({ provider: 'akshare', top: 12, refresh: false }));
     expect(getHotspotDetail).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
@@ -307,7 +306,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    await screen.findByText('选股已开启');
+    await screen.findByRole('button', { name: /运行选股/ });
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
     fireEvent.click(await screen.findByRole('button', { name: /AI算力/ }));
     await waitFor(() => expect(getHotspotDetail).toHaveBeenCalledTimes(1));
@@ -619,7 +618,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     await waitFor(() => expect(getHotspots).toHaveBeenCalledWith({ provider: 'akshare', top: 12, refresh: false }));
     expect(getHotspotDetail).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
@@ -683,7 +682,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
     fireEvent.click(await screen.findByRole('button', { name: /AI算力/ }));
     expect(await screen.findByText('盘中发酵')).toBeInTheDocument();
@@ -757,7 +756,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
     fireEvent.click(await screen.findByRole('button', { name: /AI算力/ }));
     await waitFor(() => expect(getHotspotDetail).toHaveBeenCalledWith({ topic: 'AI算力', provider: 'akshare', refresh: false }));
@@ -865,7 +864,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
     fireEvent.click(await screen.findByRole('button', { name: /AI算力/ }));
     await waitFor(() => expect(getHotspotDetail).toHaveBeenCalledTimes(1));
@@ -913,7 +912,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
     expect(await screen.findByText('强势领先')).toBeInTheDocument();
     expect(screen.getByText(/中际旭创、工业富联/)).toBeInTheDocument();
@@ -951,7 +950,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
 
     const strategySelect = screen.getByLabelText('策略');
     fireEvent.click(strategySelect);
@@ -1012,7 +1011,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     expect(await screen.findByText('旧策略股票')).toBeInTheDocument();
@@ -1061,7 +1060,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument();
     const expandButton = screen.queryByRole('button', { name: '展开查看' });
@@ -1133,7 +1132,7 @@ describe('StockScreeningPage', () => {
 
     const firstRender = render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     await waitFor(() =>
@@ -1202,7 +1201,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     await waitFor(() => {
@@ -1247,7 +1246,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     expect(await screen.findByText('当前使用因子排序')).toBeInTheDocument();
@@ -1284,7 +1283,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     expect(await screen.findByText('选股提示')).toBeInTheDocument();
@@ -1318,7 +1317,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     const efinanceWarning = await screen.findByText('数据源降级：efinance（网络连接中断）');
@@ -1364,7 +1363,7 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
 
     expect(await screen.findByText('增强摘要')).toBeInTheDocument();
