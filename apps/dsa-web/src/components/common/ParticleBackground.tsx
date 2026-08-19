@@ -18,9 +18,9 @@ function createParticle(canvas: HTMLCanvasElement): Particle {
     y: Math.random() * canvas.height,
     vx: (Math.random() - 0.5) * 0.5,
     vy: (Math.random() - 0.5) * 0.5,
-    radius: Math.random() * 2.0 + 1.0,
+    radius: Math.random() * 3.0 + 2.0,
     color: PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)],
-    baseAlpha: Math.random() * 0.6 + 0.2,
+    baseAlpha: Math.random() * 0.35 + 0.15,
   };
 }
 
@@ -37,9 +37,19 @@ function updateParticle(particle: Particle, canvas: HTMLCanvasElement) {
 }
 
 function drawParticle(ctx: CanvasRenderingContext2D, particle: Particle) {
+  const grad = ctx.createRadialGradient(
+    particle.x,
+    particle.y,
+    0,
+    particle.x,
+    particle.y,
+    particle.radius * 3,
+  );
+  grad.addColorStop(0, `rgba(${particle.color}, ${particle.baseAlpha})`);
+  grad.addColorStop(1, `rgba(${particle.color}, 0)`);
+  ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
-  ctx.fillStyle = `rgba(${particle.color}, ${particle.baseAlpha})`;
+  ctx.arc(particle.x, particle.y, particle.radius * 3, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -55,6 +65,7 @@ export const ParticleBackground = () => {
     let animationFrameId: number;
     let particles: Particle[] = [];
     const mouse = { x: -1000, y: -1000 };
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const resize = () => {
       if (!canvas) return;
@@ -120,6 +131,7 @@ export const ParticleBackground = () => {
       });
       drawLines(ctx);
 
+      if (prefersReducedMotion) return;
       animationFrameId = requestAnimationFrame(animate);
     };
 
