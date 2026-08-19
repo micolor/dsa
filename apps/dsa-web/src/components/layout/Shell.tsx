@@ -83,7 +83,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
         className={
           'sticky top-1 z-40 glass-surface transition-[border-color] duration-200 ' +
           (scrolled
-            ? 'border-b border-border/40'
+            ? 'border-b border-border/40 border-x-transparent border-t-transparent'
             : 'border-b border-transparent')
         }
       >
