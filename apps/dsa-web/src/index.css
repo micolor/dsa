@@ -300,6 +300,21 @@
   --login-input-toggle-active-text: hsl(205 88% 28%);
   --login-grid-line: hsl(214 20% 55% / 0.08);
   --login-grid-mask: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+
+  /* Liquid Glass tokens (Light theme) */
+  --glass-blur: 24px;
+  --glass-saturate: 1.6;
+  --glass-bg: hsl(214 40% 98% / 0.55);
+  --glass-bg-strong: hsl(214 40% 98% / 0.72);
+  --glass-border: hsl(230 30% 20% / 0.12);
+  --glass-highlight: hsl(0 0% 100% / 0.8);
+  --glass-shadow: hsl(230 25% 40% / 0.18);
+
+  /* 背景光斑（Light theme，玻璃的底衬） */
+  --bg-orb-1: hsl(247 84% 58% / 0.16);
+  --bg-orb-2: hsl(247 84% 66% / 0.14);
+  --bg-orb-3: hsl(190 95% 45% / 0.1);
+  --bg-orb-4: hsl(152 69% 45% / 0.08);
 }
 
 .dark {
@@ -566,6 +581,21 @@
   --login-input-toggle-active-text: hsl(var(--primary) / 0.96);
   --login-grid-line: hsl(0 0% 50% / 0.04);
   --login-grid-mask: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+
+  /* Liquid Glass tokens (Dark theme) */
+  --glass-blur: 24px;
+  --glass-saturate: 1.6;
+  --glass-bg: hsl(230 26% 12% / 0.5);
+  --glass-bg-strong: hsl(230 26% 14% / 0.68);
+  --glass-border: hsl(0 0% 100% / 0.14);
+  --glass-highlight: hsl(0 0% 100% / 0.6);
+  --glass-shadow: hsl(228 30% 4% / 0.5);
+
+  /* 背景光斑（Dark theme，玻璃的底衬，暗色更强） */
+  --bg-orb-1: hsl(247 84% 58% / 0.28);
+  --bg-orb-2: hsl(247 84% 72% / 0.24);
+  --bg-orb-3: hsl(190 95% 45% / 0.16);
+  --bg-orb-4: hsl(152 69% 45% / 0.12);
 }
 
 /* =========================================
@@ -1029,6 +1059,35 @@
 
 .glass-panel-lg {
   @apply rounded-3xl border border-border/60 bg-card/70 shadow-soft-card backdrop-blur-md transition-all;
+}
+
+/* Liquid Glass 统一表面工具（承载层：侧边栏/顶栏/卡片/弹窗/工具栏/Toast） */
+.glass-surface {
+  position: relative;
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  background: var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 12px 30px var(--glass-shadow);
+}
+/* 顶部镜面高光带 */
+.glass-surface::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+  pointer-events: none;
+}
+/* 更强玻璃：弹窗/抽屉等浮层，更实底 + 更大模糊 */
+.glass-surface-strong {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
 }
 
 /* ============ Utilities ============ */
