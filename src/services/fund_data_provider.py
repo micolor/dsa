@@ -38,9 +38,12 @@ class FundDataProvider:
                 d = datetime.strptime(str(r["净值日期"]), "%Y-%m-%d").date()
             except Exception:
                 continue
+            raw_nav = r.get("单位净值") or r.get("单位净值估算") or 0
+            nav = float(raw_nav)
+            unit_nav = None if pd.isna(nav) else nav
             rows.append(FundNavRow(
                 date=d,
-                unit_nav=float(r.get("单位净值") or r.get("单位净值估算") or 0) or None,
+                unit_nav=unit_nav,
                 daily_growth=float(r.get("日增长率", 0) or 0),
             ))
         rows.sort(key=lambda x: x.date)
@@ -88,7 +91,7 @@ class FundDataProvider:
         cur_peak = rows[-1].unit_nav
         cur_dd = 0.0
         for r in rows:
-            if r.unit_nav is None:
+            if r.unit_nav is None or pd.isna(r.unit_nav):
                 continue
             peak = max(peak, r.unit_nav)
             dd = (peak - r.unit_nav) / peak if peak else 0.0
