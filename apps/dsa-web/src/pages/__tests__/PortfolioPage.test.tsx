@@ -562,6 +562,39 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getByText('信号风险暂不可用')).toBeInTheDocument();
   });
 
+  it('falls back to position concentration when sector data is unavailable', async () => {
+    getRisk.mockResolvedValueOnce(makeRisk({
+      sectorConcentration: {
+        ...makeRisk().sectorConcentration,
+        topSectors: [],
+      },
+      concentration: {
+        ...makeRisk().concentration,
+        topPositions: [{ symbol: '600519', weightPct: 40 }],
+      },
+    }));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    // 行业数据为空时降级为个股集中度：标题与展示口径均需体现降级语义。
+    expect(await screen.findByText('行业数据暂不可用，当前展示个股集中度')).toBeInTheDocument();
+    expect(screen.getByText(/个股维度（降级显示）/)).toBeInTheDocument();
+  });
+
+  it('uses the no-concentration title when both sector and position data are empty', async () => {
+    // 行业与个股集中度都为空时，不应误用「当前展示个股集中度」降级标题，改为「暂无集中度数据」。
+    getRisk.mockResolvedValueOnce(makeRisk());
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    expect((await screen.findAllByText('暂无集中度数据')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('行业数据暂不可用，当前展示个股集中度')).not.toBeInTheDocument();
+  });
+
   it('refreshes FX for a single selected account and only reloads snapshot/risk', async () => {
     getSnapshot
       .mockResolvedValueOnce(makeSnapshot({ fxStale: true }))

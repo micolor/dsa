@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pie, PieChart, ResponsiveContainer, Tooltip, Legend, Cell } from 'recharts';
+import { Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
 import { RefreshCw, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
@@ -17,6 +17,7 @@ import {
   InlineAlert,
   Loading,
   StatCard,
+  ToastViewport,
 } from '../components/common';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
 import { DashboardPanelHeader } from '../components/dashboard';
@@ -196,6 +197,56 @@ async function loadPortfolioSignalLookup(lookup: PortfolioSignalLookup): Promise
   }
 }
 
+type ConcentrationPieEntry = { name: string; value: number };
+
+// 集中度饼图不使用 recharts 的 ResponsiveContainer（其在首帧返回 null，等 ResizeObserver
+// 测量后在空白区“弹开”出图表）。改为用容器 ref + ResizeObserver 测量尺寸，测量完成前
+// 保留 Loading 占位，让图表首次渲染即已是完整尺寸，避免加载时出现“撑开”/弹出动画。
+function SizedConcentrationPie({ data }: { data: ConcentrationPieEntry[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setSize((prev) => (
+        prev.width === width && prev.height === height ? prev : { width, height }
+      ));
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      measure();
+      return () => observer.disconnect();
+    }
+    measure();
+  }, []);
+
+  const hasSize = size.width > 0 && size.height > 0;
+
+  return (
+    <div ref={containerRef} className="h-64">
+      {hasSize ? (
+        <PieChart width={size.width} height={size.height}>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} isAnimationActive={false}>
+            {data.map((entry, index) => (
+              <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
+          <Legend />
+        </PieChart>
+      ) : (
+        <Loading className="h-64" />
+      )}
+    </div>
+  );
+}
+
 const PortfolioPage: React.FC = () => {
   const { language, t } = useUiLanguage();
   const text = PORTFOLIO_TEXT[language];
@@ -242,6 +293,25 @@ const PortfolioPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
+  // 刷新结果用全局 toast 呈现，不占卡片高度；带自动消失 + 手动关闭。
+  const fxRefreshFeedbackTimerRef = useRef<number | null>(null);
+  const dismissFxRefreshFeedback = useCallback(() => {
+    if (fxRefreshFeedbackTimerRef.current !== null) {
+      window.clearTimeout(fxRefreshFeedbackTimerRef.current);
+      fxRefreshFeedbackTimerRef.current = null;
+    }
+    setFxRefreshFeedback(null);
+  }, []);
+  const showFxRefreshFeedback = useCallback((feedback: FxRefreshFeedback) => {
+    if (fxRefreshFeedbackTimerRef.current !== null) {
+      window.clearTimeout(fxRefreshFeedbackTimerRef.current);
+    }
+    setFxRefreshFeedback(feedback);
+    fxRefreshFeedbackTimerRef.current = window.setTimeout(() => {
+      fxRefreshFeedbackTimerRef.current = null;
+      setFxRefreshFeedback(null);
+    }, 5000);
+  }, []);
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [riskWarning, setRiskWarning] = useState<string | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
@@ -525,6 +595,9 @@ const PortfolioPage: React.FC = () => {
     return () => {
       snapshotRequestRef.current += 1;
       eventsRequestRef.current += 1;
+      if (fxRefreshFeedbackTimerRef.current !== null) {
+        window.clearTimeout(fxRefreshFeedbackTimerRef.current);
+      }
     };
   }, []);
 
@@ -534,8 +607,8 @@ const PortfolioPage: React.FC = () => {
       requestId: refreshContextRef.current.requestId + 1,
     };
     setFxRefreshing(false);
-    setFxRefreshFeedback(null);
-  }, [refreshViewKey]);
+    dismissFxRefreshFeedback();
+  }, [refreshViewKey, dismissFxRefreshFeedback]);
 
   useEffect(() => {
     setEventPage(1);
@@ -705,8 +778,11 @@ const PortfolioPage: React.FC = () => {
       .filter((item) => item.value > 0);
   }, [risk]);
 
-  const concentrationPieData = sectorPieData.length > 0 ? sectorPieData : positionFallbackPieData;
-  const concentrationMode = sectorPieData.length > 0 ? 'sector' : 'position';
+  const hasSectorData = sectorPieData.length > 0;
+  const hasPositionData = positionFallbackPieData.length > 0;
+  const concentrationPieData = hasSectorData ? sectorPieData : positionFallbackPieData;
+  // 三态：有行业数据 / 无非零行业但有个股集中度（回退）/ 两者皆空。
+  const concentrationMode = hasSectorData ? 'sector' : hasPositionData ? 'position' : 'none';
 
   const handleTradeStockSelect = async (code: string) => {
     // Prefill the symbol; then best-effort fetch the current price as a default (user can edit).
@@ -1011,7 +1087,7 @@ const PortfolioPage: React.FC = () => {
 
     try {
       setFxRefreshing(true);
-      setFxRefreshFeedback(null);
+      dismissFxRefreshFeedback();
       const result = await portfolioApi.refreshFx({
         accountId: requestedAccountId,
       });
@@ -1027,7 +1103,7 @@ const PortfolioPage: React.FC = () => {
       if (!reloaded || !isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return;
       }
-      setFxRefreshFeedback(buildFxRefreshFeedback(result));
+      showFxRefreshFeedback(buildFxRefreshFeedback(result));
     } catch (err) {
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return;
@@ -1259,18 +1335,10 @@ const PortfolioPage: React.FC = () => {
             </Button>
           </div>
           <div className="mt-2">{snapshot?.fxStale ? <Badge variant="warning">{text.stale}</Badge> : <Badge variant="success">{text.latest}</Badge>}</div>
-          {fxRefreshFeedback ? (
-            <InlineAlert
-              variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
-              title={text.fxRefreshResult}
-              message={fxRefreshFeedback.text}
-              className="mt-3 rounded-xl px-3 py-2 text-xs shadow-none"
-            />
-          ) : null}
         </div>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+      <section className="grid grid-cols-1 items-start xl:grid-cols-3 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5 xl:col-span-2">
           <DashboardPanelHeader
             className="mb-3"
@@ -1396,47 +1464,48 @@ const PortfolioPage: React.FC = () => {
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader
             className="mb-3"
-            title={concentrationMode === 'sector' ? text.sectorConcentration : text.positionConcentrationFallback}
+            title={concentrationMode === 'sector'
+              ? text.sectorConcentration
+              : concentrationMode === 'position'
+                ? text.positionConcentrationFallback
+                : text.noConcentrationTitle}
             titleClassName="text-base font-semibold"
           />
           {isLoading ? (
             <Loading className="h-64" />
           ) : concentrationPieData.length > 0 ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} isAnimationActive={false}>
-                    {concentrationPieData.map((entry, index) => (
-                      <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <SizedConcentrationPie data={concentrationPieData} />
           ) : (
             <EmptyState
               title={text.noConcentrationTitle}
               description={text.noConcentrationDescription}
-              className="border-none bg-transparent px-4 py-10 shadow-none"
+              className="h-64 flex flex-col items-center justify-center border-none bg-transparent px-4 py-0 shadow-none"
             />
           )}
           <div className="mt-3 text-xs text-secondary-text space-y-1">
-            <div>{text.displayScope}: {concentrationMode === 'sector' ? text.sectorDimension : text.positionDimensionFallback}</div>
-            <div>{text.sectorAlert}: {risk?.sectorConcentration?.alert ? text.yes : text.no}</div>
-            <div>{text.topWeight}: {formatPct(risk?.sectorConcentration?.topWeightPct ?? risk?.concentration?.topWeightPct)}</div>
+            <div>{text.displayScope}: {concentrationMode === 'sector'
+              ? text.sectorDimension
+              : concentrationMode === 'position'
+                ? text.positionDimensionFallback
+                : text.noConcentrationTitle}</div>
+            <div>{text.sectorAlert}: {risk?.sectorConcentration?.alert ? text.yes : text.no}{risk?.thresholds?.concentrationAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.concentrationAlertPct)}）` : ''}</div>
+            <div>{text.topWeight}: {formatPct(concentrationMode === 'sector'
+              ? risk?.sectorConcentration?.topWeightPct
+              : risk?.concentration?.topWeightPct)}</div>
+            <div>{text.sectorCoverage}: {risk?.sectorConcentration?.coverage
+              ? `已分类 ${risk.sectorConcentration.coverage.classifiedCount ?? 0} / 未分类 ${risk.sectorConcentration.coverage.unclassifiedCount ?? 0}${(risk.sectorConcentration.coverage.failedCount ?? 0) > 0 ? ` / 失败 ${risk.sectorConcentration.coverage.failedCount}` : ''}`
+              : '--'}</div>
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <section className="grid grid-cols-1 items-start md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
             <div>{text.currentDrawdown}: {formatPct(risk?.drawdown?.currentDrawdownPct)}</div>
-            <div>{text.alert}: {risk?.drawdown?.alert ? text.yes : text.no}</div>
+            <div>{text.alert}: {risk?.drawdown?.alert ? text.yes : text.no}{risk?.thresholds?.drawdownAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.drawdownAlertPct)}）` : ''}</div>
           </div>
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -1444,7 +1513,7 @@ const PortfolioPage: React.FC = () => {
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.triggeredCount}: {risk?.stopLoss?.triggeredCount ?? 0}</div>
             <div>{text.nearCount}: {risk?.stopLoss?.nearCount ?? 0}</div>
-            <div>{text.alert}: {risk?.stopLoss?.nearAlert ? text.yes : text.no}</div>
+            <div>{text.alert}: {risk?.stopLoss?.nearAlert ? text.yes : text.no}{risk?.thresholds?.stopLossAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.stopLossAlertPct)}）` : ''}</div>
             {risk?.stopLoss?.items && risk.stopLoss.items.length > 0 ? (
               <div className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t border-border/50 pt-2">
                 {risk.stopLoss.items.map((item) => (
@@ -1943,6 +2012,27 @@ const PortfolioPage: React.FC = () => {
           ) : null}
         </div>
       </Dialog>
+      <ToastViewport>
+        {fxRefreshFeedback ? (
+          <InlineAlert
+            elevated
+            variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
+            title={text.fxRefreshResult}
+            message={fxRefreshFeedback.text}
+            action={(
+              <button
+                type="button"
+                onClick={dismissFxRefreshFeedback}
+                className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                aria-label={t('common.close')}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            className="pointer-events-auto"
+          />
+        ) : null}
+      </ToastViewport>
     </div>
   );
 };
