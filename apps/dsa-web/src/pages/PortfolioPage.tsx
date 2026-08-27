@@ -1338,7 +1338,7 @@ const PortfolioPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="grid grid-cols-1 items-start xl:grid-cols-3 gap-3">
+      <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5 xl:col-span-2">
           <DashboardPanelHeader
             className="mb-3"
