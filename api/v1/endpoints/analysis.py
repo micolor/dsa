@@ -217,6 +217,14 @@ def _is_obviously_invalid_analysis_input(text: str) -> bool:
     if not text or is_code_like(text):
         return False
 
+    # Off-market fund codes (explicit .FUND / .OTC suffix) are valid analysis
+    # inputs; let them through so the resolver can preserve the suffix.
+    # Placed before the free-text regex to keep behavior consistent with
+    # is_fund_code, which also accepts the underscore form (e.g. 006229_FUND).
+    from src.services.fund_data_provider import is_fund_code
+    if is_fund_code(text):
+        return False
+
     if not _SUPPORTED_FREE_TEXT_RE.fullmatch(text):
         return True
 
@@ -236,6 +244,14 @@ def _resolve_and_normalize_input(raw_value: str) -> str:
     text = (raw_value or "").strip()
     if not text:
         return ""
+
+    # Off-market fund codes (explicit .FUND / .OTC suffix) are not code-like
+    # and cannot be resolved by name; carry the normalized fund code through
+    # with its suffix preserved so analyze_stock still routes it to the fund
+    # path.
+    from src.services.fund_data_provider import is_fund_code, strip_fund_suffix
+    if is_fund_code(text):
+        return f"{strip_fund_suffix(text)}.FUND"
 
     if is_code_like(text):
         return resolve_index_stock_code_for_analysis(text)
