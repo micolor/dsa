@@ -70,6 +70,7 @@ import { areStockCodesEquivalent, normalizeStockCode } from '../utils/stockCode'
 import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
 import { SELECT_CHEVRON_CLASS } from '../utils/formClasses';
+import { cn } from '../utils/cn';
 
 const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
 const DEFAULT_PAGE_SIZE = 20;
@@ -1581,7 +1582,7 @@ const PortfolioPage: React.FC = () => {
             {/* Toolbar: type toggle + inline focus chip + primary filters */}
             <div className="flex flex-wrap items-center gap-2">
               <select
-                className={`${PORTFOLIO_SELECT_CLASS} w-32`}
+                className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')}
                 value={eventType}
                 onChange={(e) => setEventType(e.target.value as EventType)}
                 aria-label="事件类型"
@@ -1607,15 +1608,15 @@ const PortfolioPage: React.FC = () => {
 
               <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
                 {(eventType === 'trade' || eventType === 'corporate') ? (
-                  <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} placeholder="股票代码" value={eventSymbol}
+                  <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-28')} placeholder="股票代码" value={eventSymbol}
                     onChange={(e) => setEventSymbol(e.target.value)} aria-label="股票代码筛选" />
                 ) : null}
-                <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} type="date" value={eventDateFrom}
+                <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateFrom}
                   onChange={(e) => setEventDateFrom(e.target.value)} aria-label="起始日期" />
-                <input className={`${PORTFOLIO_INPUT_CLASS} w-32`} type="date" value={eventDateTo}
+                <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateTo}
                   onChange={(e) => setEventDateTo(e.target.value)} aria-label="结束日期" />
                 {eventType === 'trade' ? (
-                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventSide}
+                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventSide}
                     onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)} aria-label="买卖方向">
                     <option value="">全部方向</option>
                     <option value="buy">买入</option>
@@ -1623,7 +1624,7 @@ const PortfolioPage: React.FC = () => {
                   </select>
                 ) : null}
                 {eventType === 'cash' ? (
-                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventDirection}
+                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventDirection}
                     onChange={(e) => setEventDirection(e.target.value as '' | PortfolioCashDirection)} aria-label="资金方向">
                     <option value="">全部方向</option>
                     <option value="in">流入</option>
@@ -1631,7 +1632,7 @@ const PortfolioPage: React.FC = () => {
                   </select>
                 ) : null}
                 {eventType === 'corporate' ? (
-                  <select className={`${PORTFOLIO_SELECT_CLASS} w-28`} value={eventActionType}
+                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventActionType}
                     onChange={(e) => setEventActionType(e.target.value as '' | PortfolioCorporateActionType)} aria-label="公司行为类型">
                     <option value="">全部公司行为</option>
                     <option value="cash_dividend">现金分红</option>
