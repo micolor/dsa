@@ -106,7 +106,6 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
 }) => {
   const { t } = useUiLanguage();
   const isMarketReviewHistoryReport = selectedReport?.meta.reportType === 'market_review';
-  const isFundHistoryReport = selectedReport?.meta.reportType === 'fund';
   const isHistoryTrendUnavailable = !selectedReport || !selectedReport.meta.stockCode;
   const liveMarketReviewLanguage: ReportLanguage = normalizeReportLanguage(marketReviewPayload?.language);
 
@@ -182,7 +181,7 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
       ) : !marketReviewReport && selectedReport ? (
         <div className="space-y-4 pb-8">
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {!isMarketReviewHistoryReport && !isFundHistoryReport ? (
+            {!isMarketReviewHistoryReport ? (
               <>
                 <Button
                   variant="home-action-ai"
