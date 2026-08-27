@@ -36,15 +36,17 @@ class FundDataProvider:
         for _, r in df.iterrows():
             try:
                 d = datetime.strptime(str(r["净值日期"]), "%Y-%m-%d").date()
-            except Exception:
+                raw_nav = r.get("单位净值") or r.get("单位净值估算") or 0
+                nav = float(raw_nav)
+                unit_nav = None if pd.isna(nav) else nav
+                daily_growth = float(r.get("日增长率", 0) or 0)
+            except (ValueError, TypeError):
+                # 单行单元值非法（如 "-"、空白、非数字）时跳过该行，避免整个净值序列崩溃
                 continue
-            raw_nav = r.get("单位净值") or r.get("单位净值估算") or 0
-            nav = float(raw_nav)
-            unit_nav = None if pd.isna(nav) else nav
             rows.append(FundNavRow(
                 date=d,
                 unit_nav=unit_nav,
-                daily_growth=float(r.get("日增长率", 0) or 0),
+                daily_growth=daily_growth,
             ))
         rows.sort(key=lambda x: x.date)
         return rows

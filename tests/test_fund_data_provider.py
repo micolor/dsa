@@ -56,3 +56,16 @@ def test_normalize_nav_df_treats_nan_as_missing():
     })
     parsed = FundDataProvider._normalize_nav_df(df)
     assert parsed[1].unit_nav is None
+
+
+def test_normalize_nav_df_skips_malformed_cell_row():
+    import pandas as pd
+    df = pd.DataFrame({
+        "净值日期": ["2024-01-01", "2024-01-02", "2024-01-03"],
+        "单位净值": [1.0, "-", 1.2],
+        "日增长率": [0.0, 1.0, 0.2],
+    })
+    parsed = FundDataProvider._normalize_nav_df(df)
+    assert len(parsed) == 2
+    assert parsed[0].unit_nav == 1.0
+    assert parsed[1].unit_nav == 1.2
