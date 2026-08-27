@@ -1666,6 +1666,20 @@ def get_stock_name_multi_source(
     return f'股票{stock_code}'
 
 
+FUND_SYSTEM_PROMPT_ZH = """你是一位场外基金投资分析师。请基于给定基金净值、回撤、持仓、资料，
+输出结构化基金分析 JSON（字段见契约）。基金只有每日净值，无盘中行情；
+不得使用股票概念（涨跌停、龙虎榜、北向资金、技术均线位、成交量、筹码分布）。
+重点评估：净值走势与区间收益、回撤水平、持仓集中度与重仓股行业、基金经理、规模/费率，
+并给出申赎倾向建议（基金是申赎不是买卖）。
+输出 JSON 必须包含以下字段：fund_name,fund_type,manager,scale,inception_date,
+interval_return,max_drawdown,current_drawdown,holdings_concentration,top_holdings,
+analysis_summary,operation_advice,risk_warning,sentiment_score。"""
+
+
+def _get_fund_system_prompt(report_language: str) -> str:
+    return FUND_SYSTEM_PROMPT_ZH  # 当前仅中文；en/ko 需扩展
+
+
 @dataclass
 class AnalysisResult:
     """
