@@ -4677,10 +4677,76 @@ class GeminiAnalyzer:
 
         self._validate_analysis_minimal_contract(data)
     
+    def _validate_fund_json_response(self, text: str) -> None:
+        """Validate that *text* contains one parseable JSON object (fund contract).
+
+        Used as the ``response_validator`` argument to :meth:`_call_litellm` so a
+        JSON-less or unparseable fund reply is treated as a model failure and
+        triggers fallback to the next configured model.  Unlike the stock
+        validator, this does not require stock-specific minimal fields, so it
+        stays reusable for the fund report contract.
+        """
+        try:
+            _json_str, data = self._extract_analysis_json_object(text)
+        except ValueError as exc:
+            reason = str(exc) or "invalid_json"
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason=reason,
+                message="No unique JSON object found in LLM response",
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason="invalid_json",
+                message=str(exc)[:200],
+            ) from exc
+        if not isinstance(data, dict):
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason="invalid_json",
+                message="Fund JSON root is not an object",
+            )
+
+    def run_fund_analysis(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        report_language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run a fund analysis LLM call and return the parsed JSON dict.
+
+        Reuses the existing LLM call skeleton (model fallback, JSON extraction
+        and repair) without duplicating the stock analyzer.  Only the system
+        prompt, the user context and the validation contract are swapped for the
+        fund domain.
+        """
+        config = self._get_runtime_config()
+        generation_config = {
+            "temperature": config.llm_temperature,
+            "max_output_tokens": 8192,
+        }
+        try:
+            response_text, _model_used, _llm_usage = self._call_litellm(
+                user_prompt,
+                generation_config,
+                system_prompt=system_prompt,
+                stream=True,
+                response_validator=self._validate_fund_json_response,
+            )
+        except _AllModelsFailedError as exc:
+            # Best-effort text fallback when every model returned invalid JSON.
+            if exc.last_response_text is not None:
+                response_text = exc.last_response_text
+            else:
+                raise
+        _json_str, data = self._extract_analysis_json_object(response_text)
+        return data
+
     def _parse_text_response(
-        self, 
-        response_text: str, 
-        code: str, 
+        self,
+        response_text: str,
+        code: str,
         name: str
     ) -> AnalysisResult:
         """从纯文本响应中尽可能提取分析信息"""

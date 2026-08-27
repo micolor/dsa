@@ -79,6 +79,12 @@ class AnalysisService:
             - stock_name: 股票名称
             - report: 分析报告
         """
+        # 场外基金分流：仅显式基金后缀（.FUND/.OTC）进场外基金分析，不影响证券路径。
+        from src.services.fund_data_provider import is_fund_code
+        if is_fund_code(stock_code):
+            return self._analyze_fund_stock(
+                stock_code, query_id=query_id, report_language=report_language,
+                trace_id=trace_id)
         try:
             self.last_error = None
             # 导入分析相关模块
@@ -253,4 +259,62 @@ class AnalysisService:
             "stock_name": stock_name,
             "report": report,
             "diagnostic_summary": diagnostic_summary,
+        }
+
+    def _analyze_fund_stock(self, stock_code, query_id=None,
+                            report_language=None, trace_id=None):
+        """场外基金分析：净值/持仓 -> LLM -> 基金报告结构（复用骨架，领域层基金专属）。"""
+        from src.services.fund_data_provider import FundDataProvider, strip_fund_suffix
+        from src.schemas.fund_report_schema import FundReportSchema
+
+        provider = FundDataProvider()
+        nav_rows, nav_quality = provider.get_nav_series(stock_code)
+        stats = provider.stats_from_nav(nav_rows)
+        try:
+            holdings = provider.get_holdings(stock_code)
+        except Exception:
+            holdings = []
+        fund_context = {
+            "is_fund": True,
+            "fund_code": strip_fund_suffix(stock_code),
+            "nav_quality": nav_quality,
+            "holding_count": len(holdings),
+            "holding_preview": [h.model_dump() for h in holdings[:10]],
+            **stats,
+        }
+        # 复用 LLM 分析骨架：以基金 prompt 调用，解析为基金报告
+        llm_data = self._run_fund_llm(fund_context, report_language)
+        report_schema = FundReportSchema(**llm_data)
+        return self._build_fund_response(stock_code, report_schema,
+                                         query_id, report_language)
+
+    def _run_fund_llm(self, context, report_language):
+        """复用 GeminiAnalyzer 的模型调用骨架，喂基金 prompt 与基金上下文，返回结构化字典。"""
+        import json
+        from src.analyzer import GeminiAnalyzer, _get_fund_system_prompt
+
+        analyzer = GeminiAnalyzer()
+        system_prompt = _get_fund_system_prompt(report_language)
+        user_prompt = (
+            "请基于以下场外基金数据（JSON），严格按基金分析契约输出结构化 JSON：\n"
+            + json.dumps(context, ensure_ascii=False, default=str)
+        )
+        return analyzer.run_fund_analysis(system_prompt, user_prompt,
+                                          report_language)
+
+    def _build_fund_response(self, stock_code, schema, query_id,
+                             report_language):
+        """构建与 _build_analysis_response 对齐的基金分析响应结构。"""
+        return {
+            "query_id": query_id,
+            "stock_code": stock_code,
+            "report": {
+                "meta": {
+                    "query_id": query_id,
+                    "stock_code": stock_code,
+                    "report_type": "fund",
+                    "report_language": report_language,
+                },
+                "fund": schema.model_dump(),
+            },
         }
