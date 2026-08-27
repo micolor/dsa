@@ -77,6 +77,7 @@ def serialize_stock_list(value: str) -> str:
 class ParseStatus:
     STOCK = "stock"
     INDEX = "index"
+    FUND = "fund"
     UNSUPPORTED = "unsupported"
 
 
@@ -503,6 +504,27 @@ def parse_analysis_target(
             display_code="",
             exchange="UNKNOWN",
             unsupported_reason="empty input",
+        )
+
+    # Off-market fund branch (issue fund support): an explicit fund-suffix
+    # token (``006229.FUND`` / ``006229.OTC``) is short-circuited here, before
+    # any of the three stock/index contracts below, so it never enters the
+    # normalizer / prefix splitter / bare-code classifier. Only ``is_fund_code``
+    # matches (explicit ``.FUND``/``.OTC`` suffix); a bare numeric code such as
+    # ``006229`` is NOT a fund and keeps its stock contract (contract #2).
+    # Imported lazily to avoid any coupling with ``fund_data_provider``.
+    from src.services.fund_data_provider import is_fund_code, strip_fund_suffix
+    if is_fund_code(raw):
+        return AnalysisTarget(
+            raw_input=raw_input,
+            asset_type=ParseStatus.FUND,
+            canonical_id=strip_fund_suffix(raw),
+            display_code=raw,
+            exchange="UNKNOWN",
+            unsupported_reason=None,
+            normalized_prefix="",
+            normalized_code=strip_fund_suffix(raw),
+            matched_index=None,
         )
 
     # Note: we deliberately use ``is None`` rather than ``or`` so that an
