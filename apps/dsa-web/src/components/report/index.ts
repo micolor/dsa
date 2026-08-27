@@ -9,4 +9,5 @@ export * from './ReportDetails';
 export * from './ReportMarkdown';
 export * from './ReportMarkdownBody';
 export * from './MarketReviewReportView';
+export * from './FundReportView';
 export * from './ShareImageButton';

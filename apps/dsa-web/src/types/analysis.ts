@@ -6,7 +6,7 @@
 // ============ Request Types ============
 
 export type StockReportType = 'simple' | 'detailed' | 'full' | 'brief';
-export type ReportType = StockReportType | 'market_review';
+export type ReportType = StockReportType | 'market_review' | 'fund';
 export type AnalysisPhase = 'auto' | 'premarket' | 'intraday' | 'postmarket';
 export type MarketReviewRegion = 'cn' | 'hk' | 'us' | 'jp' | 'kr';
 
@@ -353,6 +353,34 @@ export interface AnalysisContextPackOverview {
   metadata: AnalysisContextPackOverviewMetadata;
 }
 
+/** 场外基金报告 top_holdings 单条明细。后端 snake_case 经 API 层 toCamelCase 深转后到达前端。 */
+export interface FundHoldingItem {
+  code?: string;
+  name?: string;
+  ratio?: number | null;
+  marketValue?: string | number | null;
+  quarter?: string | null;
+}
+
+/** 场外基金分析 payload。后端 FundReportSchema.dump() 为 snake_case，经 `toCamelCase` 深转后为 camelCase。 */
+export interface FundReportPayload {
+  fundName?: string;
+  fundType?: string;
+  manager?: string;
+  scale?: string;
+  inceptionDate?: string;
+  intervalReturn?: number | null;
+  maxDrawdown?: number | null;
+  currentDrawdown?: number | null;
+  holdingsConcentration?: string;
+  topHoldings?: FundHoldingItem[];
+  analysisSummary?: string;
+  operationAdvice?: string;
+  riskWarning?: string;
+  sentimentScore?: number;
+  [key: string]: unknown;
+}
+
 /** Details section */
 export interface ReportDetails {
   newsContent?: string;
@@ -365,6 +393,7 @@ export interface ReportDetails {
   sectorRankings?: SectorRankings;
   conceptRankings?: SectorRankings;
   marketStructure?: MarketStructureContext | null;
+  fund?: FundReportPayload;
 }
 
 /** Full analysis report */

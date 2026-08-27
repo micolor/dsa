@@ -7,6 +7,7 @@ import { ReportDetails } from './ReportDetails';
 import { ReportDiagnostics } from './ReportDiagnostics';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
+import { FundReportView } from './FundReportView';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -49,6 +50,17 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
   if (meta.reportType === 'market_review') {
     return (
       <MarketReviewReportView
+        report={report}
+        recordId={recordId}
+        reportLanguage={reportLanguage}
+        onOpenRunFlow={onOpenRunFlow}
+      />
+    );
+  }
+
+  if (meta.reportType === 'fund') {
+    return (
+      <FundReportView
         report={report}
         recordId={recordId}
         reportLanguage={reportLanguage}

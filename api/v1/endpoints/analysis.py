@@ -1486,6 +1486,7 @@ def _build_analysis_report(
             break
     analysis_context_pack_overview = extract_analysis_context_pack_overview(context_snapshot)
     api_context_snapshot = sanitize_context_snapshot_for_api(context_snapshot)
+    fund_payload = report_data.get("fund")
     details = None
     has_board_details = (
         bool(extracted_boards.get("belong_boards"))
@@ -1494,6 +1495,7 @@ def _build_analysis_report(
     )
     if (
         details_data
+        or fund_payload is not None
         or any(extracted_fundamental.values())
         or has_board_details
         or market_structure is not None
@@ -1511,6 +1513,7 @@ def _build_analysis_report(
             sector_rankings=extracted_boards.get("sector_rankings"),
             concept_rankings=extracted_boards.get("concept_rankings"),
             market_structure=market_structure,
+            fund=fund_payload,
         )
 
     return AnalysisReport(
