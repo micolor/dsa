@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 DEFENSIVE_DECISION_SIGNAL_ACTIONS = ("sell", "reduce", "alert")
 
+# 回撤回填每次调用最多补齐的最近缺失交易日数。首屏 /risk 不应一次性补齐整个
+# lookback 窗口（逐日逐账户重算快照），否则首次加载会被拖慢；改为每次补齐最近一批，
+# 后续调用再增量补齐历史，权衡为「首屏有界延迟 + 回撤窗口渐进完整」。
+DRAWDOWN_BACKFILL_BATCH_DAYS = 30
+
 
 class PortfolioRiskService:
     """Compute portfolio risk blocks on top of replayed snapshot data."""
@@ -226,37 +231,47 @@ class PortfolioRiskService:
             account_id=account_id,
             lookback_days=lookback_days,
         )
+        batch_days = max(1, DRAWDOWN_BACKFILL_BATCH_DAYS)
+
+        def _day_iter() -> List[date]:
+            days: List[date] = []
+            current = start_date
+            while current <= as_of_date:
+                days.append(current)
+                current += timedelta(days=1)
+            return days
+
         if account_id is not None:
             existing_dates = {row.snapshot_date for row in existing_rows if int(row.account_id) == int(account_id)}
-            current_date = start_date
-            while current_date <= as_of_date:
-                if current_date not in existing_dates:
-                    self.portfolio_service.get_portfolio_snapshot(
-                        account_id=account_id,
-                        as_of=current_date,
-                        cost_method=cost_method,
-                        include_realtime=include_realtime,
-                    )
-                    existing_dates.add(current_date)
-                current_date += timedelta(days=1)
+            missing = [day for day in _day_iter() if day not in existing_dates]
+            # 只补齐最近 batch_days 个缺失日，避免首屏被整窗回填拖慢。
+            for current_date in missing[-batch_days:]:
+                self.portfolio_service.get_portfolio_snapshot(
+                    account_id=account_id,
+                    as_of=current_date,
+                    cost_method=cost_method,
+                    include_realtime=include_realtime,
+                )
+                existing_dates.add(current_date)
             return
 
         account_ids = [int(account.id) for account in self.repo.list_accounts(include_inactive=False)]
         if not account_ids:
             return
         existing_pairs = {(int(row.account_id), row.snapshot_date) for row in existing_rows}
-        current_date = start_date
-        while current_date <= as_of_date:
-            if not all((aid, current_date) in existing_pairs for aid in account_ids):
-                self.portfolio_service.get_portfolio_snapshot(
-                    account_id=None,
-                    as_of=current_date,
-                    cost_method=cost_method,
-                    include_realtime=include_realtime,
-                )
-                for aid in account_ids:
-                    existing_pairs.add((aid, current_date))
-            current_date += timedelta(days=1)
+        missing = [
+            day for day in _day_iter()
+            if not all((aid, day) in existing_pairs for aid in account_ids)
+        ]
+        for current_date in missing[-batch_days:]:
+            self.portfolio_service.get_portfolio_snapshot(
+                account_id=None,
+                as_of=current_date,
+                cost_method=cost_method,
+                include_realtime=include_realtime,
+            )
+            for aid in account_ids:
+                existing_pairs.add((aid, current_date))
 
     def _resolve_backfill_start_date(
         self,
@@ -279,14 +294,27 @@ class PortfolioRiskService:
             return as_of_date
         return max(window_start, min(first_activity_candidates))
 
+    @staticmethod
+    def _normalize_concentration_symbol(symbol: str, *, market: str) -> str:
+        """归一化代码用于集中度合并，避免同一股票以不同格式（600519/SH600519/600519.SH）被拆成多条。"""
+        if not market:
+            return symbol
+        try:
+            return DecisionSignalService.normalize_stock_code_for_signal(symbol, market=market)
+        except Exception:
+            return symbol
+
     def _build_concentration(self, snapshot: Dict[str, Any], threshold_pct: float, *, as_of_date: date) -> Dict[str, Any]:
         total_mv = float(snapshot.get("total_market_value", 0.0) or 0.0)
         exposure_by_symbol: Dict[str, float] = {}
+        display_by_key: Dict[str, str] = {}
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
-                symbol = str(pos.get("symbol") or "").strip().upper()
-                if not symbol:
+                raw_symbol = str(pos.get("symbol") or "").strip().upper()
+                if not raw_symbol:
                     continue
+                market = str(pos.get("market") or account.get("market") or "").strip().lower()
+                key_symbol = self._normalize_concentration_symbol(raw_symbol, market=market)
                 market_value = float(pos.get("market_value_base") or 0.0)
                 valuation_currency = str(pos.get("valuation_currency") or account.get("base_currency") or "CNY")
                 converted, _, _ = self.portfolio_service.convert_amount(
@@ -295,14 +323,15 @@ class PortfolioRiskService:
                     to_currency="CNY",
                     as_of_date=as_of_date,
                 )
-                exposure_by_symbol[symbol] = exposure_by_symbol.get(symbol, 0.0) + converted
+                exposure_by_symbol[key_symbol] = exposure_by_symbol.get(key_symbol, 0.0) + converted
+                display_by_key.setdefault(key_symbol, raw_symbol)
 
         rows = []
-        for symbol, exposure in exposure_by_symbol.items():
+        for key_symbol, exposure in exposure_by_symbol.items():
             weight = (exposure / total_mv * 100.0) if total_mv > 0 else 0.0
             rows.append(
                 {
-                    "symbol": symbol,
+                    "symbol": display_by_key[key_symbol],
                     "market_value_base": round(exposure, 6),
                     "weight_pct": round(weight, 4),
                     "is_alert": bool(weight >= threshold_pct),
@@ -342,6 +371,8 @@ class PortfolioRiskService:
                 market = str(pos.get("market") or account.get("market") or "").strip().lower()
                 if not symbol:
                     continue
+                # 归一化用于同目录重个股计数（symbol_count），板块查询仍用原始代码，避免改变 data provider 行为。
+                key_symbol = self._normalize_concentration_symbol(symbol, market=market)
 
                 market_value = float(pos.get("market_value_base") or 0.0)
                 valuation_currency = str(pos.get("valuation_currency") or account.get("base_currency") or "CNY")
@@ -360,7 +391,7 @@ class PortfolioRiskService:
                     errors=errors,
                 )
                 sector_exposure[sector] = sector_exposure.get(sector, 0.0) + converted
-                sector_symbols.setdefault(sector, set()).add(symbol)
+                sector_symbols.setdefault(sector, set()).add(key_symbol)
 
         rows = []
         for sector, exposure in sector_exposure.items():
@@ -532,7 +563,9 @@ class PortfolioRiskService:
             for pos in account.get("positions", []):
                 avg_cost = float(pos.get("avg_cost", 0.0) or 0.0)
                 last_price = float(pos.get("last_price", 0.0) or 0.0)
-                if avg_cost <= 0:
+                # 缺价（last_price<=0，price_available=False）时无法判断止损位置，
+                # 否则会按 (avg_cost-0)/avg_cost 误算成 100% 亏损而误报。
+                if avg_cost <= 0 or last_price <= 0:
                     continue
                 loss_pct = max(0.0, (avg_cost - last_price) / avg_cost * 100.0)
                 if loss_pct < near_threshold:
