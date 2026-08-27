@@ -1607,14 +1607,14 @@ const PortfolioPage: React.FC = () => {
               ) : null}
 
               <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-                {(eventType === 'trade' || eventType === 'corporate') ? (
-                  <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-28')} placeholder="股票代码" value={eventSymbol}
-                    onChange={(e) => setEventSymbol(e.target.value)} aria-label="股票代码筛选" />
-                ) : null}
                 <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateFrom}
                   onChange={(e) => setEventDateFrom(e.target.value)} aria-label="起始日期" />
                 <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateTo}
                   onChange={(e) => setEventDateTo(e.target.value)} aria-label="结束日期" />
+                {(eventType === 'trade' || eventType === 'corporate') ? (
+                  <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-28')} placeholder="股票代码" value={eventSymbol}
+                    onChange={(e) => setEventSymbol(e.target.value)} aria-label="股票代码筛选" />
+                ) : null}
                 {eventType === 'trade' ? (
                   <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventSide}
                     onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)} aria-label="买卖方向">
@@ -1646,7 +1646,7 @@ const PortfolioPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-border/60">
+            <div className="flex min-h-[24rem] flex-col overflow-x-auto rounded-lg border border-border/60">
               {eventType === 'trade' ? (
                 <table className="w-full text-sm">
                   <thead className="text-xs text-muted-text border-b border-border/60">
@@ -1789,7 +1789,7 @@ const PortfolioPage: React.FC = () => {
                     <EmptyState
                       title="暂无流水"
                       description="调整筛选条件或先录入一笔交易、资金流水或公司行为。"
-                      className="border-none bg-transparent px-3 py-6 shadow-none"
+                      className="flex flex-1 flex-col items-center justify-center border-none bg-transparent px-3 py-6 shadow-none"
                     />
                   ) : null}
             </div>
