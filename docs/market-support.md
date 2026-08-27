@@ -136,3 +136,25 @@ Portfolio 允许 JP/KR 账户、交易和持仓快照进入现有链路，但会
 - Web UI 可视证据口径：Market Light 告警目标范围切到“大盘市场”时，市场区域下拉只显示 A 股、港股、美股，不显示日股/韩股；设置页 `MARKET_REVIEW_REGION` 渲染为可输入逗号分隔值的文本框。当前仓库不保存一次性截图证据，可替代证据为 `apps/dsa-web/src/components/alerts/__tests__/AlertRuleForm.test.tsx`、`apps/dsa-web/src/components/settings/__tests__/SettingsField.test.tsx` 和 `apps/dsa-web/tests/system_config_i18n.test.ts` 的断言。
 
 回滚方式：移除 Portfolio snapshot 的 `data_quality` / `limitations` 扩展，恢复告警前端/后端对市场枚举的旧边界说明；如需整体回滚，移除 `jp/kr` 市场识别、交易日历注册、YFinance 路由扩展、Web/API 类型放行、`scripts/stock_index_seeds/` 日韩种子索引，并删除本文档中的能力声明。
+
+## 场外基金（公募开放式）单基分析支持
+
+场外基金（公募开放式基金）作为一种**独立资产类别**（`asset_type=fund`）与证券（A 股 / 港美股 / ETF 等）平行支持，可进入单基分析报告链路。用户以显式后缀输入基金代码（如 `006229.FUND` / `006229.OTC`，含下划线形态）即可触发基金专属 LLM 报告，复用既有编排、模型、通知、历史与渲染骨架。
+
+支持范围：
+
+- 识别仅限**显式后缀**（`.FUND` / `.OTC`）；裸 6 位码（如 `006229`）默认仍按既有证券语义处理，不做自动纠偏为基金，避免破坏现有证券行为。
+- 数据：仅每日净值（无盘中行情），经 akshare 净值 / 持仓接口获取；持仓为最近可得的季度披露。
+- 报告：基金专属字段（净值区间收益、回撤、重仓股、基金经理、规模、申赎建议），不套用股票概念（涨跌停、龙虎榜、北向资金等）。
+
+边界与不承诺项：
+
+- 不承诺实时净值；净值本身按每日收盘更新。
+- 不承诺完整同类基金排行、QDII 特殊结构，也不支持裸码自动识别为基金。
+- 报告金融语义与股票链路分离（`meta.reportType==='fund'`），前端按 `FundReportView` 渲染。
+
+配置：
+
+- `.env` 新增 `FUND_SUPPORT`（默认 `false`），当前为后续 UI 入口 / 提示预留的开关，分析路由由显式后缀驱动，未读取该配置；关闭它不改变证券链路行为。
+
+回滚方式：移除基金代码识别、`FundDataProvider`、基金报告 schema / prompt、`_analyze_fund_stock` 分流与前端 `FundReportView` 渲染，并删除本文档中的能力声明。
