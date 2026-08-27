@@ -78,7 +78,6 @@ def test_analyze_fund_structures_report_with_mocked_provider():
 
 
 def test_analyze_fund_internal_llm_method_reuses_analyzer():
-    # 验证 _run_fund_llm 复用 GeminiAnalyzer.run_fund_analysis（不复制整套 analyzer）。
     cnt = {"calls": 0}
 
     class _FakeAnalyzer:
@@ -94,3 +93,33 @@ def test_analyze_fund_internal_llm_method_reuses_analyzer():
         out = svc._run_fund_llm({"fund_code": "006229"}, "zh")
     assert cnt["calls"] == 1
     assert out == {"fund_name": "X"}
+
+
+def test_build_fund_response_top_level_keys_align():
+    # 与股票路径 _build_analysis_response 的顶层 key 集同构：
+    # query_id / trace_id / stock_code / stock_name / report / diagnostic_summary。
+    svc = AnalysisService()
+    schema = FundReportSchema(fund_name="X", sentiment_score=60)
+    out = svc._build_fund_response("006229.FUND", schema, query_id="q1",
+                                   report_language="zh", trace_id="trc-1")
+    for key in ("query_id", "trace_id", "stock_code", "stock_name",
+                "report", "diagnostic_summary"):
+        assert key in out, f"缺失顶层 key: {key}"
+    assert out["trace_id"] == "trc-1"
+    assert out["report"]["meta"]["report_type"] == "fund"
+
+
+def test_analyze_fund_response_contract_via_mocked_path():
+    # 经 mock 的 _analyze_fund_stock 入口验证，顶层 key 集与股票路径一致。
+    with mock.patch("src.services.fund_data_provider.is_fund_code", return_value=True), \
+         mock.patch.object(AnalysisService, "_analyze_fund_stock",
+                           return_value=AnalysisService()._build_fund_response(
+                               "006229.FUND", FundReportSchema(fund_name="X"),
+                               query_id="q1", report_language="zh",
+                               trace_id="trc-1")):
+        svc = AnalysisService()
+        out = svc.analyze_stock("006229.FUND", query_id="q1", trace_id="src-trc")
+        assert "trace_id" in out
+        assert "stock_name" in out
+        assert "diagnostic_summary" in out
+        assert out["report"]["meta"]["report_type"] == "fund"

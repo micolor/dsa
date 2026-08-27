@@ -286,7 +286,8 @@ class AnalysisService:
         llm_data = self._run_fund_llm(fund_context, report_language)
         report_schema = FundReportSchema(**llm_data)
         return self._build_fund_response(stock_code, report_schema,
-                                         query_id, report_language)
+                                         query_id, report_language,
+                                         trace_id=trace_id)
 
     def _run_fund_llm(self, context, report_language):
         """复用 GeminiAnalyzer 的模型调用骨架，喂基金 prompt 与基金上下文，返回结构化字典。"""
@@ -303,11 +304,19 @@ class AnalysisService:
                                           report_language)
 
     def _build_fund_response(self, stock_code, schema, query_id,
-                             report_language):
-        """构建与 _build_analysis_response 对齐的基金分析响应结构。"""
+                             report_language, trace_id=None):
+        """构建与 _build_analysis_response 顶层 key 集对齐的基金分析响应结构。
+
+        顶层 key 集保持一致：query_id / trace_id / stock_code / stock_name /
+        report / diagnostic_summary。基金无股票语义，stock_name 取基金名称，
+        diagnostic_summary 置 None（与股票路径字段存在性对齐）。
+        """
+        fund_name = getattr(schema, "fund_name", None)
         return {
             "query_id": query_id,
+            "trace_id": trace_id,
             "stock_code": stock_code,
+            "stock_name": fund_name,
             "report": {
                 "meta": {
                     "query_id": query_id,
@@ -317,4 +326,5 @@ class AnalysisService:
                 },
                 "fund": schema.model_dump(),
             },
+            "diagnostic_summary": None,
         }
