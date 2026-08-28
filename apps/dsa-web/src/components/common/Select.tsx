@@ -15,6 +15,8 @@ interface SelectProps {
   onChange: (value: string) => void;
   options: SelectOption[];
   label?: string;
+  /** Accessible name override for the trigger (does not render a visible label). */
+  ariaLabel?: string;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -32,6 +34,7 @@ export const Select: React.FC<SelectProps> = ({
   onChange,
   options,
   label,
+  ariaLabel,
   placeholder,
   disabled = false,
   className = '',
@@ -107,7 +110,7 @@ export const Select: React.FC<SelectProps> = ({
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          aria-label={label || resolvedPlaceholder}
+          aria-label={ariaLabel || label || resolvedPlaceholder}
           data-value={value}
           className={cn(
             SELECT_INPUT_CLASS,

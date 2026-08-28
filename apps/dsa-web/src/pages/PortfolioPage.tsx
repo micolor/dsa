@@ -12,10 +12,12 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DatePicker,
   Dialog,
   EmptyState,
   InlineAlert,
   Loading,
+  Select,
   StatCard,
   ToastViewport,
 } from '../components/common';
@@ -69,7 +71,6 @@ import { useStockIndex } from '../hooks/useStockIndex';
 import { areStockCodesEquivalent, normalizeStockCode } from '../utils/stockCode';
 import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
-import { SELECT_CHEVRON_CLASS } from '../utils/formClasses';
 import { cn } from '../utils/cn';
 
 const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
@@ -133,7 +134,6 @@ type FxRefreshContext = {
 
 const PORTFOLIO_INPUT_CLASS =
   'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const PORTFOLIO_SELECT_CLASS = `${SELECT_CHEVRON_CLASS} w-full`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 
@@ -1140,29 +1140,27 @@ const PortfolioPage: React.FC = () => {
           <div className="grid w-full grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_minmax(0,1fr)] items-end gap-2">
             <div>
               <p className="text-xs text-muted-text mb-1">{text.accountView}</p>
-              <select
+              <Select
                 value={String(selectedAccount)}
-                onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                className={PORTFOLIO_SELECT_CLASS}
-              >
-                <option value="all">{text.allAccounts}</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name} (#{account.id})
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setSelectedAccount(v === 'all' ? 'all' : Number(v))}
+                ariaLabel={text.accountView}
+                options={[
+                  { value: 'all', label: text.allAccounts },
+                  ...accounts.map((account) => ({ value: String(account.id), label: `${account.name} (#${account.id})` })),
+                ]}
+              />
             </div>
             <div>
               <p className="text-xs text-muted-text mb-1">{text.costMethod}</p>
-              <select
+              <Select
                 value={costMethod}
-                onChange={(e) => setCostMethod(e.target.value as PortfolioCostMethod)}
-                className={PORTFOLIO_SELECT_CLASS}
-              >
-                <option value="fifo">{text.fifo}</option>
-                <option value="avg">{text.avg}</option>
-              </select>
+                onChange={(v) => setCostMethod(v as PortfolioCostMethod)}
+                ariaLabel={text.costMethod}
+                options={[
+                  { value: 'fifo', label: text.fifo },
+                  { value: 'avg', label: text.avg },
+                ]}
+              />
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -1288,18 +1286,19 @@ const PortfolioPage: React.FC = () => {
               value={accountForm.baseCurrency}
               onChange={(e) => setAccountForm((prev) => ({ ...prev, baseCurrency: e.target.value.toUpperCase() }))}
             />
-            <select
-              className={PORTFOLIO_SELECT_CLASS}
+            <Select
+              ariaLabel="市场"
               value={accountForm.market}
-              onChange={(e) => setAccountForm((prev) => ({ ...prev, market: e.target.value as PortfolioAccountMarket }))}
-            >
-              <option value="cn">市场：A 股（cn）</option>
-              <option value="hk">市场：港股（hk）</option>
-              <option value="us">市场：美股（us）</option>
-              <option value="jp">市场：日股（jp）</option>
-              <option value="kr">市场：韩股（kr）</option>
-              <option value="tw">市场：台股（tw）</option>
-            </select>
+              onChange={(v) => setAccountForm((prev) => ({ ...prev, market: v as PortfolioAccountMarket }))}
+              options={[
+                { value: 'cn', label: '市场：A 股（cn）' },
+                { value: 'hk', label: '市场：港股（hk）' },
+                { value: 'us', label: '市场：美股（us）' },
+                { value: 'jp', label: '市场：日股（jp）' },
+                { value: 'kr', label: '市场：韩股（kr）' },
+                { value: 'tw', label: '市场：台股（tw）' },
+              ]}
+            />
             <Button type="submit" variant="primary" size="lg" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}
             </Button>
@@ -1581,16 +1580,17 @@ const PortfolioPage: React.FC = () => {
         <div className="space-y-3">
             {/* Toolbar: type toggle + inline focus chip + primary filters */}
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')}
+              <Select
+                className="w-32"
                 value={eventType}
-                onChange={(e) => setEventType(e.target.value as EventType)}
-                aria-label="事件类型"
-              >
-                <option value="trade">交易流水</option>
-                <option value="cash">资金流水</option>
-                <option value="corporate">公司行为</option>
-              </select>
+                onChange={(v) => setEventType(v as EventType)}
+                ariaLabel="事件类型"
+                options={[
+                  { value: 'trade', label: '交易流水' },
+                  { value: 'cash', label: '资金流水' },
+                  { value: 'corporate', label: '公司行为' },
+                ]}
+              />
 
               {eventSymbol && (eventType === 'trade' || eventType === 'corporate') ? (
                 <Badge variant="info" className="gap-1 pr-1">
@@ -1607,37 +1607,50 @@ const PortfolioPage: React.FC = () => {
               ) : null}
 
               <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-                <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateFrom}
-                  onChange={(e) => setEventDateFrom(e.target.value)} aria-label="起始日期" />
-                <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-32')} type="date" value={eventDateTo}
-                  onChange={(e) => setEventDateTo(e.target.value)} aria-label="结束日期" />
+                <DatePicker className="w-32" value={eventDateFrom} onChange={setEventDateFrom} placeholder="起始日期" />
+                <DatePicker className="w-32" value={eventDateTo} onChange={setEventDateTo} placeholder="结束日期" />
                 {(eventType === 'trade' || eventType === 'corporate') ? (
                   <input className={cn(PORTFOLIO_INPUT_CLASS, 'w-28')} placeholder="股票代码" value={eventSymbol}
                     onChange={(e) => setEventSymbol(e.target.value)} aria-label="股票代码筛选" />
                 ) : null}
                 {eventType === 'trade' ? (
-                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventSide}
-                    onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)} aria-label="买卖方向">
-                    <option value="">全部方向</option>
-                    <option value="buy">买入</option>
-                    <option value="sell">卖出</option>
-                  </select>
+                  <Select
+                    className="w-32"
+                    value={eventSide}
+                    onChange={(v) => setEventSide(v as '' | PortfolioSide)}
+                    ariaLabel="买卖方向"
+                    options={[
+                      { value: '', label: '全部方向' },
+                      { value: 'buy', label: '买入' },
+                      { value: 'sell', label: '卖出' },
+                    ]}
+                  />
                 ) : null}
                 {eventType === 'cash' ? (
-                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventDirection}
-                    onChange={(e) => setEventDirection(e.target.value as '' | PortfolioCashDirection)} aria-label="资金方向">
-                    <option value="">全部方向</option>
-                    <option value="in">流入</option>
-                    <option value="out">流出</option>
-                  </select>
+                  <Select
+                    className="w-32"
+                    value={eventDirection}
+                    onChange={(v) => setEventDirection(v as '' | PortfolioCashDirection)}
+                    ariaLabel="资金方向"
+                    options={[
+                      { value: '', label: '全部方向' },
+                      { value: 'in', label: '流入' },
+                      { value: 'out', label: '流出' },
+                    ]}
+                  />
                 ) : null}
                 {eventType === 'corporate' ? (
-                  <select className={cn(PORTFOLIO_SELECT_CLASS, 'w-32')} value={eventActionType}
-                    onChange={(e) => setEventActionType(e.target.value as '' | PortfolioCorporateActionType)} aria-label="公司行为类型">
-                    <option value="">全部公司行为</option>
-                    <option value="cash_dividend">现金分红</option>
-                    <option value="split_adjustment">拆并股调整</option>
-                  </select>
+                  <Select
+                    className="w-32"
+                    value={eventActionType}
+                    onChange={(v) => setEventActionType(v as '' | PortfolioCorporateActionType)}
+                    ariaLabel="公司行为类型"
+                    options={[
+                      { value: '', label: '全部公司行为' },
+                      { value: 'cash_dividend', label: '现金分红' },
+                      { value: 'split_adjustment', label: '拆并股调整' },
+                    ]}
+                  />
                 ) : null}
                 <Button type="button" variant="secondary" size="sm" onClick={() => void loadEvents()} disabled={eventLoading}>
                   <RefreshCw className={`h-4 w-4 ${eventLoading ? 'animate-spin' : ''}`} />
@@ -1862,13 +1875,16 @@ const PortfolioPage: React.FC = () => {
             ariaLabel="股票代码或名称"
           />
           <div className="grid grid-cols-2 gap-2">
-            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
-              onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
-            <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
-              onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
-              <option value="buy">买入</option>
-              <option value="sell">卖出</option>
-            </select>
+            <DatePicker value={tradeForm.tradeDate} onChange={(v) => setTradeForm((prev) => ({ ...prev, tradeDate: v }))} />
+            <Select
+              ariaLabel="方向"
+              value={tradeForm.side}
+              onChange={(v) => setTradeForm((prev) => ({ ...prev, side: v as PortfolioSide }))}
+              options={[
+                { value: 'buy', label: '买入' },
+                { value: 'sell', label: '卖出' },
+              ]}
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="数量（必填）" value={tradeForm.quantity}
@@ -1899,13 +1915,16 @@ const PortfolioPage: React.FC = () => {
         {writeBlocked ? <p className="mb-3 text-xs text-secondary-text">请先在右上角选择具体账户后再提交。</p> : null}
         <form className="space-y-2" onSubmit={handleCashSubmit}>
           <div className="grid grid-cols-2 gap-2">
-            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
-              onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-            <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
-              onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
-              <option value="in">流入</option>
-              <option value="out">流出</option>
-            </select>
+            <DatePicker value={cashForm.eventDate} onChange={(v) => setCashForm((prev) => ({ ...prev, eventDate: v }))} />
+            <Select
+              ariaLabel="资金方向"
+              value={cashForm.direction}
+              onChange={(v) => setCashForm((prev) => ({ ...prev, direction: v as PortfolioCashDirection }))}
+              options={[
+                { value: 'in', label: '流入' },
+                { value: 'out', label: '流出' },
+              ]}
+            />
           </div>
           <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="金额"
             value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
@@ -1929,13 +1948,16 @@ const PortfolioPage: React.FC = () => {
           <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码" value={corpForm.symbol}
             onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
           <div className="grid grid-cols-2 gap-2">
-            <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
-              onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
-            <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
-              onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
-              <option value="cash_dividend">现金分红</option>
-              <option value="split_adjustment">拆并股调整</option>
-            </select>
+            <DatePicker value={corpForm.effectiveDate} onChange={(v) => setCorpForm((prev) => ({ ...prev, effectiveDate: v }))} />
+            <Select
+              ariaLabel="公司行为类型"
+              value={corpForm.actionType}
+              onChange={(v) => setCorpForm((prev) => ({ ...prev, actionType: v as PortfolioCorporateActionType }))}
+              options={[
+                { value: 'cash_dividend', label: '现金分红' },
+                { value: 'split_adjustment', label: '拆并股调整' },
+              ]}
+            />
           </div>
           {corpForm.actionType === 'cash_dividend' ? (
             <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="每股分红"
@@ -1969,13 +1991,14 @@ const PortfolioPage: React.FC = () => {
           ) : null}
           {writeBlocked ? <p className="text-xs text-secondary-text">请先在右上角选择具体账户后再提交导入。</p> : null}
           <div className="grid grid-cols-2 gap-2">
-            <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
-              {brokers.length > 0 ? (
-                brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
-              ) : (
-                <option value="huatai">huatai（华泰）</option>
-              )}
-            </select>
+            <Select
+              ariaLabel="券商"
+              value={selectedBroker}
+              onChange={(v) => setSelectedBroker(v)}
+              options={brokers.length > 0
+                ? brokers.map((item) => ({ value: item.broker, label: formatBrokerLabel(item.broker, item.displayName) }))
+                : [{ value: 'huatai', label: 'huatai（华泰）' }]}
+            />
             <label className={PORTFOLIO_FILE_PICKER_CLASS}>
               选择 CSV
               <input type="file" accept=".csv" className="hidden"

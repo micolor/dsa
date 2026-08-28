@@ -330,6 +330,16 @@ async function waitForInitialLoad() {
 }
 
 /**
+ * 通过自定义 <Select> 触发按钮选择某个下拉项（替代原先的原生 select change）。
+ * selectTriggerIndex：页面上 aria-haspopup="listbox" 的触发按钮顺序（0=账户视图，1=成本口径）。
+ */
+async function changeSelect(selectTriggerIndex: number, optionName: string): Promise<void> {
+  const triggers = () => screen.getAllByRole('button').filter((b) => b.getAttribute('aria-haspopup') === 'listbox');
+  fireEvent.click(triggers()[selectTriggerIndex]);
+  fireEvent.click(await screen.findByRole('option', { name: optionName }));
+}
+
+/**
  * 定位持仓行建议单元格中的 Tooltip 触发器。
  * 持仓风险摘要原先通过原生 `title` 承载（`findByTitle` 可直接断言）；按治理规则
  * 替换为可访问 Tooltip 后，内容仅在悬停时渲染，测试需悬停展开后断言。
@@ -605,8 +615,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
 
     await waitFor(() => {
       expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false });
@@ -777,8 +786,7 @@ describe('PortfolioPage FX refresh', () => {
     await expectSignalAdvice('600519', /账号信号/);
     const signalCallsBeforeSwitch = getLatestDecisionSignals.mock.calls.length;
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '2' } });
+    await changeSelect(0, 'Alt (#2)');
 
     await waitFor(() => {
       expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false });
@@ -842,8 +850,7 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(await screen.findByText('600519')).toBeInTheDocument();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '2' } });
+    await changeSelect(0, 'Alt (#2)');
 
     await expectSignalAdvice('600519', /新账号信号/);
 
@@ -1138,14 +1145,13 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
-    fireEvent.change(accountSelect, { target: { value: '2' } });
+    await changeSelect(0, 'Alt (#2)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
@@ -1184,12 +1190,10 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const costMethodSelect = screen.getAllByRole('combobox')[1];
-
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
-    fireEvent.change(costMethodSelect, { target: { value: 'avg' } });
+    await changeSelect(1, '均价成本（AVG）');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: undefined, costMethod: 'avg', includeRealtime: false }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
@@ -1222,8 +1226,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
 
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
     fireEvent.click(screen.getByRole('button', { name: '删除账户' }));
@@ -1237,15 +1240,14 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith(1));
     await waitFor(() => expect(getAccounts).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByText('Main (#1)')).not.toBeInTheDocument());
-    expect(screen.getByRole('option', { name: 'Alt (#2)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '账户视图' })).toHaveTextContent('Alt (#2)');
   });
 
   it('录入交易时选中股票自动带出代码与当前价格作为默认', async () => {
     render(<PortfolioPage />);
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
@@ -1267,8 +1269,7 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
@@ -1287,8 +1288,7 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
     await waitForInitialLoad();
 
-    const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await changeSelect(0, 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
@@ -1298,7 +1298,6 @@ describe('PortfolioPage FX refresh', () => {
     fireEvent.change(symbolInput, { target: { value: '600519.SH' } });
     fireEvent.change(within(dialog).getByPlaceholderText('成交价（必填）'), { target: { value: '1800.5' } });
     fireEvent.change(within(dialog).getByPlaceholderText('数量（必填）'), { target: { value: '100' } });
-    fireEvent.change(dialog.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: '2026-08-11' } });
 
     fireEvent.keyDown(symbolInput, { key: 'Enter' });
 
