@@ -412,6 +412,31 @@ class PortfolioPr2TestCase(unittest.TestCase):
         self.assertGreater(report["drawdown"]["max_drawdown_pct"], 10.0)
         self.assertTrue(report["drawdown"]["alert"])
 
+    def test_snapshot_cache_returns_same_and_invalidates_on_mutation(self) -> None:
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_cash_ledger(
+            account_id=aid, event_date=date(2026, 1, 1), direction="in", amount=10000, currency="CNY",
+        )
+        self.service.record_trade(
+            account_id=aid, symbol="600519", trade_date=date(2026, 1, 1), side="buy",
+            quantity=100, price=100, market="cn", currency="CNY",
+        )
+        self._save_close("600519", date(2026, 1, 1), 100.0)
+        as_of = date(2026, 1, 2)
+
+        s1 = self.service.get_portfolio_snapshot(account_id=aid, as_of=as_of, cost_method="fifo", include_realtime=False)
+        # 同一 (as_of, account, cost_method) 在 TTL 内应命中缓存，返回相同快照。
+        s2 = self.service.get_portfolio_snapshot(account_id=aid, as_of=as_of, cost_method="fifo", include_realtime=False)
+        self.assertEqual(s1, s2)
+
+        # 写入操作应失效缓存，下一次请求重新计算（现金变化后 total_cash 应不同）。
+        self.service.record_cash_ledger(
+            account_id=aid, event_date=date(2026, 1, 1), direction="in", amount=5000, currency="CNY",
+        )
+        s3 = self.service.get_portfolio_snapshot(account_id=aid, as_of=as_of, cost_method="fifo", include_realtime=False)
+        self.assertNotEqual(s3["total_cash"], s1["total_cash"])
+
     def test_concentration_uses_cny_normalized_exposure(self) -> None:
         cn_account = self.service.create_account(name="CN", broker="Demo", market="cn", base_currency="CNY")
         us_account = self.service.create_account(name="US", broker="Demo", market="us", base_currency="USD")

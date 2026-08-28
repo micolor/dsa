@@ -38,6 +38,15 @@ def _isolate_os_environ():
     os.environ.clear()
     os.environ.update(saved)
 
+
+@pytest.fixture(autouse=True)
+def _reset_portfolio_cache():
+    """Clear the in-memory portfolio snapshot cache between tests."""
+    from src.services import portfolio_cache
+
+    portfolio_cache.clear()
+
+
 T = TypeVar("T")
 
 _original_call_soon_threadsafe = asyncio.BaseEventLoop.call_soon_threadsafe

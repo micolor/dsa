@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.config import get_config
+from src.services import portfolio_cache
 from src.repositories.portfolio_repo import (
     DuplicateTradeDedupHashError,
     DuplicateTradeUidError,
@@ -136,6 +137,7 @@ class PortfolioService:
             base_currency=base_currency_norm,
             owner_id=(owner_id or "").strip() or None,
         )
+        portfolio_cache.mark_dirty()
         return self._account_to_dict(row)
 
     def list_accounts(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
@@ -175,10 +177,13 @@ class PortfolioService:
         row = self.repo.update_account(account_id, fields)
         if row is None:
             return None
+        portfolio_cache.mark_dirty()
         return self._account_to_dict(row)
 
     def deactivate_account(self, account_id: int) -> bool:
-        return self.repo.deactivate_account(account_id)
+        ok = self.repo.deactivate_account(account_id)
+        portfolio_cache.mark_dirty()
+        return ok
 
     # ------------------------------------------------------------------
     # Event writes
@@ -249,6 +254,7 @@ class PortfolioService:
                     note=(note or "").strip() or None,
                     dedup_hash=dedup_hash_norm,
                 )
+                portfolio_cache.mark_dirty()
                 return {"id": int(row.id)}
         except (DuplicateTradeUidError, DuplicateTradeDedupHashError) as exc:
             raise PortfolioConflictError(str(exc)) from exc
@@ -280,6 +286,7 @@ class PortfolioService:
                 currency=currency_norm,
                 note=(note or "").strip() or None,
             )
+            portfolio_cache.mark_dirty()
             return {"id": int(row.id)}
 
     def record_corporate_action(
@@ -324,19 +331,26 @@ class PortfolioService:
                 split_ratio=split_ratio,
                 note=(note or "").strip() or None,
             )
+            portfolio_cache.mark_dirty()
             return {"id": int(row.id)}
 
     def delete_trade_event(self, trade_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_trade_in_session(session=session, trade_id=trade_id)
+            ok = self.repo.delete_trade_in_session(session=session, trade_id=trade_id)
+        portfolio_cache.mark_dirty()
+        return ok
 
     def delete_cash_ledger_event(self, entry_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_cash_ledger_in_session(session=session, entry_id=entry_id)
+            ok = self.repo.delete_cash_ledger_in_session(session=session, entry_id=entry_id)
+        portfolio_cache.mark_dirty()
+        return ok
 
     def delete_corporate_action_event(self, action_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
+            ok = self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
+        portfolio_cache.mark_dirty()
+        return ok
 
     def list_trade_events(
         self,
@@ -479,6 +493,11 @@ class PortfolioService:
         as_of_date = as_of or date.today()
         method = self._normalize_cost_method(cost_method)
 
+        cache_key = portfolio_cache.snapshot_key(account_id, as_of_date.isoformat(), method, include_realtime)
+        cached = portfolio_cache.get_snapshot(cache_key)
+        if cached is not None:
+            return cached
+
         if account_id is not None:
             account = self._require_active_account(account_id)
             account_rows = [account]
@@ -594,7 +613,7 @@ class PortfolioService:
                 ]
             )
 
-        return {
+        result = {
             "as_of": as_of_date.isoformat(),
             "cost_method": method,
             "currency": aggregate_currency,
@@ -611,6 +630,8 @@ class PortfolioService:
             "limitations": aggregate["limitations"],
             "accounts": accounts_payload,
         }
+        portfolio_cache.put_snapshot(cache_key, result)
+        return result
 
     def refresh_fx_rates(
         self,
@@ -647,6 +668,7 @@ class PortfolioService:
             summary["updated_count"] += item["updated_count"]
             summary["stale_count"] += item["stale_count"]
             summary["error_count"] += item["error_count"]
+        portfolio_cache.mark_dirty()
         return summary
 
     # ------------------------------------------------------------------
