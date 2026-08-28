@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Area, AreaChart, ResponsiveContainer, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
+import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
 import { ArrowDown, ArrowUp, ChartPie, ClipboardList, RefreshCw, Wallet, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
@@ -1728,6 +1728,8 @@ const PortfolioPage: React.FC = () => {
                       <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
+                  <XAxis hide />
+                  <YAxis hide domain={['dataMin', 'dataMax']} />
                   <Area type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={1.5} fill="url(#drawdownFill)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
