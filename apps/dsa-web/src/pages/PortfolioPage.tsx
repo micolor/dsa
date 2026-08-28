@@ -834,6 +834,18 @@ const PortfolioPage: React.FC = () => {
   // 三态：有行业数据 / 无非零行业但有个股集中度（回退）/ 两者皆空。
   const concentrationMode = hasSectorData ? 'sector' : hasPositionData ? 'position' : 'none';
 
+  // 行业覆盖：已分类占比 + 未分类/失败明细，说明「行业数据暂不可用」的成因。
+  const sectorCoverageInfo = useMemo(() => {
+    const coverage = risk?.sectorConcentration?.coverage;
+    if (!coverage) return null;
+    const classified = coverage.classifiedCount ?? 0;
+    const unclassified = coverage.unclassifiedCount ?? 0;
+    const failed = coverage.failedCount ?? 0;
+    const total = classified + unclassified + failed;
+    const pct = total > 0 ? Math.round((classified / total) * 100) : 0;
+    return { pct, classified, unclassified, failed };
+  }, [risk?.sectorConcentration?.coverage]);
+
   const handleTradeStockSelect = async (code: string) => {
     // Prefill the symbol; then best-effort fetch the current price as a default (user can edit).
     setTradeForm((prev) => ({ ...prev, symbol: code, price: '' }));
@@ -1545,8 +1557,8 @@ const PortfolioPage: React.FC = () => {
             <div>{text.topWeight}: {formatPct(concentrationMode === 'sector'
               ? risk?.sectorConcentration?.topWeightPct
               : risk?.concentration?.topWeightPct)}</div>
-            <div>{text.sectorCoverage}: {risk?.sectorConcentration?.coverage
-              ? `已分类 ${risk.sectorConcentration.coverage.classifiedCount ?? 0} / 未分类 ${risk.sectorConcentration.coverage.unclassifiedCount ?? 0}${(risk.sectorConcentration.coverage.failedCount ?? 0) > 0 ? ` / 失败 ${risk.sectorConcentration.coverage.failedCount}` : ''}`
+            <div>{text.sectorCoverage}: {sectorCoverageInfo
+              ? `${sectorCoverageInfo.pct}%（已分类 ${sectorCoverageInfo.classified} / 未分类 ${sectorCoverageInfo.unclassified}${sectorCoverageInfo.failed > 0 ? ` / 失败 ${sectorCoverageInfo.failed}` : ''}）`
               : '--'}</div>
           </div>
         </div>
