@@ -148,7 +148,7 @@ export const portfolioApi = {
     return toCamelCase<TaskAccepted>(response.data);
   },
 
-  async getPositionPriceHistory(symbol: string, days = 30): Promise<{
+  async getPositionPriceHistory(symbol: string, days = 20): Promise<{
     symbol: string;
     source: string;
     items: { date: string; close: number }[];

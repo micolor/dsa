@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import suppress
 from datetime import date
 from typing import Literal, Optional
+
+# 持仓价格历史（drawer sparkline）：冷启动网络拉取慢，用 5 分钟内存 TTL 缓存。
+_PRICE_HISTORY_CACHE: dict = {}
+PRICE_HISTORY_CACHE_TTL = 300.0
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -499,8 +504,15 @@ def analyze_position(symbol: str, request: PortfolioPositionAnalysisRequest) -> 
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     summary="Get recent daily close history for a held position",
 )
-def get_position_price_history(symbol: str, days: int = Query(30, ge=1, le=250)) -> dict:
+def get_position_price_history(symbol: str, days: int = Query(20, ge=1, le=250)) -> dict:
     from src.services.history_loader import load_history_df
+
+    # 冷启动网络拉取慢（~10-15s），用 5 分钟内存 TTL 缓存，重复打开秒开。
+    key = (symbol, days)
+    now = time.monotonic()
+    cached = _PRICE_HISTORY_CACHE.get(key)
+    if cached and now - cached[0] < PRICE_HISTORY_CACHE_TTL:
+        return cached[1]
 
     with suppress(Exception):
         df, source = load_history_df(symbol, days=days)
@@ -515,7 +527,13 @@ def get_position_price_history(symbol: str, days: int = Query(30, ge=1, le=250))
             if close <= 0:
                 continue
             items.append({"date": str(row.get("date") or ""), "close": round(close, 6)})
-        return {"symbol": symbol, "source": source, "items": items}
+        result = {"symbol": symbol, "source": source, "items": items}
+        # 顺手清掉过期项，避免无限增长
+        expired = [k for k, (ts, _) in _PRICE_HISTORY_CACHE.items() if now - ts >= PRICE_HISTORY_CACHE_TTL]
+        for k in expired:
+            _PRICE_HISTORY_CACHE.pop(k, None)
+        _PRICE_HISTORY_CACHE[key] = (now, result)
+        return result
     return {"symbol": symbol, "source": "none", "items": []}
 
 

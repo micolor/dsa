@@ -764,7 +764,7 @@ const PortfolioPage: React.FC = () => {
     }
     setPriceHistoryLoading(true);
     setPriceHistory([]);
-    portfolioApi.getPositionPriceHistory(positionDetailRow.symbol, 30)
+    portfolioApi.getPositionPriceHistory(positionDetailRow.symbol)
       .then((data) => { if (active) setPriceHistory(data.items); })
       .catch(() => { if (active) setPriceHistory([]); })
       .finally(() => { if (active) setPriceHistoryLoading(false); });

@@ -41,10 +41,16 @@ def _isolate_os_environ():
 
 @pytest.fixture(autouse=True)
 def _reset_portfolio_cache():
-    """Clear the in-memory portfolio snapshot cache between tests."""
+    """Clear the in-memory portfolio snapshot / price-history caches between tests."""
     from src.services import portfolio_cache
 
     portfolio_cache.clear()
+    try:
+        from api.v1.endpoints import portfolio as portfolio_endpoints
+
+        portfolio_endpoints._PRICE_HISTORY_CACHE.clear()
+    except Exception:
+        pass
 
 
 T = TypeVar("T")
