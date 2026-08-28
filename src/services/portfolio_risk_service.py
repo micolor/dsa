@@ -516,6 +516,7 @@ class PortfolioRiskService:
                 "current_drawdown_pct": 0.0,
                 "alert": False,
                 "fx_stale": False,
+                "series": [],
             }
 
         grouped: Dict[str, float] = {}
@@ -535,7 +536,8 @@ class PortfolioRiskService:
         peak = 0.0
         max_drawdown = 0.0
         current_drawdown = 0.0
-        for _, equity in series:
+        equity_series: List[Dict[str, Any]] = []
+        for date_key, equity in series:
             peak = max(peak, equity)
             if peak <= 0:
                 drawdown = 0.0
@@ -543,6 +545,11 @@ class PortfolioRiskService:
                 drawdown = (peak - equity) / peak * 100.0
             max_drawdown = max(max_drawdown, drawdown)
             current_drawdown = drawdown
+            equity_series.append({
+                "date": date_key,
+                "equity": round(equity, 2),
+                "drawdown_pct": round(drawdown, 4),
+            })
 
         return {
             "series_points": len(series),
@@ -550,6 +557,7 @@ class PortfolioRiskService:
             "current_drawdown_pct": round(current_drawdown, 4),
             "alert": bool(max_drawdown >= threshold_pct),
             "fx_stale": stale_flag,
+            "series": equity_series,
         }
 
     @staticmethod

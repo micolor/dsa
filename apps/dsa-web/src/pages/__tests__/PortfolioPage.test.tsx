@@ -132,6 +132,8 @@ vi.mock('../../components/StockAutocomplete', () => ({
 
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AreaChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Area: () => null,
   PieChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Pie: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Tooltip: () => null,

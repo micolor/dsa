@@ -105,3 +105,26 @@ class PortfolioRiskStopLossTest(unittest.TestCase):
         result = svc._build_concentration(snapshot, 35.0, as_of_date=date(2026, 1, 2))
         self.assertEqual(len(result["top_positions"]), 1)
         self.assertAlmostEqual(result["top_positions"][0]["weight_pct"], 100.0, places=4)
+
+    def test_drawdown_returns_equity_series(self) -> None:
+        # 回撤块应返回每日权益/回撤序列，供前端画回撤图。
+        repo = MagicMock()
+        repo.list_daily_snapshots_for_risk.return_value = [
+            SimpleNamespace(snapshot_date=date(2026, 1, 1), total_equity=100.0, base_currency="CNY", fx_stale=False),
+            SimpleNamespace(snapshot_date=date(2026, 1, 2), total_equity=80.0, base_currency="CNY", fx_stale=False),
+        ]
+        svc = PortfolioRiskService(repo=repo)
+        svc.portfolio_service.convert_amount = lambda amount, from_currency, to_currency, as_of_date: (float(amount), False, 1.0)
+
+        result = svc._build_drawdown(
+            account_id=1,
+            as_of_date=date(2026, 1, 2),
+            cost_method="fifo",
+            threshold_pct=15.0,
+            lookback_days=365,
+        )
+        self.assertEqual(result["series_points"], 2)
+        self.assertAlmostEqual(result["max_drawdown_pct"], 20.0, places=4)
+        self.assertTrue(result["alert"])
+        self.assertEqual(result["series"][0], {"date": "2026-01-01", "equity": 100.0, "drawdown_pct": 0.0})
+        self.assertAlmostEqual(result["series"][1]["drawdown_pct"], 20.0, places=4)

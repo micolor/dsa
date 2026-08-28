@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
-import { RefreshCw, X } from 'lucide-react';
+import { Area, AreaChart, ResponsiveContainer, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
+import { ArrowDown, ArrowUp, RefreshCw, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
 import { stocksApi } from '../api/stocks';
@@ -327,6 +327,12 @@ const PortfolioPage: React.FC = () => {
   const eventsRequestRef = useRef(0);
   const [positionAnalysisLoadingKey, setPositionAnalysisLoadingKey] = useState<string | null>(null);
   const [positionAnalysisMessage, setPositionAnalysisMessage] = useState<string | null>(null);
+  // 持仓表格排序 + 只看亏损筛选。
+  const [positionSort, setPositionSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({
+    key: 'marketValueBase',
+    dir: 'desc',
+  });
+  const [onlyLoss, setOnlyLoss] = useState(false);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
   const [selectedBroker, setSelectedBroker] = useState('huatai');
@@ -636,6 +642,49 @@ const PortfolioPage: React.FC = () => {
     rows.sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0));
     return rows;
   }, [snapshot]);
+
+  // 展示用：先按「只看亏损」筛选，再按当前排序列排序（默认市值降序）。
+  const displayPositionRows: FlatPosition[] = useMemo(() => {
+    const filtered = onlyLoss
+      ? positionRows.filter((row) => Number(row.unrealizedPnlBase || 0) < 0)
+      : positionRows;
+    const dir = positionSort.dir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const av = (a as unknown as Record<string, unknown>)[positionSort.key];
+      const bv = (b as unknown as Record<string, unknown>)[positionSort.key];
+      const cmp = typeof av === 'string'
+        ? String(av).localeCompare(String(bv))
+        : Number(av) - Number(bv);
+      return Number.isNaN(cmp) ? 0 : cmp * dir;
+    });
+  }, [onlyLoss, positionRows, positionSort]);
+
+  const handlePositionSort = useCallback((key: string) => {
+    setPositionSort((prev) => (
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'symbol' ? 'asc' : 'desc' }
+    ));
+  }, []);
+
+  const sortHeader = (label: string, key: string) => {
+    const active = positionSort.key === key;
+    return (
+      <button
+        type="button"
+        onClick={() => handlePositionSort(key)}
+        className="inline-flex items-center gap-1 transition-colors hover:text-foreground focus:outline-none"
+        aria-label={`按${label}排序`}
+      >
+        {label}
+        {active
+          ? positionSort.dir === 'asc'
+            ? <ArrowUp className="h-3 w-3" aria-hidden="true" />
+            : <ArrowDown className="h-3 w-3" aria-hidden="true" />
+          : <ArrowUp className="h-3 w-3 opacity-0" aria-hidden="true" />}
+      </button>
+    );
+  };
 
   const snapshotMatchesAccountScope = useMemo(() => {
     if (!snapshot) return false;
@@ -1346,7 +1395,11 @@ const PortfolioPage: React.FC = () => {
             titleClassName="text-base font-semibold"
             actions={(
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-secondary-text">{formatUiText(text.countItems, { count: positionRows.length })}</span>
+                <span className="text-xs text-secondary-text">{formatUiText(text.countItems, { count: displayPositionRows.length })}</span>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-secondary-text">
+                  <input type="checkbox" checked={onlyLoss} onChange={(e) => setOnlyLoss(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
+                  {text.onlyLoss}
+                </label>
                 <span className="h-5 w-px bg-border/60 self-center" aria-hidden="true" />
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setTradeModalOpen(true)}>录入交易</Button>
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCashModalOpen(true)}>录入资金</Button>
@@ -1375,20 +1428,20 @@ const PortfolioPage: React.FC = () => {
               <table className="min-w-[860px] w-full text-sm">
                 <thead className="text-xs text-muted-text border-b border-border/60">
                   <tr>
-                    <th className="text-left py-2 pr-2">{text.account}</th>
-                    <th className="text-left py-2 pr-2">{text.code}</th>
-                    <th className="text-right py-2 pr-2">{text.quantity}</th>
-                    <th className="text-right py-2 pr-2">{text.avgCost}</th>
-                    <th className="text-right py-2 pr-2">{text.lastPrice}</th>
-                    <th className="text-right py-2 pr-2">{text.marketValue}</th>
-                    <th className="text-right py-2 pr-3">{text.unrealizedPnl}</th>
-                    <th className="text-right py-2 pr-3">{text.returnPct}</th>
+                    <th className="text-left py-2 pr-2">{sortHeader(text.account, 'accountName')}</th>
+                    <th className="text-left py-2 pr-2">{sortHeader(text.code, 'symbol')}</th>
+                    <th className="text-right py-2 pr-2">{sortHeader(text.quantity, 'quantity')}</th>
+                    <th className="text-right py-2 pr-2">{sortHeader(text.avgCost, 'avgCost')}</th>
+                    <th className="text-right py-2 pr-2">{sortHeader(text.lastPrice, 'lastPrice')}</th>
+                    <th className="text-right py-2 pr-2">{sortHeader(text.marketValue, 'marketValueBase')}</th>
+                    <th className="text-right py-2 pr-3">{sortHeader(text.unrealizedPnl, 'unrealizedPnlBase')}</th>
+                    <th className="text-right py-2 pr-3">{sortHeader(text.returnPct, 'unrealizedPnlPct')}</th>
                     <th className="min-w-[8rem] text-right py-2 pr-3">{t('decisionSignals.portfolioColumn')}</th>
                     <th className="w-20 text-right py-2">{text.action}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {positionRows.map((row) => {
+                  {displayPositionRows.map((row) => {
                     const rowKey = `${row.accountId}-${row.symbol}-${row.market}`;
                     const analyzing = positionAnalysisLoadingKey === rowKey;
                     const signal = signalByPositionKey.get(rowKey);
@@ -1502,6 +1555,21 @@ const PortfolioPage: React.FC = () => {
       <section className="grid grid-cols-1 items-start md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
+          {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
+            <div className="mb-2 h-20">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={risk.drawdown.series}>
+                  <defs>
+                    <linearGradient id="drawdownFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={1.5} fill="url(#drawdownFill)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : null}
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
             <div>{text.currentDrawdown}: {formatPct(risk?.drawdown?.currentDrawdownPct)}</div>

@@ -117,6 +117,7 @@ export interface PortfolioDrawdownBlock {
   currentDrawdownPct: number;
   alert: boolean;
   fxStale: boolean;
+  series?: { date: string; equity: number; drawdownPct: number }[];
 }
 
 export interface PortfolioStopLossItem {
