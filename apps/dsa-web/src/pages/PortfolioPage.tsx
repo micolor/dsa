@@ -1714,11 +1714,11 @@ const PortfolioPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="space-y-3">
+      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
           {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
-            <div className="mb-2 h-20">
+            <div className="mb-2 h-12">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={risk.drawdown.series}>
                   <defs>
@@ -1738,7 +1738,6 @@ const PortfolioPage: React.FC = () => {
             <div>{text.alert}: {risk?.drawdown?.alert ? text.yes : text.no}{risk?.thresholds?.drawdownAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.drawdownAlertPct)}）` : ''}</div>
           </div>
         </div>
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.stopLossWarning} titleClassName="text-sm font-semibold" />
           <div className="text-xs text-secondary-text space-y-1">
@@ -1797,7 +1796,6 @@ const PortfolioPage: React.FC = () => {
             )}
           </div>
         </div>
-        </section>
       </section>
 
 
