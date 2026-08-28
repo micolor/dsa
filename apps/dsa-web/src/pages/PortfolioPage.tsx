@@ -203,7 +203,10 @@ type ConcentrationPieEntry = { name: string; value: number };
 // 集中度饼图不使用 recharts 的 ResponsiveContainer（其在首帧返回 null，等 ResizeObserver
 // 测量后在空白区“弹开”出图表）。改为用容器 ref + ResizeObserver 测量尺寸，测量完成前
 // 保留 Loading 占位，让图表首次渲染即已是完整尺寸，避免加载时出现“撑开”/弹出动画。
-function SizedConcentrationPie({ data }: { data: ConcentrationPieEntry[] }) {
+function SizedConcentrationPie({ data, onItemClick }: {
+  data: ConcentrationPieEntry[];
+  onItemClick?: (name: string) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -233,7 +236,12 @@ function SizedConcentrationPie({ data }: { data: ConcentrationPieEntry[] }) {
     <div ref={containerRef} className="h-64">
       {hasSize ? (
         <PieChart width={size.width} height={size.height}>
-          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} isAnimationActive={false}>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} isAnimationActive={false}
+            style={onItemClick ? { cursor: 'pointer' } : undefined}
+            onClick={onItemClick ? (entry: unknown) => {
+              const name = (entry as { name?: string } | null)?.name ?? (entry as { payload?: { name?: string } } | null)?.payload?.name;
+              if (name) onItemClick(String(name));
+            } : undefined}>
             {data.map((entry, index) => (
               <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
             ))}
@@ -333,6 +341,8 @@ const PortfolioPage: React.FC = () => {
     dir: 'desc',
   });
   const [onlyLoss, setOnlyLoss] = useState(false);
+  // 集中度下钻：点击个股集中度的某个标的，过滤持仓表格。
+  const [positionSymbolFilter, setPositionSymbolFilter] = useState<string | null>(null);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
   const [selectedBroker, setSelectedBroker] = useState('huatai');
@@ -643,11 +653,14 @@ const PortfolioPage: React.FC = () => {
     return rows;
   }, [snapshot]);
 
-  // 展示用：先按「只看亏损」筛选，再按当前排序列排序（默认市值降序）。
+  // 展示用：先按「只看亏损 / 集中度下钻标的」筛选，再按当前排序列排序（默认市值降序）。
   const displayPositionRows: FlatPosition[] = useMemo(() => {
-    const filtered = onlyLoss
+    let filtered = onlyLoss
       ? positionRows.filter((row) => Number(row.unrealizedPnlBase || 0) < 0)
       : positionRows;
+    if (positionSymbolFilter) {
+      filtered = filtered.filter((row) => areStockCodesEquivalent(row.symbol, positionSymbolFilter));
+    }
     const dir = positionSort.dir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
       const av = (a as unknown as Record<string, unknown>)[positionSort.key];
@@ -657,7 +670,7 @@ const PortfolioPage: React.FC = () => {
         : Number(av) - Number(bv);
       return Number.isNaN(cmp) ? 0 : cmp * dir;
     });
-  }, [onlyLoss, positionRows, positionSort]);
+  }, [onlyLoss, positionRows, positionSort, positionSymbolFilter]);
 
   const handlePositionSort = useCallback((key: string) => {
     setPositionSort((prev) => (
@@ -685,6 +698,38 @@ const PortfolioPage: React.FC = () => {
       </button>
     );
   };
+
+  const handleExportPositions = () => {
+    const header = ['账户', '代码', '名称', '数量', '均价', '现价', '市值', '未实现盈亏', '收益率'];
+    const rows = displayPositionRows.map((row) => [
+      row.accountName,
+      row.symbol,
+      getStockName(row.symbol) || '',
+      row.quantity,
+      row.avgCost,
+      row.lastPrice,
+      row.marketValueBase,
+      row.unrealizedPnlBase,
+      row.unrealizedPnlPct ?? '',
+    ]);
+    const csv = [header, ...rows]
+      .map((line) => line.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `positions-${getTodayIso()}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleConcentrationItemClick = useCallback((symbol: string) => {
+    setPositionSymbolFilter(symbol);
+  }, []);
+  const clearPositionSymbolFilter = useCallback(() => setPositionSymbolFilter(null), []);
 
   const snapshotMatchesAccountScope = useMemo(() => {
     if (!snapshot) return false;
@@ -1412,12 +1457,21 @@ const PortfolioPage: React.FC = () => {
                   <input type="checkbox" checked={onlyLoss} onChange={(e) => setOnlyLoss(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
                   {text.onlyLoss}
                 </label>
+                {positionSymbolFilter ? (
+                  <Badge variant="info" className="gap-1 pr-1">
+                    只看 {positionSymbolFilter}
+                    <button type="button" aria-label="清除股票筛选" className="ml-1 rounded-full p-0.5 hover:bg-white/10" onClick={clearPositionSymbolFilter}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                ) : null}
                 <span className="h-5 w-px bg-border/60 self-center" aria-hidden="true" />
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setTradeModalOpen(true)}>录入交易</Button>
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCashModalOpen(true)}>录入资金</Button>
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCorpModalOpen(true)}>公司行为</Button>
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCsvModalOpen(true)}>导入CSV</Button>
                 <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={() => setEventDialogOpen(true)}>事件记录</Button>
+                <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={handleExportPositions} disabled={displayPositionRows.length === 0}>导出CSV</Button>
               </div>
             )}
           />
@@ -1539,7 +1593,10 @@ const PortfolioPage: React.FC = () => {
           {isLoading ? (
             <Loading className="h-64" />
           ) : concentrationPieData.length > 0 ? (
-            <SizedConcentrationPie data={concentrationPieData} />
+            <SizedConcentrationPie
+              data={concentrationPieData}
+              onItemClick={concentrationMode === 'position' ? handleConcentrationItemClick : undefined}
+            />
           ) : (
             <EmptyState
               title={text.noConcentrationTitle}
