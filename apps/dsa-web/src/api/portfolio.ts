@@ -148,6 +148,18 @@ export const portfolioApi = {
     return toCamelCase<TaskAccepted>(response.data);
   },
 
+  async getPositionPriceHistory(symbol: string, days = 30): Promise<{
+    symbol: string;
+    source: string;
+    items: { date: string; close: number }[];
+  }> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/portfolio/positions/${encodeURIComponent(symbol)}/price-history`,
+      { params: { days } },
+    );
+    return toCamelCase<{ symbol: string; source: string; items: { date: string; close: number }[] }>(response.data);
+  },
+
   async getRisk(query: SnapshotQuery = {}): Promise<PortfolioRiskResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/risk', {
       params: buildSnapshotParams(query),

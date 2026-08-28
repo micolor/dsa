@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from datetime import date
 from typing import Literal, Optional
 
@@ -491,6 +492,31 @@ def analyze_position(symbol: str, request: PortfolioPositionAnalysisRequest) -> 
         analysis_phase=task.analysis_phase,
     )
     return response
+
+
+@router.get(
+    "/positions/{symbol}/price-history",
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get recent daily close history for a held position",
+)
+def get_position_price_history(symbol: str, days: int = Query(30, ge=1, le=250)) -> dict:
+    from src.services.history_loader import load_history_df
+
+    with suppress(Exception):
+        df, source = load_history_df(symbol, days=days)
+        if df is None or df.empty:
+            return {"symbol": symbol, "source": "none", "items": []}
+        items = []
+        for _, row in df.sort_values("date").tail(days).iterrows():
+            try:
+                close = float(row.get("close"))
+            except (TypeError, ValueError):
+                continue
+            if close <= 0:
+                continue
+            items.append({"date": str(row.get("date") or ""), "close": round(close, 6)})
+        return {"symbol": symbol, "source": source, "items": items}
+    return {"symbol": symbol, "source": "none", "items": []}
 
 
 def _resolve_position_analysis_context(

@@ -520,6 +520,26 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(kwargs["portfolio_context"]["market"], "hk")
         self.assertEqual(kwargs["portfolio_context"]["currency"], "HKD")
 
+    def test_get_position_price_history_returns_closes(self) -> None:
+        df = pd.DataFrame({
+            "date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")],
+            "close": [100.0, 110.0],
+        })
+        with patch("src.services.history_loader.load_history_df", return_value=(df, "db_cache")) as mock_hist:
+            resp = self.client.get("/api/v1/portfolio/positions/600519/price-history?days=5")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["symbol"], "600519")
+        self.assertEqual(mock_hist.call_count, 1)
+        self.assertEqual(len(body["items"]), 2)
+        self.assertEqual(body["items"][-1]["close"], 110.0)
+
+    def test_get_position_price_history_fails_open_when_source_fails(self) -> None:
+        with patch("src.services.history_loader.load_history_df", return_value=(None, "none")):
+            resp = self.client.get("/api/v1/portfolio/positions/600519/price-history?days=5")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["items"], [])
+
     def test_position_analysis_returns_404_for_missing_holding(self) -> None:
         resp = self.client.post("/api/v1/portfolio/positions/600519/analysis", json={})
 

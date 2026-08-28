@@ -346,6 +346,8 @@ const PortfolioPage: React.FC = () => {
   const [liveQuotesLoading, setLiveQuotesLoading] = useState(false);
   // 持仓详情抽屉：点击持仓代码打开。
   const [positionDetailRow, setPositionDetailRow] = useState<FlatPosition | null>(null);
+  const [priceHistory, setPriceHistory] = useState<{ date: string; close: number }[]>([]);
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
   const [selectedBroker, setSelectedBroker] = useState('huatai');
@@ -752,6 +754,22 @@ const PortfolioPage: React.FC = () => {
       setLiveQuotesLoading(false);
     }
   };
+
+  // 抽屉打开时拉取该股近 30 天收盘价，画价格趋势。
+  useEffect(() => {
+    let active = true;
+    if (!positionDetailRow) {
+      setPriceHistory([]);
+      return () => { active = false; };
+    }
+    setPriceHistoryLoading(true);
+    setPriceHistory([]);
+    portfolioApi.getPositionPriceHistory(positionDetailRow.symbol, 30)
+      .then((data) => { if (active) setPriceHistory(data.items); })
+      .catch(() => { if (active) setPriceHistory([]); })
+      .finally(() => { if (active) setPriceHistoryLoading(false); });
+    return () => { active = false; };
+  }, [positionDetailRow]);
 
   const snapshotMatchesAccountScope = useMemo(() => {
     if (!snapshot) return false;
@@ -2250,6 +2268,28 @@ const PortfolioPage: React.FC = () => {
               <div><span className="text-secondary-text">盈亏：</span>{formatPositionMoney(positionDetailRow.unrealizedPnlBase, positionDetailRow)}</div>
               <div><span className="text-secondary-text">收益率：</span>{formatSignedPct(positionDetailRow.unrealizedPnlPct)}</div>
             </div>
+            {(() => {
+              if (priceHistory.length > 1) return (
+                <div className="rounded-xl border border-border/60 bg-elevated/30 p-3">
+                  <div className="mb-2 text-sm font-semibold">价格趋势（近 30 天）</div>
+                  <div className="h-24">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={priceHistory}>
+                        <defs>
+                          <linearGradient id="priceHistoryFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
+                            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <Area type="monotone" dataKey="close" stroke="hsl(var(--primary))" strokeWidth={1.5} fill="url(#priceHistoryFill)" isAnimationActive={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              );
+              if (priceHistoryLoading) return <div className="text-sm text-secondary-text">加载价格趋势…</div>;
+              return null;
+            })()}
             {(() => {
               const detailSignal = signalByPositionKey.get(`${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`);
               return (
