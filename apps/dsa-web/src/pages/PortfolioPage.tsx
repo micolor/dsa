@@ -343,6 +343,9 @@ const PortfolioPage: React.FC = () => {
   const [onlyLoss, setOnlyLoss] = useState(false);
   // 集中度下钻：点击个股集中度的某个标的，过滤持仓表格。
   const [positionSymbolFilter, setPositionSymbolFilter] = useState<string | null>(null);
+  const [liveQuotesLoading, setLiveQuotesLoading] = useState(false);
+  // 持仓详情抽屉：点击持仓代码打开。
+  const [positionDetailRow, setPositionDetailRow] = useState<FlatPosition | null>(null);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
   const [selectedBroker, setSelectedBroker] = useState('huatai');
@@ -731,6 +734,25 @@ const PortfolioPage: React.FC = () => {
   }, []);
   const clearPositionSymbolFilter = useCallback(() => setPositionSymbolFilter(null), []);
 
+  // 手动刷新行情：用实时价重取快照（与默认的历史收盘估值区分）。
+  const handleRefreshLiveQuotes = async () => {
+    if (liveQuotesLoading) return;
+    setLiveQuotesLoading(true);
+    setError(null);
+    try {
+      const snap = await portfolioApi.getSnapshot({
+        accountId: queryAccountId,
+        costMethod,
+        includeRealtime: true,
+      });
+      setSnapshot(snap);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setLiveQuotesLoading(false);
+    }
+  };
+
   const snapshotMatchesAccountScope = useMemo(() => {
     if (!snapshot) return false;
     const snapshotAccountIds = new Set((snapshot.accounts || []).map((account) => account.accountId));
@@ -890,6 +912,18 @@ const PortfolioPage: React.FC = () => {
     const pct = total > 0 ? Math.round((classified / total) * 100) : 0;
     return { pct, classified, unclassified, failed };
   }, [risk?.sectorConcentration?.coverage]);
+
+  // 行内风险提示：集中度告警标的 / 止损接近或触发 / 价格过期。
+  const concentrationAlertSymbols = useMemo(() => new Set(
+    (risk?.concentration?.topPositions || []).filter((p) => p.isAlert).map((p) => p.symbol),
+  ), [risk?.concentration?.topPositions]);
+  const stopLossByPositionKey = useMemo(() => {
+    const map = new Map<string, { isTriggered: boolean; lossPct: number }>();
+    for (const item of risk?.stopLoss?.items || []) {
+      map.set(`${item.accountId}-${item.symbol}`, { isTriggered: item.isTriggered, lossPct: item.lossPct });
+    }
+    return map;
+  }, [risk?.stopLoss?.items]);
 
   const handleTradeStockSelect = async (code: string) => {
     // Prefill the symbol; then best-effort fetch the current price as a default (user can edit).
@@ -1472,6 +1506,10 @@ const PortfolioPage: React.FC = () => {
                 <Button type="button" variant="outline" size="sm" className="whitespace-nowrap" disabled={writeBlocked} onClick={() => setCsvModalOpen(true)}>导入CSV</Button>
                 <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={() => setEventDialogOpen(true)}>事件记录</Button>
                 <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={handleExportPositions} disabled={displayPositionRows.length === 0}>导出CSV</Button>
+                <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" onClick={() => void handleRefreshLiveQuotes()} disabled={liveQuotesLoading}>
+                  <RefreshCw className={`h-4 w-4 ${liveQuotesLoading ? 'animate-spin' : ''}`} />
+                  <span className="sr-only">{liveQuotesLoading ? '刷新行情中...' : '刷新行情'}</span>
+                </Button>
               </div>
             )}
           />
@@ -1512,6 +1550,8 @@ const PortfolioPage: React.FC = () => {
                     const analyzing = positionAnalysisLoadingKey === rowKey;
                     const signal = signalByPositionKey.get(rowKey);
                     const stockName = getStockName(row.symbol);
+                    const stopLoss = stopLossByPositionKey.get(`${row.accountId}-${row.symbol}`);
+                    const isConcentrationAlert = concentrationAlertSymbols.has(row.symbol);
                     return (
                     <tr
                       key={rowKey}
@@ -1520,8 +1560,21 @@ const PortfolioPage: React.FC = () => {
                     >
                       <td className="py-2 pr-2 text-secondary-text">{row.accountName}</td>
                       <td className="py-2 pr-2">
-                        <div className="font-mono text-foreground">{row.symbol}</div>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setPositionDetailRow(row); }}
+                          className="font-mono text-foreground transition-colors hover:text-primary focus:outline-none"
+                        >
+                          {row.symbol}
+                        </button>
                         {stockName ? <div className="text-[11px] text-secondary-text">{stockName}</div> : null}
+                        {(isConcentrationAlert || stopLoss || row.priceStale) ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {isConcentrationAlert ? <Badge variant="warning">集中</Badge> : null}
+                            {stopLoss ? <Badge variant={stopLoss.isTriggered ? 'danger' : 'warning'}>{stopLoss.isTriggered ? '止损触发' : '接近止损'}</Badge> : null}
+                            {row.priceStale ? <Badge variant="warning">价滞</Badge> : null}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.quantity, 2)}</td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.avgCost, 4)}</td>
@@ -2172,6 +2225,67 @@ const PortfolioPage: React.FC = () => {
             />
           ) : null}
         </div>
+      </Dialog>
+      <Dialog
+        isOpen={Boolean(positionDetailRow)}
+        onClose={() => setPositionDetailRow(null)}
+        title="持仓详情"
+        ariaLabel="持仓详情"
+        widthClassName="sm:max-w-lg"
+      >
+        {positionDetailRow ? (
+          <div className="space-y-4">
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-lg text-foreground">{positionDetailRow.symbol}</span>
+              {getStockName(positionDetailRow.symbol)
+                ? <span className="text-sm text-secondary-text">{getStockName(positionDetailRow.symbol)}</span>
+                : null}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div><span className="text-secondary-text">账户：</span>{positionDetailRow.accountName}</div>
+              <div><span className="text-secondary-text">数量：</span>{formatPriceDecimal(positionDetailRow.quantity, 2)}</div>
+              <div><span className="text-secondary-text">均价：</span>{formatPriceDecimal(positionDetailRow.avgCost, 4)}</div>
+              <div><span className="text-secondary-text">现价：</span>{formatPositionPrice(positionDetailRow)}</div>
+              <div><span className="text-secondary-text">市值：</span>{formatPositionMoney(positionDetailRow.marketValueBase, positionDetailRow)}</div>
+              <div><span className="text-secondary-text">盈亏：</span>{formatPositionMoney(positionDetailRow.unrealizedPnlBase, positionDetailRow)}</div>
+              <div><span className="text-secondary-text">收益率：</span>{formatSignedPct(positionDetailRow.unrealizedPnlPct)}</div>
+            </div>
+            {(() => {
+              const detailSignal = signalByPositionKey.get(`${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`);
+              return (
+                <div className="rounded-xl border border-border/60 bg-elevated/30 p-3">
+                  <div className="mb-2 text-sm font-semibold">AI 建议</div>
+                  {detailSignal ? (
+                    <div className="space-y-1 text-sm">
+                      <div>操作：{getDecisionActionLabel(detailSignal.action, detailSignal.actionLabel, null, text.alert, decisionActionLabels)}
+                        {detailSignal.confidence != null ? ` · 置信度 ${Math.round(detailSignal.confidence * 100)}%` : ''}</div>
+                      {detailSignal.reason ? <div>理由：{detailSignal.reason}</div> : null}
+                      {detailSignal.riskSummary ? <div>风险：{detailSignal.riskSummary}</div> : null}
+                      {detailSignal.targetPrice ? <div>目标价：{detailSignal.targetPrice}</div> : null}
+                      {detailSignal.stopLoss ? <div>止损：{detailSignal.stopLoss}</div> : null}
+                      {detailSignal.invalidation ? <div>失效：{detailSignal.invalidation}</div> : null}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-secondary-text">暂无 AI 建议</div>
+                  )}
+                </div>
+              );
+            })()}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="lg"
+                className="flex-1"
+                disabled={positionAnalysisLoadingKey === `${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`}
+                onClick={() => void handleAnalyzePosition(positionDetailRow)}
+              >
+                {positionAnalysisLoadingKey === `${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}` ? '提交中...' : '提交分析'}
+              </Button>
+              <Button type="button" variant="outline" size="lg" onClick={() => setPositionDetailRow(null)}>关闭</Button>
+            </div>
+          </div>
+        ) : null}
       </Dialog>
       <ToastViewport>
         {fxRefreshFeedback ? (
