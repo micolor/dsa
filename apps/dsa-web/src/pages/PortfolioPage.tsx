@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
-import { ArrowDown, ArrowUp, RefreshCw, Wallet, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChartPie, ClipboardList, RefreshCw, Wallet, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
 import { stocksApi } from '../api/stocks';
@@ -1693,6 +1693,7 @@ const PortfolioPage: React.FC = () => {
             <EmptyState
               title={text.noConcentrationTitle}
               description={text.noConcentrationDescription}
+              icon={<ChartPie className="h-6 w-6" />}
               className="h-64 flex flex-col items-center justify-center border-none bg-transparent px-4 py-0 shadow-none"
             />
           )}
@@ -2031,6 +2032,7 @@ const PortfolioPage: React.FC = () => {
                     <EmptyState
                       title="暂无流水"
                       description="调整筛选条件或先录入一笔交易、资金流水或公司行为。"
+                      icon={<ClipboardList className="h-6 w-6" />}
                       className="flex flex-1 flex-col items-center justify-center border-none bg-transparent px-3 py-6 shadow-none"
                     />
                   ) : null}
