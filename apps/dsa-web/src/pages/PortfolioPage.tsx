@@ -1717,8 +1717,9 @@ const PortfolioPage: React.FC = () => {
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
-          {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
-            <div className="mb-2 h-12">
+          {/* 固定预留图表高度，避免数据加载后图表出现时卡片被撑高。 */}
+          <div className="mb-2 h-12">
+            {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={risk.drawdown.series}>
                   <defs>
@@ -1730,8 +1731,8 @@ const PortfolioPage: React.FC = () => {
                   <Area type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={1.5} fill="url(#drawdownFill)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
             <div>{text.currentDrawdown}: {formatPct(risk?.drawdown?.currentDrawdownPct)}</div>
