@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
-import { ArrowDown, ArrowUp, ChartPie, ClipboardList, RefreshCw, Wallet, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChartLine, ChartPie, ClipboardList, RefreshCw, ShieldAlert, Sparkles, Wallet, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
 import { stocksApi } from '../api/stocks';
@@ -1311,6 +1311,24 @@ const PortfolioPage: React.FC = () => {
       .join(language === 'en' ? '; ' : '；')
     : null;
 
+  // 只有回撤序列真实波动时才画图；当权益序列整体恒定（dataMin === dataMax）时，
+  // Recharts 只会画出一条退化的水平直线，视为无趋势，改用空态占位。
+  const drawdownSeries = risk?.drawdown?.series ?? [];
+  const hasDrawdownTrend = drawdownSeries.length > 1
+    && Math.min(...drawdownSeries.map((p) => p.equity)) !== Math.max(...drawdownSeries.map((p) => p.equity));
+
+  // 四张风险卡统一采用「顶部 h-12 视觉块 + 指标文字行」结构。止损与 AI 信号卡用
+  // 一条按数量占比堆叠的横向条作为视觉块（语义色：危险=红，预警=琥珀，信号=主色）。
+  const stopLossTriggered = risk?.stopLoss?.triggeredCount ?? 0;
+  const stopLossNear = risk?.stopLoss?.nearCount ?? 0;
+  const stopLossAtRisk = stopLossTriggered + stopLossNear;
+
+  const sigActions = risk?.decisionSignalRisk?.actions;
+  const sigSell = sigActions?.sell ?? 0;
+  const sigReduce = sigActions?.reduce ?? 0;
+  const sigAlert = sigActions?.alert ?? 0;
+  const sigBreakdownSum = sigSell + sigReduce + sigAlert;
+
   return (
     <div className="portfolio-page flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden sm:h-[calc(100vh-4.5rem)]">
       <header className="relative z-30 flex flex-shrink-0 items-center overflow-visible px-3 pb-3 md:px-4 md:pb-4">
@@ -1719,9 +1737,9 @@ const PortfolioPage: React.FC = () => {
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
           {/* 固定预留图表高度，避免数据加载后图表出现时卡片被撑高。 */}
           <div className="mb-2 h-12">
-            {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
+            {hasDrawdownTrend ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={risk.drawdown.series}>
+                <AreaChart data={drawdownSeries}>
                   <defs>
                     <linearGradient id="drawdownFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
@@ -1734,7 +1752,8 @@ const PortfolioPage: React.FC = () => {
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-full items-center justify-center border-b border-border/20 text-[11px] text-secondary-text/50">
+              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
+                <ChartLine className="h-3.5 w-3.5 text-cyan" />
                 {text.drawdownEmptyHint}
               </div>
             )}
@@ -1747,6 +1766,21 @@ const PortfolioPage: React.FC = () => {
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.stopLossWarning} titleClassName="text-sm font-semibold" />
+          <div className="mb-2 h-12">
+            {stopLossAtRisk > 0 ? (
+              <div className="flex h-full items-center">
+                <div className="flex h-2 w-full overflow-hidden rounded-full bg-card/60">
+                  <div className="h-full bg-danger" style={{ width: `${(stopLossTriggered / stopLossAtRisk) * 100}%` }} />
+                  <div className="h-full bg-warning" style={{ width: `${(stopLossNear / stopLossAtRisk) * 100}%` }} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
+                <ShieldAlert className="h-3.5 w-3.5 text-cyan" />
+                {text.stopLossEmptyHint}
+              </div>
+            )}
+          </div>
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.triggeredCount}: {risk?.stopLoss?.triggeredCount ?? 0}</div>
             <div>{text.nearCount}: {risk?.stopLoss?.nearCount ?? 0}</div>
@@ -1771,14 +1805,34 @@ const PortfolioPage: React.FC = () => {
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.scope} titleClassName="text-sm font-semibold" />
+          <div className="mb-2 flex h-12 items-center gap-2 text-secondary-text">
+            <Wallet className="h-4 w-4 text-cyan" />
+            <span className="text-lg font-semibold tabular-nums text-foreground">{snapshot?.accountCount ?? 0}</span>
+            <span className="text-xs">{text.accountCount}</span>
+          </div>
           <div className="text-xs text-secondary-text space-y-1">
-            <div>{text.accountCount}: {snapshot?.accountCount ?? 0}</div>
             <div>{text.currency}: {snapshot?.currency || 'CNY'}</div>
             <div>{text.costMethodShort}: {(snapshot?.costMethod || costMethod).toUpperCase()}</div>
           </div>
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.aiRiskSignals} titleClassName="text-sm font-semibold" />
+          <div className="mb-2 h-12">
+            {sigBreakdownSum > 0 ? (
+              <div className="flex h-full items-center">
+                <div className="flex h-2 w-full overflow-hidden rounded-full bg-card/60">
+                  <div className="h-full bg-danger" style={{ width: `${(sigSell / sigBreakdownSum) * 100}%` }} />
+                  <div className="h-full bg-warning" style={{ width: `${(sigReduce / sigBreakdownSum) * 100}%` }} />
+                  <div className="h-full bg-cyan" style={{ width: `${(sigAlert / sigBreakdownSum) * 100}%` }} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
+                <Sparkles className="h-3.5 w-3.5 text-cyan" />
+                {text.aiRiskEmptyHint}
+              </div>
+            )}
+          </div>
           <div className="text-xs text-secondary-text space-y-1">
             {risk?.decisionSignalRisk?.available === false ? (
               <div className="text-warning">{text.aiRiskUnavailable}</div>
