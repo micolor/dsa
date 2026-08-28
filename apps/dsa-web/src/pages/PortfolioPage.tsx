@@ -1733,7 +1733,11 @@ const PortfolioPage: React.FC = () => {
                   <Area type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={1.5} fill="url(#drawdownFill)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
-            ) : null}
+            ) : (
+              <div className="flex h-full items-center justify-center border-b border-border/20 text-[11px] text-secondary-text/50">
+                {text.drawdownEmptyHint}
+              </div>
+            )}
           </div>
           <div className="text-xs text-secondary-text space-y-1">
             <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
