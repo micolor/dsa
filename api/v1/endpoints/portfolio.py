@@ -4,14 +4,48 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from contextlib import suppress
 from datetime import date
 from typing import Literal, Optional
 
-# 持仓价格历史（drawer sparkline）：冷启动网络拉取慢，用 5 分钟内存 TTL 缓存。
+# 持仓价格历史（drawer sparkline）：冷启动网络拉取慢，故**后台线程**拉取 + 5 分钟内存 TTL 缓存，
+# 让首次打开的响应不阻塞（先返回 refreshing，前端轮询等缓存填充）。
 _PRICE_HISTORY_CACHE: dict = {}
 PRICE_HISTORY_CACHE_TTL = 300.0
+_PRICE_HISTORY_REFRESHING: set = set()
+
+
+def _build_price_history_items(df, days: int) -> list:
+    items = []
+    for _, row in df.sort_values("date").tail(days).iterrows():
+        try:
+            close = float(row.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if close <= 0:
+            continue
+        items.append({"date": str(row.get("date") or ""), "close": round(close, 6)})
+    return items
+
+
+def _refresh_price_history(symbol: str, days: int) -> None:
+    """后台线程：拉取历史并填充分子内存缓存。"""
+    from src.services.history_loader import load_history_df
+
+    key = (symbol, days)
+    try:
+        df, source = load_history_df(symbol, days=days)
+        if df is not None and not df.empty:
+            result = {"symbol": symbol, "source": source, "items": _build_price_history_items(df, days)}
+            now = time.monotonic()
+            expired = [k for k, (ts, _) in _PRICE_HISTORY_CACHE.items() if now - ts >= PRICE_HISTORY_CACHE_TTL]
+            for k in expired:
+                _PRICE_HISTORY_CACHE.pop(k, None)
+            _PRICE_HISTORY_CACHE[key] = (now, result)
+    finally:
+        _PRICE_HISTORY_REFRESHING.discard(key)
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -505,36 +539,17 @@ def analyze_position(symbol: str, request: PortfolioPositionAnalysisRequest) -> 
     summary="Get recent daily close history for a held position",
 )
 def get_position_price_history(symbol: str, days: int = Query(20, ge=1, le=250)) -> dict:
-    from src.services.history_loader import load_history_df
-
-    # 冷启动网络拉取慢（~10-15s），用 5 分钟内存 TTL 缓存，重复打开秒开。
     key = (symbol, days)
     now = time.monotonic()
     cached = _PRICE_HISTORY_CACHE.get(key)
     if cached and now - cached[0] < PRICE_HISTORY_CACHE_TTL:
         return cached[1]
 
-    with suppress(Exception):
-        df, source = load_history_df(symbol, days=days)
-        if df is None or df.empty:
-            return {"symbol": symbol, "source": "none", "items": []}
-        items = []
-        for _, row in df.sort_values("date").tail(days).iterrows():
-            try:
-                close = float(row.get("close"))
-            except (TypeError, ValueError):
-                continue
-            if close <= 0:
-                continue
-            items.append({"date": str(row.get("date") or ""), "close": round(close, 6)})
-        result = {"symbol": symbol, "source": source, "items": items}
-        # 顺手清掉过期项，避免无限增长
-        expired = [k for k, (ts, _) in _PRICE_HISTORY_CACHE.items() if now - ts >= PRICE_HISTORY_CACHE_TTL]
-        for k in expired:
-            _PRICE_HISTORY_CACHE.pop(k, None)
-        _PRICE_HISTORY_CACHE[key] = (now, result)
-        return result
-    return {"symbol": symbol, "source": "none", "items": []}
+    # 未命中缓存 → 后台线程拉取（不阻塞响应），先返回 refreshing，前端轮询等数据。
+    if key not in _PRICE_HISTORY_REFRESHING:
+        _PRICE_HISTORY_REFRESHING.add(key)
+        threading.Thread(target=_refresh_price_history, args=(symbol, days), daemon=True).start()
+    return {"symbol": symbol, "source": "refreshing", "items": [], "refreshing": True}
 
 
 def _resolve_position_analysis_context(

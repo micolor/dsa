@@ -525,17 +525,27 @@ class PortfolioApiTestCase(unittest.TestCase):
             "date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")],
             "close": [100.0, 110.0],
         })
+        from api.v1.endpoints import portfolio as portfolio_endpoints
         with patch("src.services.history_loader.load_history_df", return_value=(df, "db_cache")) as mock_hist:
+            # 冷启动先返回 refreshing（不阻塞）
+            cold = self.client.get("/api/v1/portfolio/positions/600519/price-history?days=5")
+            self.assertEqual(cold.status_code, 200, cold.text)
+            self.assertTrue(cold.json()["refreshing"])
+            # 手动执行后台刷新逻辑（同步），填充缓存
+            portfolio_endpoints._refresh_price_history("600519", 5)
             resp = self.client.get("/api/v1/portfolio/positions/600519/price-history?days=5")
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertEqual(body["symbol"], "600519")
-        self.assertEqual(mock_hist.call_count, 1)
+        self.assertGreaterEqual(mock_hist.call_count, 1)
         self.assertEqual(len(body["items"]), 2)
         self.assertEqual(body["items"][-1]["close"], 110.0)
 
     def test_get_position_price_history_fails_open_when_source_fails(self) -> None:
+        from api.v1.endpoints import portfolio as portfolio_endpoints
         with patch("src.services.history_loader.load_history_df", return_value=(None, "none")):
+            # 拉取失败时后台刷新不写入缓存，接口返回 refreshing + 空列表（fail-open）
+            portfolio_endpoints._refresh_price_history("600519", 5)
             resp = self.client.get("/api/v1/portfolio/positions/600519/price-history?days=5")
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["items"], [])

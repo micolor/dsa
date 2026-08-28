@@ -49,6 +49,7 @@ def _reset_portfolio_cache():
         from api.v1.endpoints import portfolio as portfolio_endpoints
 
         portfolio_endpoints._PRICE_HISTORY_CACHE.clear()
+        portfolio_endpoints._PRICE_HISTORY_REFRESHING.clear()
     except Exception:
         pass
 

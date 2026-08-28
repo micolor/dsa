@@ -152,12 +152,13 @@ export const portfolioApi = {
     symbol: string;
     source: string;
     items: { date: string; close: number }[];
+    refreshing?: boolean;
   }> {
     const response = await apiClient.get<Record<string, unknown>>(
       `/api/v1/portfolio/positions/${encodeURIComponent(symbol)}/price-history`,
       { params: { days } },
     );
-    return toCamelCase<{ symbol: string; source: string; items: { date: string; close: number }[] }>(response.data);
+    return toCamelCase<{ symbol: string; source: string; items: { date: string; close: number }[]; refreshing?: boolean }>(response.data);
   },
 
   async getRisk(query: SnapshotQuery = {}): Promise<PortfolioRiskResponse> {

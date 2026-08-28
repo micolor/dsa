@@ -755,19 +755,39 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
-  // 抽屉打开时拉取该股近 30 天收盘价，画价格趋势。
+  // 抽屉打开时拉取该股近 20 天收盘价，画价格趋势；冷启动后端返回 refreshing，
+  // 这里后台线程填充缓存后轮询取到数据即可（首次不阻塞请求）。
   useEffect(() => {
     let active = true;
+    let attempts = 0;
+    const maxAttempts = 12; // 后台拉取慢（~12-20s），给足 30s 轮询窗口
     if (!positionDetailRow) {
       setPriceHistory([]);
       return () => { active = false; };
     }
     setPriceHistoryLoading(true);
     setPriceHistory([]);
-    portfolioApi.getPositionPriceHistory(positionDetailRow.symbol)
-      .then((data) => { if (active) setPriceHistory(data.items); })
-      .catch(() => { if (active) setPriceHistory([]); })
-      .finally(() => { if (active) setPriceHistoryLoading(false); });
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const data = await portfolioApi.getPositionPriceHistory(positionDetailRow.symbol);
+        if (!active) return;
+        if (data.items.length > 0) {
+          setPriceHistory(data.items);
+          setPriceHistoryLoading(false);
+          return;
+        }
+        if (data.refreshing && attempts < maxAttempts) {
+          attempts += 1;
+          window.setTimeout(poll, 2500);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      if (active) setPriceHistoryLoading(false);
+    };
+    void poll();
     return () => { active = false; };
   }, [positionDetailRow]);
 
