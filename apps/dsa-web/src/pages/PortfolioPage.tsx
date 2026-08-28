@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Pie, PieChart, Tooltip, Legend, Cell } from 'recharts';
-import { ArrowDown, ArrowUp, RefreshCw, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, RefreshCw, Wallet, X } from 'lucide-react';
 import { decisionSignalsApi } from '../api/decisionSignals';
 import { portfolioApi } from '../api/portfolio';
 import { stocksApi } from '../api/stocks';
@@ -1563,6 +1563,7 @@ const PortfolioPage: React.FC = () => {
             <EmptyState
               title={text.noPositionsTitle}
               description={text.noPositionsDescription}
+              icon={<Wallet className="h-6 w-6" />}
               className="border-none bg-transparent px-4 py-8 shadow-none"
             />
           ) : (
@@ -1712,7 +1713,7 @@ const PortfolioPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="grid grid-cols-1 items-start md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.drawdownMonitor} titleClassName="text-sm font-semibold" />
           {risk?.drawdown?.series && risk.drawdown.series.length > 1 ? (
