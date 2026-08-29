@@ -256,6 +256,26 @@ function SizedConcentrationPie({ data, onItemClick }: {
   );
 }
 
+/** 风险卡片主体的可视化区空态（虚线占位框）。四张风险卡共用，保证空态风格一致。 */
+function RiskMetricEmptyState({ icon, hint }: { icon: React.ReactNode; hint: string }) {
+  return (
+    <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
+      {icon}
+      {hint}
+    </div>
+  );
+}
+
+/** 指标明细行：键左、值右对齐，用于饼图下方与四卡明细，保证全站节奏一致。 */
+function MetricMetaRow({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-xs">
+      <span className="shrink-0 text-secondary-text">{label}</span>
+      <span className="truncate text-foreground tabular-nums">{value}</span>
+    </div>
+  );
+}
+
 const PortfolioPage: React.FC = () => {
   const { language, t } = useUiLanguage();
   const text = PORTFOLIO_TEXT[language];
@@ -475,6 +495,8 @@ const PortfolioPage: React.FC = () => {
     }
   }, [selectedBroker]);
 
+  // 一次加载真实数据：等实时行情 + 风险都到位后再渲染，避免"先见收盘价/再跳到实时价"造成的误读。
+  // 期间由页面 isLoading 统一显示加载动画；实时行情网络请求约 3-5s（这是拉取真实数据本身的耗时）。
   const loadSnapshotAndRisk = useCallback(async () => {
     const requestId = snapshotRequestRef.current + 1;
     snapshotRequestRef.current = requestId;
@@ -486,12 +508,12 @@ const PortfolioPage: React.FC = () => {
         portfolioApi.getSnapshot({
           accountId: queryAccountId,
           costMethod,
-          includeRealtime: false,
+          includeRealtime: true,
         }),
         portfolioApi.getRisk({
           accountId: queryAccountId,
           costMethod,
-          includeRealtime: false,
+          includeRealtime: true,
         }),
       ]);
       if (!isCurrentRequest()) {
@@ -691,15 +713,19 @@ const PortfolioPage: React.FC = () => {
       <button
         type="button"
         onClick={() => handlePositionSort(key)}
-        className="inline-flex items-center gap-1 transition-colors hover:text-foreground focus:outline-none"
+        className="group inline-flex items-center gap-1 transition-colors hover:text-foreground focus:outline-none"
         aria-label={`按${label}排序`}
       >
-        {label}
-        {active
-          ? positionSort.dir === 'asc'
+        {/* 前置箭头：静止时不占布局宽度，保证右对齐数值列的表头与数值右缘对齐；
+            hover / 排序激活时才显示，且不会把标题向左推。 */}
+        {active ? (
+          positionSort.dir === 'asc'
             ? <ArrowUp className="h-3 w-3" aria-hidden="true" />
             : <ArrowDown className="h-3 w-3" aria-hidden="true" />
-          : <ArrowUp className="h-3 w-3 opacity-0" aria-hidden="true" />}
+        ) : (
+          <ArrowUp className="hidden h-3 w-3 group-hover:inline" aria-hidden="true" />
+        )}
+        {label}
       </button>
     );
   };
@@ -1208,10 +1234,11 @@ const PortfolioPage: React.FC = () => {
     setRiskWarning(null);
 
     try {
+      // 等实时行情到位后再渲染，避免"先见收盘价/再跳到实时价"造成的误读。
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: requestedAccountId,
         costMethod: requestedCostMethod,
-        includeRealtime: false,
+        includeRealtime: true,
       });
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return false;
@@ -1223,7 +1250,7 @@ const PortfolioPage: React.FC = () => {
         const riskData = await portfolioApi.getRisk({
           accountId: requestedAccountId,
           costMethod: requestedCostMethod,
-          includeRealtime: false,
+          includeRealtime: true,
         });
         if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
           return false;
@@ -1517,7 +1544,15 @@ const PortfolioPage: React.FC = () => {
         <StatCard label={text.totalCash} value={formatMoney(snapshot?.totalCash, snapshot?.currency || 'CNY')} />
         <div className="glass-card !border-transparent p-4">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-xs uppercase tracking-[0.22em] text-secondary-text">{text.fxStatus}</p>
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.22em] text-secondary-text">{text.fxStatus}</p>
+              <div className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
+                {snapshot?.currency || 'CNY'}
+              </div>
+              <div className="mt-2 text-sm text-secondary-text">
+                {snapshot?.fxStale ? <Badge variant="warning">{text.stale}</Badge> : <Badge variant="success">{text.latest}</Badge>}
+              </div>
+            </div>
             <Button
               type="button"
               variant="secondary"
@@ -1530,7 +1565,6 @@ const PortfolioPage: React.FC = () => {
               <span className="sr-only">{fxRefreshing ? text.refreshing : text.refreshFx}</span>
             </Button>
           </div>
-          <div className="mt-2">{snapshot?.fxStale ? <Badge variant="warning">{text.stale}</Badge> : <Badge variant="success">{text.latest}</Badge>}</div>
         </div>
       </section>
 
@@ -1577,28 +1611,30 @@ const PortfolioPage: React.FC = () => {
               className="mb-3 rounded-xl px-3 py-2 text-xs shadow-none"
             />
           ) : null}
-          {positionRows.length === 0 ? (
+          {isLoading ? (
+            <Loading className="h-64" />
+          ) : positionRows.length === 0 ? (
             <EmptyState
               title={text.noPositionsTitle}
               description={text.noPositionsDescription}
               icon={<Wallet className="h-6 w-6" />}
-              className="border-none bg-transparent px-4 py-8 shadow-none"
+              className="h-64 flex flex-col items-center justify-center border-none bg-transparent px-4 py-0 shadow-none"
             />
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-[860px] w-full text-sm">
                 <thead className="text-xs text-muted-text border-b border-border/60">
                   <tr>
-                    <th className="text-left py-2 pr-2">{sortHeader(text.account, 'accountName')}</th>
-                    <th className="text-left py-2 pr-2">{sortHeader(text.code, 'symbol')}</th>
-                    <th className="text-right py-2 pr-2">{sortHeader(text.quantity, 'quantity')}</th>
-                    <th className="text-right py-2 pr-2">{sortHeader(text.avgCost, 'avgCost')}</th>
-                    <th className="text-right py-2 pr-2">{sortHeader(text.lastPrice, 'lastPrice')}</th>
-                    <th className="text-right py-2 pr-2">{sortHeader(text.marketValue, 'marketValueBase')}</th>
-                    <th className="text-right py-2 pr-3">{sortHeader(text.unrealizedPnl, 'unrealizedPnlBase')}</th>
-                    <th className="text-right py-2 pr-3">{sortHeader(text.returnPct, 'unrealizedPnlPct')}</th>
-                    <th className="min-w-[8rem] text-right py-2 pr-3">{t('decisionSignals.portfolioColumn')}</th>
-                    <th className="w-20 text-right py-2">{text.action}</th>
+                    <th className="text-left py-2 pr-2 whitespace-nowrap">{sortHeader(text.account, 'accountName')}</th>
+                    <th className="text-left py-2 pr-2 whitespace-nowrap">{sortHeader(text.code, 'symbol')}</th>
+                    <th className="text-right py-2 pr-2 tabular-nums whitespace-nowrap">{sortHeader(text.quantity, 'quantity')}</th>
+                    <th className="text-right py-2 pr-2 tabular-nums whitespace-nowrap">{sortHeader(text.avgCost, 'avgCost')}</th>
+                    <th className="text-right py-2 pr-2 tabular-nums whitespace-nowrap">{sortHeader(text.lastPrice, 'lastPrice')}</th>
+                    <th className="text-right py-2 pr-2 tabular-nums whitespace-nowrap">{sortHeader(text.marketValue, 'marketValueBase')}</th>
+                    <th className="text-right py-2 pr-3 tabular-nums whitespace-nowrap">{sortHeader(text.unrealizedPnl, 'unrealizedPnlBase')}</th>
+                    <th className="text-right py-2 pr-3 tabular-nums whitespace-nowrap">{sortHeader(text.returnPct, 'unrealizedPnlPct')}</th>
+                    <th className="min-w-[8rem] text-right py-2 pr-3 whitespace-nowrap">{t('decisionSignals.portfolioColumn')}</th>
+                    <th className="w-20 text-right py-2 whitespace-nowrap">{text.action}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1617,33 +1653,35 @@ const PortfolioPage: React.FC = () => {
                     >
                       <td className="py-2 pr-2 text-secondary-text">{row.accountName}</td>
                       <td className="py-2 pr-2">
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setPositionDetailRow(row); }}
-                          className="font-mono text-foreground transition-colors hover:text-primary focus:outline-none"
-                        >
-                          {row.symbol}
-                        </button>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setPositionDetailRow(row); }}
+                            className="font-mono text-foreground whitespace-nowrap transition-colors hover:text-primary focus:outline-none"
+                          >
+                            {row.symbol}
+                          </button>
+                          {(isConcentrationAlert || stopLoss || row.priceStale) ? (
+                            <span className="flex items-center gap-1">
+                              {isConcentrationAlert ? <Badge variant="warning" className="px-1.5 py-0 text-[10px] leading-4">集中</Badge> : null}
+                              {stopLoss ? <Badge variant={stopLoss.isTriggered ? 'danger' : 'warning'} className="px-1.5 py-0 text-[10px] leading-4">{stopLoss.isTriggered ? '止损触发' : '接近止损'}</Badge> : null}
+                              {row.priceStale ? <Badge variant="warning" className="px-1.5 py-0 text-[10px] leading-4">价滞</Badge> : null}
+                            </span>
+                          ) : null}
+                        </div>
                         {stockName ? <div className="text-[11px] text-secondary-text">{stockName}</div> : null}
-                        {(isConcentrationAlert || stopLoss || row.priceStale) ? (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {isConcentrationAlert ? <Badge variant="warning">集中</Badge> : null}
-                            {stopLoss ? <Badge variant={stopLoss.isTriggered ? 'danger' : 'warning'}>{stopLoss.isTriggered ? '止损触发' : '接近止损'}</Badge> : null}
-                            {row.priceStale ? <Badge variant="warning">价滞</Badge> : null}
-                          </div>
-                        ) : null}
                       </td>
-                      <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.quantity, 2)}</td>
-                      <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(row.avgCost, 4)}</td>
-                      <td className="py-2 pr-2 text-right">
+                      <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">{formatPriceDecimal(row.quantity, 2)}</td>
+                      <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">{formatPriceDecimal(row.avgCost, 4)}</td>
+                      <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">
                         <div>{formatPositionPrice(row)}</div>
                         <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary-text' : 'text-warning'}`}>
                           {getPositionPriceLabel(row)}
                         </div>
                       </td>
-                      <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
+                      <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">{formatPositionMoney(row.marketValueBase, row)}</td>
                       <td
-                        className={`py-2 pr-3 text-right ${
+                        className={`py-2 pr-3 text-right whitespace-nowrap tabular-nums ${
                           hasPositionPrice(row)
                             ? row.unrealizedPnlBase >= 0
                               ? 'text-danger'
@@ -1654,7 +1692,7 @@ const PortfolioPage: React.FC = () => {
                         {formatPositionMoney(row.unrealizedPnlBase, row)}
                       </td>
                       <td
-                        className={`py-2 pr-3 text-right ${
+                        className={`py-2 pr-3 text-right whitespace-nowrap tabular-nums ${
                           hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
                             ? row.unrealizedPnlPct >= 0
                               ? 'text-danger'
@@ -1670,14 +1708,16 @@ const PortfolioPage: React.FC = () => {
                       <td className="py-2 text-right">
                         <Button
                           type="button"
-                          variant="secondary"
-                          size="xsm"
+                          variant="outline"
+                          size="sm"
+                          className="whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleAnalyzePosition(row);
                           }}
                           disabled={analyzing}
                         >
+                          <Sparkles className={`h-3.5 w-3.5 ${analyzing ? 'animate-pulse' : ''}`} />
                           {analyzing ? text.submitting : text.analyze}
                         </Button>
                       </td>
@@ -1715,19 +1755,31 @@ const PortfolioPage: React.FC = () => {
               className="h-64 flex flex-col items-center justify-center border-none bg-transparent px-4 py-0 shadow-none"
             />
           )}
-          <div className="mt-3 text-xs text-secondary-text space-y-1">
-            <div>{text.displayScope}: {concentrationMode === 'sector'
-              ? text.sectorDimension
-              : concentrationMode === 'position'
-                ? text.positionDimensionFallback
-                : text.noConcentrationTitle}</div>
-            <div>{text.sectorAlert}: {risk?.sectorConcentration?.alert ? text.yes : text.no}{risk?.thresholds?.concentrationAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.concentrationAlertPct)}）` : ''}</div>
-            <div>{text.topWeight}: {formatPct(concentrationMode === 'sector'
-              ? risk?.sectorConcentration?.topWeightPct
-              : risk?.concentration?.topWeightPct)}</div>
-            <div>{text.sectorCoverage}: {sectorCoverageInfo
-              ? `${sectorCoverageInfo.pct}%（已分类 ${sectorCoverageInfo.classified} / 未分类 ${sectorCoverageInfo.unclassified}${sectorCoverageInfo.failed > 0 ? ` / 失败 ${sectorCoverageInfo.failed}` : ''}）`
-              : '--'}</div>
+          <div className="mt-3 space-y-1">
+            <MetricMetaRow
+              label={text.displayScope}
+              value={concentrationMode === 'sector'
+                ? text.sectorDimension
+                : concentrationMode === 'position'
+                  ? text.positionDimensionFallback
+                  : text.noConcentrationTitle}
+            />
+            <MetricMetaRow
+              label={text.sectorAlert}
+              value={<>{risk?.sectorConcentration?.alert ? text.yes : text.no}{risk?.thresholds?.concentrationAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.concentrationAlertPct)}）` : ''}</>}
+            />
+            <MetricMetaRow
+              label={text.topWeight}
+              value={formatPct(concentrationMode === 'sector'
+                ? risk?.sectorConcentration?.topWeightPct
+                : risk?.concentration?.topWeightPct)}
+            />
+            <MetricMetaRow
+              label={text.sectorCoverage}
+              value={sectorCoverageInfo
+                ? `${sectorCoverageInfo.pct}%（已分类 ${sectorCoverageInfo.classified} / 未分类 ${sectorCoverageInfo.unclassified}${sectorCoverageInfo.failed > 0 ? ` / 失败 ${sectorCoverageInfo.failed}` : ''}）`
+                : '--'}
+            />
           </div>
         </div>
       </section>
@@ -1752,16 +1804,13 @@ const PortfolioPage: React.FC = () => {
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
-                <ChartLine className="h-3.5 w-3.5 text-cyan" />
-                {text.drawdownEmptyHint}
-              </div>
+              <RiskMetricEmptyState icon={<ChartLine className="h-3.5 w-3.5 text-cyan" />} hint={text.drawdownEmptyHint} />
             )}
           </div>
-          <div className="text-xs text-secondary-text space-y-1">
-            <div>{text.maxDrawdown}: {formatPct(risk?.drawdown?.maxDrawdownPct)}</div>
-            <div>{text.currentDrawdown}: {formatPct(risk?.drawdown?.currentDrawdownPct)}</div>
-            <div>{text.alert}: {risk?.drawdown?.alert ? text.yes : text.no}{risk?.thresholds?.drawdownAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.drawdownAlertPct)}）` : ''}</div>
+          <div className="mt-2 space-y-1">
+            <MetricMetaRow label={text.maxDrawdown} value={formatPct(risk?.drawdown?.maxDrawdownPct)} />
+            <MetricMetaRow label={text.currentDrawdown} value={formatPct(risk?.drawdown?.currentDrawdownPct)} />
+            <MetricMetaRow label={text.alert} value={<>{risk?.drawdown?.alert ? text.yes : text.no}{risk?.thresholds?.drawdownAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.drawdownAlertPct)}）` : ''}</>} />
           </div>
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -1775,18 +1824,15 @@ const PortfolioPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
-                <ShieldAlert className="h-3.5 w-3.5 text-cyan" />
-                {text.stopLossEmptyHint}
-              </div>
+              <RiskMetricEmptyState icon={<ShieldAlert className="h-3.5 w-3.5 text-cyan" />} hint={text.stopLossEmptyHint} />
             )}
           </div>
-          <div className="text-xs text-secondary-text space-y-1">
-            <div>{text.triggeredCount}: {risk?.stopLoss?.triggeredCount ?? 0}</div>
-            <div>{text.nearCount}: {risk?.stopLoss?.nearCount ?? 0}</div>
-            <div>{text.alert}: {risk?.stopLoss?.nearAlert ? text.yes : text.no}{risk?.thresholds?.stopLossAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.stopLossAlertPct)}）` : ''}</div>
+          <div className="mt-2 space-y-1">
+            <MetricMetaRow label={text.triggeredCount} value={String(risk?.stopLoss?.triggeredCount ?? 0)} />
+            <MetricMetaRow label={text.nearCount} value={String(risk?.stopLoss?.nearCount ?? 0)} />
+            <MetricMetaRow label={text.alert} value={<>{risk?.stopLoss?.nearAlert ? text.yes : text.no}{risk?.thresholds?.stopLossAlertPct != null ? `（阈值 ${formatPct(risk.thresholds.stopLossAlertPct)}）` : ''}</>} />
             {risk?.stopLoss?.items && risk.stopLoss.items.length > 0 ? (
-              <div className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t border-border/50 pt-2">
+              <div className="mt-2 max-h-36 space-y-1 overflow-y-auto pt-2">
                 {risk.stopLoss.items.map((item) => (
                   <div key={`${item.accountId}-${item.symbol}`} className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -1805,14 +1851,20 @@ const PortfolioPage: React.FC = () => {
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
           <DashboardPanelHeader className="mb-2" title={text.scope} titleClassName="text-sm font-semibold" />
-          <div className="mb-2 flex h-12 items-center gap-2 text-secondary-text">
-            <Wallet className="h-4 w-4 text-cyan" />
-            <span className="text-lg font-semibold tabular-nums text-foreground">{snapshot?.accountCount ?? 0}</span>
-            <span className="text-xs">{text.accountCount}</span>
+          <div className="mb-2 h-12">
+            {(snapshot?.accountCount ?? 0) > 0 ? (
+              <div className="flex h-full items-center justify-center gap-2 text-secondary-text">
+                <Wallet className="h-4 w-4 text-cyan" />
+                <span className="text-lg font-semibold tabular-nums text-foreground">{snapshot?.accountCount ?? 0}</span>
+                <span className="text-xs">{text.accountCount}</span>
+              </div>
+            ) : (
+              <RiskMetricEmptyState icon={<Wallet className="h-3.5 w-3.5 text-cyan" />} hint={text.accountCountEmptyHint} />
+            )}
           </div>
-          <div className="text-xs text-secondary-text space-y-1">
-            <div>{text.currency}: {snapshot?.currency || 'CNY'}</div>
-            <div>{text.costMethodShort}: {(snapshot?.costMethod || costMethod).toUpperCase()}</div>
+          <div className="mt-2 space-y-1">
+            <MetricMetaRow label={text.currency} value={snapshot?.currency || 'CNY'} />
+            <MetricMetaRow label={text.costMethodShort} value={(snapshot?.costMethod || costMethod).toUpperCase()} />
           </div>
         </div>
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -1827,20 +1879,20 @@ const PortfolioPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/60 bg-card/50 px-2 text-[11px] text-secondary-text/70">
-                <Sparkles className="h-3.5 w-3.5 text-cyan" />
-                {text.aiRiskEmptyHint}
-              </div>
+              <RiskMetricEmptyState icon={<Sparkles className="h-3.5 w-3.5 text-cyan" />} hint={text.aiRiskEmptyHint} />
             )}
           </div>
-          <div className="text-xs text-secondary-text space-y-1">
+          <div className="mt-2 space-y-1">
             {risk?.decisionSignalRisk?.available === false ? (
-              <div className="text-warning">{text.aiRiskUnavailable}</div>
+              <div className="text-xs text-warning">{text.aiRiskUnavailable}</div>
             ) : (
               <>
-                <div>{text.aiRiskTotal}: {risk?.decisionSignalRisk?.total ?? 0}</div>
-                <div>
-                  {text.sellSignals}: {risk?.decisionSignalRisk?.actions?.sell ?? 0} · {text.reduceSignals}: {risk?.decisionSignalRisk?.actions?.reduce ?? 0} · {text.alertSignals}: {risk?.decisionSignalRisk?.actions?.alert ?? 0}
+                <MetricMetaRow label={text.aiRiskTotal} value={String(risk?.decisionSignalRisk?.total ?? 0)} />
+                <div className="flex items-baseline justify-between gap-2 text-xs">
+                  <span className="shrink-0 text-secondary-text">{text.sellSignals} · {text.reduceSignals} · {text.alertSignals}</span>
+                  <span className="truncate tabular-nums text-foreground">
+                    {risk?.decisionSignalRisk?.actions?.sell ?? 0} · {risk?.decisionSignalRisk?.actions?.reduce ?? 0} · {risk?.decisionSignalRisk?.actions?.alert ?? 0}
+                  </span>
                 </div>
                 {decisionSignalRiskPreviewItems.length > 0 ? (
                   <div className="space-y-1 pt-1">
@@ -1851,7 +1903,7 @@ const PortfolioPage: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  <div>{text.noAiRiskSignals}</div>
+                  <div className="text-xs text-secondary-text">{text.noAiRiskSignals}</div>
                 )}
               </>
             )}
@@ -1882,20 +1934,6 @@ const PortfolioPage: React.FC = () => {
                   { value: 'corporate', label: '公司行为' },
                 ]}
               />
-
-              {eventSymbol && (eventType === 'trade' || eventType === 'corporate') ? (
-                <Badge variant="info" className="gap-1 pr-1">
-                  只看 {eventSymbol}
-                  <button
-                    type="button"
-                    aria-label="清除股票筛选"
-                    className="ml-1 rounded-full p-0.5 hover:bg-white/10"
-                    onClick={() => setEventSymbol('')}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </Badge>
-              ) : null}
 
               <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
                 <DatePicker className="w-32" value={eventDateFrom} onChange={setEventDateFrom} placeholder="起始日期" />
@@ -1972,7 +2010,11 @@ const PortfolioPage: React.FC = () => {
                         <td className="py-2 pl-3 pr-2 whitespace-nowrap">{accountNameOf(item.accountId)}</td>
                         <td className="py-2 pr-2 whitespace-nowrap">{item.tradeDate}</td>
                         <td className="py-2 pr-2">{formatSideLabel(item.side)}</td>
-                        <td className="py-2 pr-2 font-mono">{item.symbol}</td>
+                        <td className="py-2 pr-2 font-mono">{item.symbol}
+                          {getStockName(item.symbol) ? (
+                            <div className="font-sans text-[11px] text-secondary-text">{getStockName(item.symbol)}</div>
+                          ) : null}
+                        </td>
                         <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.quantity, 2)}</td>
                         <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.price, 4)}</td>
                         <td className="py-2 pr-2 text-right whitespace-nowrap">{formatPriceDecimal(item.fee, 2)}</td>

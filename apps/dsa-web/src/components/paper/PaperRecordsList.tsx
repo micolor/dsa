@@ -49,6 +49,20 @@ export const PaperRecordsList: React.FC<Props> = ({
     hold: { label: text.dispHold, variant: 'default' },
     ignored: { label: text.dispIgnored, variant: 'default' },
   };
+  // 成交流水 reason：区分「主动跟单」与「被动风控退出」，用徽章+颜色一眼可辨。
+  // 未知值回退为原样文本，避免丢信息。
+  const reasonMeta: Record<string, { label: string; variant: MetaBadgeVariant }> = {
+    signal_action: { label: text.reasonSignal, variant: 'default' },
+    stop_loss: { label: text.reasonStopLoss, variant: 'danger' },
+    take_profit: { label: text.reasonTakeProfit, variant: 'success' },
+    ambiguous_stop_loss: { label: text.reasonAmbiguous, variant: 'danger' },
+  };
+  const renderReason = (reason: string | null) => {
+    if (!reason) return null;
+    const meta = reasonMeta[reason];
+    if (meta) return <Badge variant={meta.variant}>{meta.label}</Badge>;
+    return <span className="text-xs text-secondary-text">{reason}</span>;
+  };
 
   const totalPages = Math.max(1, Math.ceil((mode === 'signals' ? signalTotal : tradeTotal) / pageSize));
   const empty = mode === 'signals' ? signals.length === 0 : trades.length === 0;
@@ -94,13 +108,18 @@ export const PaperRecordsList: React.FC<Props> = ({
                 <Badge variant={trade.side === 'buy' ? 'success' : 'danger'}>
                   {trade.side === 'buy' ? text.buy : text.sell}
                 </Badge>
-                <span className="text-sm font-medium text-foreground">{trade.stockCode}</span>
+                <span className="text-sm font-medium text-foreground">
+                  {trade.stockName || trade.stockCode}
+                  {trade.stockCode ? (
+                    <span className="ml-1.5 font-mono text-xs text-secondary-text">{trade.stockCode}</span>
+                  ) : null}
+                </span>
                 <span className="text-xs text-secondary-text">
                   {trade.quantity} @ {trade.price}
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-secondary-text">{trade.reason}</span>
+                {renderReason(trade.reason)}
                 <span className="text-xs text-secondary-text">{trade.tradeDate}</span>
               </div>
             </div>
