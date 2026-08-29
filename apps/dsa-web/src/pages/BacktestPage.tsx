@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Check, Download, Minus, X } from 'lucide-react';
+import { Check, Download, Info, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -10,6 +10,7 @@ import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
 import {
   BACKTEST_DIRECTION_EXPECTED_LABELS,
+  BACKTEST_METRIC_HINTS,
   BACKTEST_MOVEMENT_LABELS,
   BACKTEST_OUTCOME_LABELS,
   BACKTEST_PHASE_FILTER_OPTIONS,
@@ -157,9 +158,16 @@ function boolIcon(value: boolean | null | undefined, text: BacktestText) {
 
 // ============ Metric Row ============
 
-const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = ({ label, value, accent }) => (
+const MetricRow: React.FC<{ label: string; value: string; accent?: boolean; hint?: string }> = ({ label, value, accent, hint }) => (
   <div className="flex items-center justify-between gap-2 py-2">
-    <span className="text-xs text-muted-text">{label}</span>
+    <span className="flex items-center gap-1 text-xs text-muted-text">
+      <span>{label}</span>
+      {hint ? (
+        <Tooltip content={hint} focusable>
+          <Info className="h-3 w-3 cursor-help text-muted-text" aria-hidden="true" />
+        </Tooltip>
+      ) : null}
+    </span>
     <span className={accent ? 'text-sm font-semibold tabular-nums text-foreground' : 'text-sm tabular-nums text-secondary-text'}>
       {value}
     </span>
@@ -186,24 +194,35 @@ function phaseBreakdownText(metrics: PerformanceMetrics, language: UiLanguage): 
 
 const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string; language: UiLanguage }> = ({ metrics, title, language }) => {
   const text = BACKTEST_TEXT[language];
+  const hints = BACKTEST_METRIC_HINTS[language];
   const phaseText = phaseBreakdownText(metrics, language);
   return (
     <Card padding="md" title={title} className="animate-fade-in">
-      <MetricRow label={text.directionAccuracy} value={pct(metrics.directionAccuracyPct)} accent />
-      <MetricRow label={text.winRate} value={pct(metrics.winRatePct)} accent />
-      <MetricRow label={text.avgSimulatedReturn} value={pct(metrics.avgSimulatedReturnPct)} />
-      <MetricRow label={text.avgStockReturn} value={pct(metrics.avgStockReturnPct)} />
-      <MetricRow label={text.stopLossTriggerRate} value={pct(metrics.stopLossTriggerRate)} />
-      <MetricRow label={text.takeProfitTriggerRate} value={pct(metrics.takeProfitTriggerRate)} />
-      <MetricRow label={text.avgDaysToFirstHit} value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} />
+      <MetricRow label={text.directionAccuracy} value={pct(metrics.directionAccuracyPct)} accent hint={hints.directionAccuracy} />
+      <MetricRow label={text.winRate} value={pct(metrics.winRatePct)} accent hint={hints.winRate} />
+      <MetricRow label={text.avgSimulatedReturn} value={pct(metrics.avgSimulatedReturnPct)} hint={hints.avgSimulatedReturn} />
+      <MetricRow label={text.avgStockReturn} value={pct(metrics.avgStockReturnPct)} hint={hints.avgStockReturn} />
+      <MetricRow label={text.stopLossTriggerRate} value={pct(metrics.stopLossTriggerRate)} hint={hints.stopLossTriggerRate} />
+      <MetricRow label={text.takeProfitTriggerRate} value={pct(metrics.takeProfitTriggerRate)} hint={hints.takeProfitTriggerRate} />
+      <MetricRow label={text.avgDaysToFirstHit} value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} hint={hints.avgDaysToFirstHit} />
       <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-2">
-        <span className="text-xs text-muted-text">{text.evaluationCount}</span>
+        <span className="flex items-center gap-1 text-xs text-muted-text">
+          <span>{text.evaluationCount}</span>
+          <Tooltip content={hints.evaluationCount} focusable>
+            <Info className="h-3 w-3 cursor-help text-muted-text" aria-hidden="true" />
+          </Tooltip>
+        </span>
         <span className="text-xs text-secondary-text font-mono">
           {Number(metrics.completedCount)} / {Number(metrics.totalEvaluations)}
         </span>
       </div>
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-text">{text.outcomeSummary}</span>
+        <span className="flex items-center gap-1 text-xs text-muted-text">
+          <span>{text.outcomeSummary}</span>
+          <Tooltip content={hints.outcomeSummary} focusable>
+            <Info className="h-3 w-3 cursor-help text-muted-text" aria-hidden="true" />
+          </Tooltip>
+        </span>
         <span className="text-xs font-mono">
           <span className="text-success">{metrics.winCount}</span>
           {' / '}
@@ -501,6 +520,18 @@ const BacktestPage: React.FC = () => {
     fetchPerformance(code, 1, analysisDateFrom, analysisDateTo, phaseFilter);
   };
 
+  // 评估窗口在失焦时套用：让输入、1 日验证 chip、列头与已加载 cohort 保持一致。
+  // 若当前值已是已加载窗口（例如刚输入 "1" 触发过 1 日验证），则不重复刷新。
+  const handleEvalWindowBlur = () => {
+    const windowDays = parseEvalWindowDays(evalDays);
+    if (windowDays == null || windowDays === appliedWindowDays) return;
+    const code = normalizeBacktestCode(codeFilter);
+    setAppliedWindowDays(windowDays);
+    setCurrentPage(1);
+    fetchResults(1, code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+    fetchPerformance(code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+  };
+
   // Pagination
   const totalPages = Math.ceil(totalResults / pageSize);
   const handlePageChange = (page: number) => {
@@ -527,6 +558,7 @@ const BacktestPage: React.FC = () => {
               max={120}
               value={evalDays}
               onChange={(e) => setEvalDays(e.target.value)}
+              onBlur={handleEvalWindowBlur}
               placeholder="10"
               disabled={isRunning}
               className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
@@ -717,6 +749,7 @@ const BacktestPage: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
               )}
+              action={<p className="mt-1 max-w-md text-xs leading-relaxed text-muted-text">{text.noResultsGuide}</p>}
             />
           ) : (
             <Card title={isNextDayValidation ? text.nextDayValidation : text.resultSet} padding="md" className="animate-fade-in">
@@ -801,10 +834,10 @@ const BacktestPage: React.FC = () => {
                                     </span>
                                   ) : null}
                                   {row.trendPrediction && row.trendPrediction !== actionLabel ? (
-                                    <span className="block truncate text-xs text-secondary-text">{row.trendPrediction}</span>
+                                    <span className="block min-w-0 max-w-[220px] truncate text-xs text-secondary-text">{row.trendPrediction}</span>
                                   ) : null}
                                   {row.operationAdvice && row.operationAdvice !== actionLabel ? (
-                                    <span className="block truncate text-xs text-secondary-text">{row.operationAdvice}</span>
+                                    <span className="block min-w-0 max-w-[220px] truncate text-xs text-secondary-text">{row.operationAdvice}</span>
                                   ) : null}
                                 </div>
                               </Tooltip>
