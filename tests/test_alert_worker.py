@@ -1281,6 +1281,80 @@ class AlertWorkerTestCase(unittest.TestCase):
         self.assertEqual(triggers[0]["target"], "cn")
         self.assertEqual(triggers[0]["data_source"], "market_light")
 
+    def test_price_rule_skips_non_trading_day_when_check_enabled(self) -> None:
+        self._create_rule(
+            name="Moutai above",
+            target_scope="single_symbol",
+            target="600519",
+            alert_type="price_cross",
+            parameters={"direction": "above", "price": 1300},
+        )
+        config = SimpleNamespace(
+            agent_event_monitor_enabled=True,
+            agent_event_alert_rules_json="",
+            trading_day_check_enabled=True,
+        )
+        worker = AlertWorker(config_provider=lambda: config, service=self.service)
+
+        with patch("src.services.alert_service.get_open_markets_today", return_value=set()):
+            stats = worker.run_once()
+
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["triggered"], 0)
+        triggers = self._triggers(status="skipped")
+        self.assertEqual(len(triggers), 1)
+        self.assertEqual(triggers[0]["target"], "600519")
+        self.assertEqual(triggers[0]["data_source"], "trading_calendar")
+
+    def test_price_change_rule_skips_non_trading_day_when_check_enabled(self) -> None:
+        self._create_rule(
+            name="Moutai drop",
+            target_scope="single_symbol",
+            target="600519",
+            alert_type="price_change_percent",
+            parameters={"direction": "down", "change_pct": 3.0},
+        )
+        config = SimpleNamespace(
+            agent_event_monitor_enabled=True,
+            agent_event_alert_rules_json="",
+            trading_day_check_enabled=True,
+        )
+        worker = AlertWorker(config_provider=lambda: config, service=self.service)
+
+        with patch("src.services.alert_service.get_open_markets_today", return_value=set()):
+            stats = worker.run_once()
+
+        self.assertEqual(stats["skipped"], 1)
+        triggers = self._triggers(status="skipped")
+        self.assertEqual(len(triggers), 1)
+        self.assertEqual(triggers[0]["data_source"], "trading_calendar")
+
+    def test_price_rule_still_triggers_when_market_open(self) -> None:
+        self._create_rule(
+            name="Moutai above",
+            target_scope="single_symbol",
+            target="600519",
+            alert_type="price_cross",
+            parameters={"direction": "above", "price": 1300},
+        )
+        config = SimpleNamespace(
+            agent_event_monitor_enabled=True,
+            agent_event_alert_rules_json="",
+            trading_day_check_enabled=True,
+        )
+        worker = AlertWorker(config_provider=lambda: config, service=self.service)
+
+        with patch("src.services.alert_service.get_open_markets_today", return_value={"cn"}), patch(
+            "src.agent.events.EventMonitor._get_realtime_quote",
+            new=AsyncMock(return_value=SimpleNamespace(price=1341.99)),
+        ):
+            stats = worker.run_once()
+
+        self.assertEqual(stats["triggered"], 1)
+        triggers = self._triggers(status="triggered")
+        self.assertEqual(len(triggers), 1)
+        self.assertEqual(triggers[0]["data_source"], "realtime_quote")
+
     def test_single_rule_failure_does_not_block_other_rules(self) -> None:
         self._create_rule(target="600519")
         self._create_rule(

@@ -31,7 +31,11 @@ from src.market_phase_summary import (
     format_public_phase_pack_excerpt,
     render_market_phase_summary,
 )
-from src.services.alert_service import AlertService, DRY_RUN_TARGET_TIMEOUT_SECONDS
+from src.services.alert_service import (
+    AlertService,
+    DRY_RUN_TARGET_TIMEOUT_SECONDS,
+    _resolve_stock_trading_day_flags,
+)
 from src.services.decision_signal_service import DecisionSignalService
 from src.services.decision_signal_summary import (
     format_decision_signal_excerpt,
@@ -308,6 +312,7 @@ class AlertWorker:
                 key = self._semantic_key("single_symbol", stock_code, alert_type, parameters)
                 metadata = {"source": "legacy_env", "legacy_rule_index": index}
                 if alert_type == "price_cross":
+                    metadata.update(_resolve_stock_trading_day_flags(stock_code, config))
                     rule = PriceAlert(
                         stock_code=stock_code,
                         direction=str(parameters["direction"]),
@@ -315,6 +320,7 @@ class AlertWorker:
                         metadata=metadata,
                     )
                 elif alert_type == "price_change_percent":
+                    metadata.update(_resolve_stock_trading_day_flags(stock_code, config))
                     rule = PriceChangeAlert(
                         stock_code=stock_code,
                         direction=str(parameters["direction"]),

@@ -70,6 +70,8 @@ from src.storage import (
     DatabaseManager,
 )
 from src.utils.sanitize import sanitize_diagnostic_text
+from data_provider.base import normalize_stock_code
+from src.core.trading_calendar import get_market_for_stock, get_open_markets_today
 
 
 LEGACY_RUNTIME_ALERT_TYPES = frozenset({"price_cross", "price_change_percent", "volume_spike"})
@@ -80,6 +82,36 @@ SUPPORTED_SEVERITIES = frozenset({"info", "warning", "critical"})
 NULLABLE_RULE_UPDATE_FIELDS = frozenset({"cooldown_policy", "notification_policy"})
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_stock_trading_day_flags(
+    stock_code: str,
+    config: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Resolve trading-day openness for a stock rule, mirroring market-light alerts.
+
+    Returns ``{"trading_day_check_enabled": bool, "market_is_open": bool}``.
+    Fails open (treat as open) when the region cannot be determined or the
+    openness lookup errors, so a price alert is never silently dropped.
+    """
+    if config is None:
+        from src.config import get_config
+
+        config = get_config()
+    trading_day_check_enabled = bool(getattr(config, "trading_day_check_enabled", True))
+    market_is_open = True
+    if trading_day_check_enabled:
+        try:
+            market = get_market_for_stock(normalize_stock_code(stock_code))
+            market_is_open = market in get_open_markets_today() if market else True
+        except Exception as exc:
+            logger.debug("[AlertService] trading-day check unavailable for %s: %s", stock_code, exc)
+            market_is_open = True
+    return {
+        "trading_day_check_enabled": trading_day_check_enabled,
+        "market_is_open": market_is_open,
+    }
+
 
 
 class AlertServiceError(ValueError):
@@ -362,6 +394,15 @@ class AlertService:
 
     async def _evaluate_price(self, rule: PriceAlert, monitor: EventMonitor) -> Dict[str, Any]:
         threshold = float(rule.price)
+        if rule.metadata.get("trading_day_check_enabled") and not rule.metadata.get("market_is_open", True):
+            return self._not_triggered(
+                rule,
+                None,
+                f"{rule.stock_code} market is not a trading day",
+                record_status="skipped",
+                threshold=threshold,
+                data_source="trading_calendar",
+            )
         try:
             quote = await monitor._get_realtime_quote(rule.stock_code)
         except Exception as exc:
@@ -426,6 +467,15 @@ class AlertService:
 
     async def _evaluate_price_change(self, rule: PriceChangeAlert, monitor: EventMonitor) -> Dict[str, Any]:
         threshold = abs(float(rule.change_pct))
+        if rule.metadata.get("trading_day_check_enabled") and not rule.metadata.get("market_is_open", True):
+            return self._not_triggered(
+                rule,
+                None,
+                f"{rule.stock_code} market is not a trading day",
+                record_status="skipped",
+                threshold=threshold,
+                data_source="trading_calendar",
+            )
         try:
             quote = await monitor._get_realtime_quote(rule.stock_code)
         except Exception as exc:
@@ -1080,7 +1130,7 @@ class AlertService:
                 seen_targets.add(effective_target)
                 child_data = dict(data)
                 child_data["target"] = effective_target
-                rule = self._to_runtime_rule(row, child_data)
+                rule = self._to_runtime_rule(row, child_data, config=config)
                 payloads.append(
                     RuntimeAlertPayload(
                         key=f"{parent_key}|{effective_target}",
@@ -1122,7 +1172,7 @@ class AlertService:
                 )
             return payloads
 
-        rule = self._to_runtime_rule(row, data)
+        rule = self._to_runtime_rule(row, data, config=config)
         effective_target = str(data["target"])
         return [
             RuntimeAlertPayload(
@@ -1133,7 +1183,13 @@ class AlertService:
             )
         ]
 
-    def _to_runtime_rule(self, row: AlertRuleRecord, data: Optional[Dict[str, Any]] = None):
+    def _to_runtime_rule(
+        self,
+        row: AlertRuleRecord,
+        data: Optional[Dict[str, Any]] = None,
+        *,
+        config: Optional[Any] = None,
+    ):
         data = data or self._serialize_rule_base(row)
         parameters = data["parameters"]
         metadata = {
@@ -1143,6 +1199,7 @@ class AlertService:
             "effective_target": data.get("target"),
         }
         if data["alert_type"] == "price_cross":
+            metadata.update(_resolve_stock_trading_day_flags(data["target"], config))
             return PriceAlert(
                 stock_code=data["target"],
                 direction=str(parameters["direction"]),
@@ -1150,6 +1207,7 @@ class AlertService:
                 metadata=metadata,
             )
         if data["alert_type"] == "price_change_percent":
+            metadata.update(_resolve_stock_trading_day_flags(data["target"], config))
             return PriceChangeAlert(
                 stock_code=data["target"],
                 direction=str(parameters["direction"]),

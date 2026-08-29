@@ -388,7 +388,9 @@ class AlertApiTestCase(unittest.TestCase):
         async def _quote(_monitor, stock_code):
             return SimpleNamespace(price=11.0 if stock_code == "600519" else 9.0)
 
-        with patch("src.agent.events.EventMonitor._get_realtime_quote", new=_quote):
+        with patch("src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}), patch(
+            "src.agent.events.EventMonitor._get_realtime_quote", new=_quote
+        ):
             resp = self.client.post(f"/api/v1/alerts/rules/{rule['id']}/test")
 
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -413,6 +415,8 @@ class AlertApiTestCase(unittest.TestCase):
             return SimpleNamespace(price=11.0)
 
         with patch("src.services.alert_service.DRY_RUN_TARGET_TIMEOUT_SECONDS", 0.001), patch(
+            "src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}
+        ), patch(
             "src.agent.events.EventMonitor._get_realtime_quote",
             new=_slow_quote,
         ):
@@ -599,6 +603,8 @@ class AlertApiTestCase(unittest.TestCase):
         rule = self._create_rule()
 
         with patch(
+            "src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}
+        ), patch(
             "src.agent.events.EventMonitor._get_realtime_quote",
             new=AsyncMock(return_value=SimpleNamespace(price=1800.0)),
         ) as quote:
@@ -618,6 +624,8 @@ class AlertApiTestCase(unittest.TestCase):
         rule = self._create_rule()
 
         with patch(
+            "src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}
+        ), patch(
             "src.agent.events.EventMonitor._get_realtime_quote",
             new=AsyncMock(return_value=SimpleNamespace(price=1700.0)),
         ):
@@ -635,7 +643,9 @@ class AlertApiTestCase(unittest.TestCase):
         async def _raise_quote_error(_stock_code):
             raise RuntimeError("token=secret-token failed at https://example.com/webhook")
 
-        with patch("src.agent.events.EventMonitor._get_realtime_quote", new=_raise_quote_error):
+        with patch(
+            "src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}
+        ), patch("src.agent.events.EventMonitor._get_realtime_quote", new=_raise_quote_error):
             resp = self.client.post(f"/api/v1/alerts/rules/{rule['id']}/test")
 
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -655,6 +665,8 @@ class AlertApiTestCase(unittest.TestCase):
         )
 
         with patch(
+            "src.services.alert_service.get_open_markets_today", return_value={"cn", "hk", "us"}
+        ), patch(
             "src.agent.events.EventMonitor._get_realtime_quote",
             new=AsyncMock(return_value={"pct_chg": " -3.25% "}),
         ):
