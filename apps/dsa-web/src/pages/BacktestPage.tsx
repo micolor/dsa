@@ -773,7 +773,7 @@ const BacktestPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-secondary-text">{row.analysisDate || '--'}</td>
-                          <td className="px-4 py-3 text-secondary-text">{phaseLabel(row, language)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-secondary-text">{phaseLabel(row, language)}</td>
                           <td className="px-4 py-3 max-w-[220px] text-foreground">
                             {predictionParts.length ? (
                               <Tooltip
