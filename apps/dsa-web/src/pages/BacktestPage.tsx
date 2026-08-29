@@ -598,7 +598,7 @@ const BacktestPage: React.FC = () => {
               onChange={(e) => setAnalysisDateFrom(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-40 text-center tabular-nums`}
+              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-36 text-center tabular-nums`}
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
@@ -608,9 +608,9 @@ const BacktestPage: React.FC = () => {
               aria-label={text.endDateAria}
               value={analysisDateTo}
               onChange={(e) => setAnalysisDateTo(e.target.value)}
+              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-36 text-center tabular-nums`}
               onKeyDown={handleKeyDown}
               disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-40 text-center tabular-nums`}
             />
           </div>
           <button
@@ -739,20 +739,20 @@ const BacktestPage: React.FC = () => {
                 <table className="w-full min-w-[900px] text-left text-sm">
                   <thead className="bg-surface-2/70 text-left text-xs uppercase tracking-[0.16em] text-secondary-text">
                     <tr>
-                      <th className="px-4 py-3 font-medium">{text.stock}</th>
-                      <th className="px-4 py-3 font-medium">{text.analysisDate}</th>
-                      <th className="px-4 py-3 font-medium">{text.phase}</th>
-                      <th className="px-4 py-3 font-medium">{text.aiPrediction}</th>
-                      <th className="px-4 py-3 font-medium">
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.stock}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.analysisDate}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.phase}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.aiPrediction}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">
                         {showNextDayActualColumns ? text.actualPerformance : text.windowReturn}
                       </th>
-                      <th className="px-4 py-3 font-medium">
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">
                         {showNextDayActualColumns ? text.accuracy : text.directionMatch}
                       </th>
-                      <th className="px-4 py-3 font-medium">{text.result}</th>
-                      <th className="px-4 py-3 font-medium">{text.status}</th>
-                      <th className="px-4 py-3 font-medium">{text.stopLossTakeProfit}</th>
-                      <th className="px-4 py-3 font-medium">{text.simulatedTrade}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.result}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.status}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.stopLossTakeProfit}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{text.simulatedTrade}</th>
                     </tr>
                   </thead>
                   <tbody>
