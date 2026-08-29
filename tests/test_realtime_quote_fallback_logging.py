@@ -214,6 +214,7 @@ def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
         realtime_source_priority="efinance",
+        trading_day_check_enabled=False,
     )
     manager = DataFetcherManager(
         fetchers=[

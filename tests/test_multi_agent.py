@@ -2551,7 +2551,9 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         rule = PriceAlert(stock_code="600519", direction="above", price=1800.0)
         quote = SimpleNamespace(price=1810.0)
 
-        with patch("src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)) as to_thread:
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=True), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)
+        ) as to_thread:
             triggered = await monitor._check_price(rule)
 
         self.assertIsNotNone(triggered)
@@ -2565,7 +2567,9 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         rule = PriceChangeAlert(stock_code="300750", direction="down", change_pct=3.0)
         quote = SimpleNamespace(change_pct=-3.25)
 
-        with patch("src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)) as to_thread:
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=True), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)
+        ) as to_thread:
             triggered = await monitor._check_price_change(rule)
 
         self.assertIsNotNone(triggered)
@@ -2580,11 +2584,41 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         monitor = EventMonitor()
         rule = PriceChangeAlert(stock_code="AAPL", direction="up", change_pct=2.0)
 
-        with patch("src.agent.events.asyncio.to_thread", new=AsyncMock(return_value={"pct_chg": "2.35%"})):
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=True), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value={"pct_chg": "2.35%"})
+        ):
             triggered = await monitor._check_price_change(rule)
 
         self.assertIsNotNone(triggered)
         self.assertEqual(triggered.current_value, 2.35)
+
+    async def test_check_price_skips_non_trading_day(self):
+        from src.agent.events import EventMonitor, PriceAlert
+
+        monitor = EventMonitor()
+        rule = PriceAlert(stock_code="600519", direction="above", price=1800.0)
+
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=False), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=SimpleNamespace(price=1810.0))
+        ) as to_thread:
+            triggered = await monitor._check_price(rule)
+
+        self.assertIsNone(triggered)
+        to_thread.assert_not_awaited()
+
+    async def test_check_price_change_skips_non_trading_day(self):
+        from src.agent.events import EventMonitor, PriceChangeAlert
+
+        monitor = EventMonitor()
+        rule = PriceChangeAlert(stock_code="300750", direction="down", change_pct=3.0)
+
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=False), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=SimpleNamespace(change_pct=-3.25))
+        ) as to_thread:
+            triggered = await monitor._check_price_change(rule)
+
+        self.assertIsNone(triggered)
+        to_thread.assert_not_awaited()
 
     async def test_realtime_rules_share_single_quote_fetch_per_symbol(self):
         """Multiple rules on the same symbol reuse the per-cycle quote cache.
@@ -2605,9 +2639,9 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         async def _run_inline(func, *args, **kwargs):
             return func(*args, **kwargs)
 
-        with patch("data_provider.DataFetcherManager", side_effect=[manager]) as manager_factory, patch(
-            "src.agent.events.asyncio.to_thread", new=_run_inline
-        ):
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=True), patch(
+            "data_provider.DataFetcherManager", side_effect=[manager]
+        ) as manager_factory, patch("src.agent.events.asyncio.to_thread", new=_run_inline):
             triggered = await monitor.check_all()
 
         self.assertEqual(manager_factory.call_count, 1)
@@ -2639,7 +2673,9 @@ class TestEventMonitorAsync(unittest.IsolatedAsyncioTestCase):
         monitor.on_trigger(async_cb)
 
         quote = SimpleNamespace(price=1810.0)
-        with patch("src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)):
+        with patch("src.agent.events._is_trading_day_for_stock", return_value=True), patch(
+            "src.agent.events.asyncio.to_thread", new=AsyncMock(return_value=quote)
+        ):
             triggered = await monitor.check_all()
 
         self.assertEqual(len(triggered), 1)

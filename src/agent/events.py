@@ -36,6 +36,31 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _is_trading_day_for_stock(stock_code: str) -> bool:
+    """True if the stock's market is a trading day (fails open when unknown).
+
+    Mirrors the price-alert gate in ``alert_service`` so the legacy EventMonitor
+    loop also stops re-firing stale-close price alerts on closed markets.
+    Reuses the existing ``trading_day_check_enabled`` config; when the market
+    cannot be determined the check is treated as open so a live alert is never
+    silently dropped.
+    """
+    try:
+        from src.config import get_config
+        from src.core.trading_calendar import get_market_for_stock, get_open_markets_today
+
+        config = get_config()
+        if not bool(getattr(config, "trading_day_check_enabled", True)):
+            return True
+        market = get_market_for_stock(stock_code)
+        if not market:
+            return True
+        return market in get_open_markets_today()
+    except Exception:
+        return True
+
+
+
 class AlertType(str, Enum):
     PRICE_CROSS = "price_cross"
     PRICE_CHANGE_PERCENT = "price_change_percent"
@@ -286,6 +311,10 @@ class EventMonitor:
     async def _check_price(self, rule: PriceAlert) -> Optional[TriggeredAlert]:
         """Check price alert against realtime quote."""
         try:
+            if not _is_trading_day_for_stock(rule.stock_code):
+                logger.debug("[EventMonitor] _check_price skipped: %s market is not a trading day", rule.stock_code)
+                return None
+
             quote = await self._get_realtime_quote(rule.stock_code)
             if quote is None:
                 return None
@@ -314,6 +343,10 @@ class EventMonitor:
     async def _check_price_change(self, rule: PriceChangeAlert) -> Optional[TriggeredAlert]:
         """Check price-change percentage alert against realtime quote."""
         try:
+            if not _is_trading_day_for_stock(rule.stock_code):
+                logger.debug("[EventMonitor] _check_price_change skipped: %s market is not a trading day", rule.stock_code)
+                return None
+
             quote = await self._get_realtime_quote(rule.stock_code)
             if quote is None:
                 return None

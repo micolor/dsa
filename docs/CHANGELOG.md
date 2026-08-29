@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [改进] 非交易日价格类告警按「跳过」记录不再触发：价位（价格上穿/下穿）、涨跌幅规则此前不论是否交易日都按实时报价判断，休市日静态收盘价会重复触发同一条「处于阈值之上/之下」噪音；现复用既有 `trading_day_check_enabled`（默认启用，`TRADING_DAY_CHECK_ENABLED` 可关）与交易日历，规则所在市场休市时按 `skipped`（数据源 `trading_calendar`）记录、不触发，价位/涨跌幅规则在 DB 规则与 legacy env 规则两条入口都生效，dry-run（测试按钮）与生产 worker 行为一致
+- [改进] legacy `EventMonitor` 告警回路补非交易日门控：此前 `agent_event_monitor_enabled` 的老式 `_check_price` / `_check_price_change` 回路仍在休市日按静态收盘价触发价位/涨跌幅告警；现与 AlertService 价位告警一致，复用同一 `trading_day_check_enabled` 与交易日历，所属市场休市时该条规则直接跳过（不取实时报价、不触发不通知），与持久化规则路径保持一致
 - [改进] 告警中心页面级文案与「通知尝试记录」Tab 接入中英文（i18n）：此前 `AlertsPage` 页面本体与通知尝试记录整节为中文硬编码，而三个子组件（规则表单/列表/触发历史）均已双语，模块内部自相矛盾；现试跑状态、通知渠道/状态、Tab 标题、测试结果统计与警示、通知记录表头与空态全部走 `featureText`，复用既有 `ALERT_*_LABELS` 与新增 `ALERT_PAGE_TEXT`
 - [改进] 告警中心「触发历史」与「通知尝试记录」两个 Tab 补齐分页：此前硬编码只取前 20 条（≥21 条被静默截断且无提示），现按 rules 列表同款 `Pagination` 翻页并展示总数
 - [改进] 告警中心 Tab 内容按需加载：进入页面只在默认「规则」Tab 拉取规则列表，触发历史 / 通知记录改为首次切到对应 Tab 时才请求，不再页面挂载即三份全量预载
