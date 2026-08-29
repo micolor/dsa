@@ -9,6 +9,7 @@ Tools:
 """
 
 import logging
+from typing import Optional
 
 from src.agent.tools.execution import (
     ToolExecutionCancelled,
@@ -35,6 +36,21 @@ _BACKTEST_GLOBAL_READ_POLICY = ToolPolicy.declared(
 _CONTROL_ERRORS = (ToolExecutionCancelled, ToolExecutionDeadlineExceeded)
 
 _backtest_service = None
+
+
+def _resolve_default_eval_window(eval_window_days: Optional[int]) -> int:
+    """Resolve the evaluation window, defaulting to the configured backtest window.
+
+    Summaries are only built for the window a backtest actually ran with, so a
+    hardcoded tool default that diverges from ``backtest_eval_window_days`` would
+    query a window that was never computed and return "no summary". Read the
+    configured default instead of duplicating the magic number here.
+    """
+    if eval_window_days is not None:
+        return int(eval_window_days)
+    from src.config import get_config
+
+    return int(getattr(get_config(), "backtest_eval_window_days", 10))
 
 
 def _get_backtest_service():
@@ -68,10 +84,11 @@ def _serialize_overall_backtest_summary(summary: dict, eval_window_days: int) ->
     }
 
 
-def _handle_get_overall_backtest_summary(eval_window_days: int = 30) -> dict:
+def _handle_get_overall_backtest_summary(eval_window_days: Optional[int] = None) -> dict:
     """Get the overall backtest summary for the full analysis corpus."""
     try:
         check_tool_execution()
+        eval_window_days = _resolve_default_eval_window(eval_window_days)
         svc = _get_backtest_service()
         summary = svc.get_summary(scope="overall", code=None, eval_window_days=eval_window_days)
         check_tool_execution()
@@ -85,7 +102,7 @@ def _handle_get_overall_backtest_summary(eval_window_days: int = 30) -> dict:
         return {"error": "Failed to retrieve backtest summary."}
 
 
-def _handle_get_skill_backtest_summary(skill_id: str = "", eval_window_days: int = 30) -> dict:
+def _handle_get_skill_backtest_summary(skill_id: str = "", eval_window_days: Optional[int] = None) -> dict:
     """Get a skill-scoped backtest summary when real per-skill stats exist."""
     if not skill_id:
         return {
@@ -95,6 +112,7 @@ def _handle_get_skill_backtest_summary(skill_id: str = "", eval_window_days: int
 
     try:
         check_tool_execution()
+        eval_window_days = _resolve_default_eval_window(eval_window_days)
         svc = _get_backtest_service()
         summary = svc.get_skill_summary(skill_id, eval_window_days=eval_window_days)
         check_tool_execution()
@@ -144,9 +162,9 @@ get_skill_backtest_summary_tool = ToolDefinition(
         ToolParameter(
             name="eval_window_days",
             type="integer",
-            description="Evaluation window in days (default: 30). How many trading days after signal to evaluate.",
+            description="Evaluation window in days (default: the configured backtest window). How many trading days after signal to evaluate.",
             required=False,
-            default=30,
+            default=None,
         ),
     ],
     handler=_handle_get_skill_backtest_summary,
@@ -164,9 +182,9 @@ get_strategy_backtest_summary_tool = ToolDefinition(
         ToolParameter(
             name="eval_window_days",
             type="integer",
-            description="Evaluation window in days (default: 30). How many trading days after signal to evaluate.",
+            description="Evaluation window in days (default: the configured backtest window). How many trading days after signal to evaluate.",
             required=False,
-            default=30,
+            default=None,
         ),
     ],
     handler=_handle_get_overall_backtest_summary,
@@ -179,13 +197,14 @@ get_strategy_backtest_summary_tool = ToolDefinition(
 # get_stock_backtest_summary
 # ============================================================
 
-def _handle_get_stock_backtest_summary(stock_code: str, eval_window_days: int = 30, limit: int = 10) -> dict:
+def _handle_get_stock_backtest_summary(stock_code: str, eval_window_days: Optional[int] = None, limit: int = 10) -> dict:
     """Get backtest results for a specific stock.
 
     Returns the summary plus recent evaluation items.
     """
     try:
         check_tool_execution()
+        eval_window_days = _resolve_default_eval_window(eval_window_days)
         svc = _get_backtest_service()
         result = {}
 
@@ -253,9 +272,9 @@ get_stock_backtest_summary_tool = ToolDefinition(
         ToolParameter(
             name="eval_window_days",
             type="integer",
-            description="Evaluation window in days (default: 30)",
+            description="Evaluation window in days (default: the configured backtest window)",
             required=False,
-            default=30,
+            default=None,
         ),
         ToolParameter(
             name="limit",

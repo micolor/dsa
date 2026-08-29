@@ -39,6 +39,7 @@ interface PaginationProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   className?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -49,6 +50,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   totalPages,
   onPageChange,
   className = '',
+  disabled = false,
 }) => {
   if (totalPages <= 1) return null;
 
@@ -77,7 +79,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       {/* Previous page */}
       <PageButton
         page="prev"
-        disabled={currentPage === 1}
+        disabled={currentPage === 1 || disabled}
         onClick={() => onPageChange(currentPage - 1)}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -91,6 +93,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           key={`${page}-${index}`}
           page={page}
           isActive={page === currentPage}
+          disabled={disabled}
           onClick={() => typeof page === 'number' && onPageChange(page)}
         />
       ))}
@@ -98,7 +101,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       {/* Next page */}
       <PageButton
         page="next"
-        disabled={currentPage === totalPages}
+        disabled={currentPage === totalPages || disabled}
         onClick={() => onPageChange(currentPage + 1)}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

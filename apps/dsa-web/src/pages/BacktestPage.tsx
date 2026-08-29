@@ -326,8 +326,12 @@ const BacktestPage: React.FC = () => {
   const [overallPerf, setOverallPerf] = useState<PerformanceMetrics | null>(null);
   const [stockPerf, setStockPerf] = useState<PerformanceMetrics | null>(null);
   const [isLoadingPerf, setIsLoadingPerf] = useState(false);
-  const effectiveWindowDays = parseEvalWindowDays(evalDays) ?? overallPerf?.evalWindowDays;
-  const isNextDayValidation = effectiveWindowDays === 1;
+  // appliedWindowDays: the eval window the currently-loaded rows/metrics were queried with.
+  // Column headers / mode description must describe the LOADED cohort, not the raw input
+  // (which changes on every keystroke) — otherwise the UI would render columns for a window
+  // that the rows in view were never filtered by. Updated whenever a query actually runs.
+  const [appliedWindowDays, setAppliedWindowDays] = useState<number | null>(null);
+  const isNextDayValidation = appliedWindowDays === 1;
   const showNextDayActualColumns = isNextDayValidation;
 
   // Mount guard
@@ -433,6 +437,7 @@ const BacktestPage: React.FC = () => {
       if (windowDays && !evalDays) {
         setEvalDays(String(windowDays));
       }
+      setAppliedWindowDays(windowDays ?? null);
       fetchResults(1, undefined, windowDays, undefined, undefined, 'all');
     };
     init();
@@ -464,6 +469,7 @@ const BacktestPage: React.FC = () => {
         ?? overallPerf?.evalWindowDays;
       if (effectiveEvalWindowDays != null) {
         setEvalDays(String(effectiveEvalWindowDays));
+        setAppliedWindowDays(effectiveEvalWindowDays);
       }
       // Refresh data with same eval_window_days
       fetchResults(1, code, effectiveEvalWindowDays, dateFrom, dateTo, phaseFilter);
@@ -475,11 +481,13 @@ const BacktestPage: React.FC = () => {
     }
   };
 
-  // Filter by code
+  // Filter by code. The window used reflects what the current cohort was built with, so an
+  // input change is only applied here (on an explicit filter), not on every keystroke.
   const handleFilter = () => {
     const code = normalizeBacktestCode(codeFilter);
-    const windowDays = parseEvalWindowDays(evalDays);
+    const windowDays = parseEvalWindowDays(evalDays) ?? appliedWindowDays ?? overallPerf?.evalWindowDays ?? undefined;
     setCurrentPage(1);
+    setAppliedWindowDays(windowDays ?? null);
     fetchResults(1, code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
     fetchPerformance(code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
   };
@@ -493,6 +501,7 @@ const BacktestPage: React.FC = () => {
   const handleShowNextDay = () => {
     const code = normalizeBacktestCode(codeFilter);
     setEvalDays('1');
+    setAppliedWindowDays(1);
     setCurrentPage(1);
     fetchResults(1, code, 1, analysisDateFrom, analysisDateTo, phaseFilter);
     fetchPerformance(code, 1, analysisDateFrom, analysisDateTo, phaseFilter);
@@ -501,8 +510,9 @@ const BacktestPage: React.FC = () => {
   // Pagination
   const totalPages = Math.ceil(totalResults / pageSize);
   const handlePageChange = (page: number) => {
-    const windowDays = parseEvalWindowDays(evalDays);
-    fetchResults(page, normalizeBacktestCode(codeFilter), windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+    // Pagination must stay within the cohort the current rows were loaded with, and not
+    // pick up a half-typed input value (which would mix windows across pages).
+    fetchResults(page, normalizeBacktestCode(codeFilter), appliedWindowDays ?? undefined, analysisDateFrom, analysisDateTo, phaseFilter);
   };
 
   return (
@@ -533,7 +543,7 @@ const BacktestPage: React.FC = () => {
           <button
             type="button"
             onClick={handleFilter}
-            disabled={isLoadingResults}
+            disabled={isLoadingResults || isRunning}
             className="btn-secondary flex !h-10 items-center gap-1.5 whitespace-nowrap"
           >
             {isLoadingResults ? (
@@ -607,7 +617,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleShowNextDay}
             aria-pressed={isNextDayValidation}
-            disabled={isLoadingResults || isLoadingPerf}
+            disabled={isLoadingResults || isLoadingPerf || isRunning}
             className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
             }`}
@@ -704,7 +714,7 @@ const BacktestPage: React.FC = () => {
                 <div className="min-w-0">
                   <p className="truncate text-xs text-secondary-text">
                     {codeFilter.trim() ? formatUiText(text.filteredStock, { code: codeFilter.trim() }) : text.allStocks}
-                    {evalDays ? ` · ${formatUiText(text.dayWindow, { days: evalDays })}` : ''}
+                    {appliedWindowDays ? ` · ${formatUiText(text.dayWindow, { days: String(appliedWindowDays) })}` : ''}
                     {phaseFilter !== 'all' ? ` · ${phaseFilterOptions.find((item) => item.value === phaseFilter)?.label ?? phaseFilter}` : ''}
                     {analysisDateFrom ? ` · ${formatUiText(text.fromDate, { date: analysisDateFrom })}` : ''}
                     {analysisDateTo ? ` · ${formatUiText(text.toDate, { date: analysisDateTo })}` : ''}
@@ -714,7 +724,7 @@ const BacktestPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => exportResultsCsv(results, actionLabels, text, language)}
-                    disabled={results.length === 0}
+                    disabled={results.length === 0 || isRunning}
                     className="btn-secondary inline-flex items-center gap-1.5 !px-3 !py-1.5 !text-xs"
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -851,6 +861,7 @@ const BacktestPage: React.FC = () => {
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={handlePageChange}
+                  disabled={isRunning}
                 />
               </div>
 
