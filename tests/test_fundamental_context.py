@@ -39,6 +39,12 @@ class _DummyBoardFetcher:
 
 
 class TestFundamentalContext(unittest.TestCase):
+    def setUp(self) -> None:
+        # get_belong_boards uses a shared module-level cache keyed by stock code
+        # (the resolved fallback-chain result, independent of fetcher); clear it so
+        # the same code re-tested with different fetchers / expectations is isolated.
+        DataFetcherManager.clear_belong_boards_cache_for_tests()
+
     def test_offshore_market_returns_not_supported_when_adapter_empty(self) -> None:
         """When yfinance adapter has no data, offshore (US/HK) status is not_supported.
 

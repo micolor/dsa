@@ -634,6 +634,11 @@ class DataFetcherManager:
     _CONCEPT_RANKINGS_EMPTY_CACHE_TTL_SECONDS = 30.0
     _concept_rankings_cache_lock = RLock()
     _concept_rankings_cache: Dict[int, Tuple[float, List[Dict], List[Dict]]] = {}
+    # 板块归属（行业分类）变化很低频，给较长 TTL 以消除持仓页 risk 报告里对每个 A 股反复的实时探测。
+    _BELONG_BOARDS_CACHE_TTL_SECONDS = 24 * 3600.0
+    _BELONG_BOARDS_CACHE_MAX_ENTRIES = 5000
+    _belong_boards_cache_lock = RLock()
+    _belong_boards_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
         """
@@ -2313,11 +2318,18 @@ class DataFetcherManager:
         stock_code = normalize_stock_code(stock_code)
         if _market_tag(stock_code) != "cn":
             return []
+        cache_key = stock_code
+        now_ts = time.time()
+        with self._belong_boards_cache_lock:
+            cached = self._belong_boards_cache.get(cache_key)
+            if cached is not None and now_ts - cached[0] < self._BELONG_BOARDS_CACHE_TTL_SECONDS:
+                return cached[1]
         candidate_fetchers = [
             fetcher
             for fetcher in self._fetchers
             if hasattr(fetcher, "get_belong_board")
         ]
+        boards_result: Optional[List[Dict[str, Any]]] = None
         for index, fetcher in enumerate(candidate_fetchers):
             fallback_to = (
                 candidate_fetchers[index + 1].name
@@ -2343,7 +2355,8 @@ class DataFetcherManager:
                         record_count=len(boards),
                     )
                     logger.info(f"[{fetcher.name}] 获取所属板块成功: {stock_code}, count={len(boards)}")
-                    return boards
+                    boards_result = boards
+                    break
                 record_provider_run(
                     data_type="belong_boards",
                     provider=fetcher.name,
@@ -2369,7 +2382,40 @@ class DataFetcherManager:
                 )
                 logger.debug(f"[{fetcher.name}] 获取所属板块失败: {e}")
                 continue
-        return []
+        boards = boards_result if boards_result is not None else []
+        with self._belong_boards_cache_lock:
+            self._belong_boards_cache[cache_key] = (now_ts, boards)
+            self._prune_belong_boards_cache()
+        return boards
+
+    @classmethod
+    def clear_belong_boards_cache_for_tests(cls) -> None:
+        """Clear the shared belong-boards cache (test isolation)."""
+        with cls._belong_boards_cache_lock:
+            cls._belong_boards_cache.clear()
+
+    def _prune_belong_boards_cache(self) -> None:
+        """Prune expired and overflow belong-boards cache items."""
+        with self._belong_boards_cache_lock:
+            if not self._belong_boards_cache:
+                return
+            now_ts = time.time()
+            ttl = self._BELONG_BOARDS_CACHE_TTL_SECONDS
+            expired_keys = [
+                key for key, value in self._belong_boards_cache.items()
+                if now_ts - float(value[0]) > ttl
+            ]
+            for key in expired_keys:
+                self._belong_boards_cache.pop(key, None)
+            max_entries = self._BELONG_BOARDS_CACHE_MAX_ENTRIES
+            if max_entries > 0 and len(self._belong_boards_cache) > max_entries:
+                overflow = len(self._belong_boards_cache) - max_entries
+                sorted_items = sorted(
+                    self._belong_boards_cache.items(),
+                    key=lambda item: float(item[1][0]),
+                )
+                for key, _ in sorted_items[:overflow]:
+                    self._belong_boards_cache.pop(key, None)
 
     def prefetch_stock_names(self, stock_codes: List[str], use_bulk: bool = False) -> None:
         """

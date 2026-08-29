@@ -9,6 +9,12 @@ from src.services.run_diagnostics import (
 from data_provider.base import DataFetcherManager
 
 
+def setup_function(_function):
+    # belong-boards cache is a shared class-level cache; clear it so each test's
+    # provider-run recording is isolated (cache is keyed by stock code "600519").
+    DataFetcherManager.clear_belong_boards_cache_for_tests()
+
+
 class _BoardFetcher:
     def __init__(self, name: str, result):
         self.name = name
