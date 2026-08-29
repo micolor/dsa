@@ -834,11 +834,11 @@ const BacktestPage: React.FC = () => {
                             {row.stopLoss != null || row.takeProfit != null ? (
                               <div className="flex flex-col gap-0.5 text-secondary-text">
                                 <span>
-                                  止损 {row.stopLoss != null ? row.stopLoss : '--'}
+                                  {text.stopLoss} {row.stopLoss != null ? row.stopLoss : '--'}
                                   {row.hitStopLoss ? ' ✓' : ''}
                                 </span>
                                 <span>
-                                  止盈 {row.takeProfit != null ? row.takeProfit : '--'}
+                                  {text.takeProfit} {row.takeProfit != null ? row.takeProfit : '--'}
                                   {row.hitTakeProfit ? ' ✓' : ''}
                                 </span>
                               </div>
