@@ -236,7 +236,7 @@ describe('BacktestPage', () => {
     fireEvent.change(phaseSelect, { target: { value: 'intraday' } });
     fireEvent.change(fromInput, { target: { value: '2026-03-01' } });
     fireEvent.change(toInput, { target: { value: '2026-03-31' } });
-    fireEvent.click(screen.getByRole('button', { name: '筛选' }));
+    fireEvent.click(screen.getByRole('button', { name: '筛选结果' }));
 
     await waitFor(() => {
       expect(mockGetResults).toHaveBeenLastCalledWith({

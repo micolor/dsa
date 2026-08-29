@@ -513,10 +513,41 @@ const BacktestPage: React.FC = () => {
     <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 md:px-6">
       {/* Header */}
       <header className="flex-shrink-0 border-b border-border/40 px-3 py-3 sm:px-4">
-        <div className="flex max-w-5xl flex-col gap-2 md:flex-row md:items-start">
-          {/* 查询条件：检索字段 + 应用筛选（左，占满可换行，日期成对不拆） */}
-          <div className="flex min-w-0 flex-wrap items-center gap-2 md:flex-1">
-            <div className="relative min-w-0 flex-[2_1_260px]">
+        <div className="flex w-full flex-col gap-3">
+          {/* 顶部用途说明 */}
+          <p className="text-xs text-secondary-text">{text.purpose}</p>
+
+          {/* ① 评估规则：评估窗口 + 1 日验证（同一规则，一窗口一快捷） */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-20 shrink-0 text-xs text-muted-text">{text.ruleSection}</span>
+            <span className="text-xs text-muted-text">{text.evalWindow}</span>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={evalDays}
+              onChange={(e) => setEvalDays(e.target.value)}
+              placeholder="10"
+              disabled={isRunning}
+              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
+            />
+            <button
+              type="button"
+              onClick={handleShowNextDay}
+              aria-pressed={evalDays === '1'}
+              disabled={isLoadingResults || isLoadingPerf || isRunning}
+              className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                evalDays === '1' ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+              }`}
+            >
+              {text.oneDayValidation}
+            </button>
+          </div>
+
+          {/* ② 追踪范围：股票 / 日期 / 阶段（运行与查看共用） */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-20 shrink-0 text-xs text-muted-text">{text.scopeSection}</span>
+            <div className="relative min-w-0 flex-[2_1_260px] max-w-sm">
               <StockAutocomplete
                 value={codeFilter}
                 onChange={(v) => setCodeFilter(v.toUpperCase())}
@@ -536,30 +567,28 @@ const BacktestPage: React.FC = () => {
                 </button>
               ) : null}
             </div>
-            <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
-              <span className="text-xs text-muted-text">{text.evalWindow}</span>
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={evalDays}
-                onChange={(e) => setEvalDays(e.target.value)}
-                placeholder="10"
-                disabled={isRunning}
-                className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
-              />
-            </div>
-            <div className="flex items-center gap-2 whitespace-nowrap">
-              <span className="text-xs text-muted-text">{text.minAgeDays}</span>
-              <input
-                type="number"
-                min={0}
-                value={minAgeDays}
-                onChange={(e) => setMinAgeDays(e.target.value)}
-                placeholder="14"
-                disabled={isRunning}
-                className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}
-              />
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs text-muted-text">{text.startDate}</span>
+                <DatePicker
+                  className="w-36 !h-10"
+                  value={analysisDateFrom}
+                  onChange={setAnalysisDateFrom}
+                  ariaLabel={text.startDateAria}
+                  disabled={isRunning}
+                />
+              </div>
+              <span className="text-xs text-muted-text">~</span>
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs text-muted-text">{text.endDate}</span>
+                <DatePicker
+                  className="w-36 !h-10"
+                  value={analysisDateTo}
+                  onChange={setAnalysisDateTo}
+                  ariaLabel={text.endDateAria}
+                  disabled={isRunning}
+                />
+              </div>
             </div>
             <div className="flex items-center gap-2 whitespace-nowrap">
               <span className="text-xs text-muted-text">{text.phase}</span>
@@ -574,28 +603,11 @@ const BacktestPage: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 whitespace-nowrap">
-                <span className="text-xs text-muted-text">{text.startDate}</span>
-                <DatePicker
-                  className="w-36 !h-10"
-                  value={analysisDateFrom}
-                  onChange={setAnalysisDateFrom}
-                  ariaLabel={text.startDateAria}
-                  disabled={isRunning}
-                />
-              </div>
-              <div className="flex items-center gap-2 whitespace-nowrap">
-                <span className="text-xs text-muted-text">{text.endDate}</span>
-                <DatePicker
-                  className="w-36 !h-10"
-                  value={analysisDateTo}
-                  onChange={setAnalysisDateTo}
-                  ariaLabel={text.endDateAria}
-                  disabled={isRunning}
-                />
-              </div>
-            </div>
+          </div>
+
+          {/* ③ 操作：筛选(仅查看) 左；运行(最小天龄+强制重跑+运行按钮) 右 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-20 shrink-0 text-xs text-muted-text">{text.actionSection}</span>
             <button
               type="button"
               onClick={handleFilter}
@@ -607,22 +619,19 @@ const BacktestPage: React.FC = () => {
               ) : null}
               {text.filter}
             </button>
-          </div>
-
-          {/* 执行面板（右，纵向）：切换项一行 + 运行按钮 */}
-          <div className="flex shrink-0 flex-col items-stretch gap-2 md:w-44">
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleShowNextDay}
-                aria-pressed={isNextDayValidation}
-                disabled={isLoadingResults || isLoadingPerf || isRunning}
-                className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
-                }`}
-              >
-                {text.oneDayValidation}
-              </button>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs text-muted-text">{text.minAgeDays}</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={minAgeDays}
+                  onChange={(e) => setMinAgeDays(e.target.value)}
+                  placeholder="14"
+                  disabled={isRunning}
+                  className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => setForceRerun(!forceRerun)}
@@ -634,25 +643,25 @@ const BacktestPage: React.FC = () => {
               >
                 {text.forceRerun}
               </button>
+              <button
+                type="button"
+                onClick={handleRun}
+                disabled={isRunning}
+                className="btn-primary flex !h-10 items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                {isRunning ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    {text.running}
+                  </>
+                ) : (
+                  text.runBacktest
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={isRunning}
-              className="btn-primary flex !h-10 w-full items-center justify-center gap-1.5 whitespace-nowrap"
-            >
-              {isRunning ? (
-                <>
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  {text.running}
-                </>
-              ) : (
-                text.runBacktest
-              )}
-            </button>
           </div>
         </div>
         {runResult && (
