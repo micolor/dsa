@@ -126,7 +126,11 @@ export const PaperTradingPage: React.FC = () => {
     setError(null);
     try {
       const result = await paperApi.backfill(backfillFrom);
-      setToast(formatUiText(text.backfillDone, { count: result.signalsReplayed }));
+      let message = formatUiText(text.backfillDone, { count: result.signalsReplayed });
+      if (result.signalsUnavailable) {
+        message += formatUiText(text.backfillSkipped, { count: result.signalsUnavailable });
+      }
+      setToast(message);
       setBackfillFrom('');
       await loadStatic();
       await loadList(activeSection, page);
@@ -135,7 +139,7 @@ export const PaperTradingPage: React.FC = () => {
     } finally {
       setIsActioning(false);
     }
-  }, [backfillFrom, loadStatic, loadList, activeSection, page, text.backfillDone]);
+  }, [backfillFrom, loadStatic, loadList, activeSection, page, text.backfillDone, text.backfillSkipped]);
 
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');

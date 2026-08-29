@@ -524,7 +524,7 @@ class PaperService:
                 },
             )
 
-        return self._record_snapshot(account, as_of)
+        return self._record_snapshot(account, as_of, positions)
 
     def _daily_exit(self, position, bar: Dict[str, float]) -> Tuple[Optional[float], str]:
         """Return (exit_price, reason) if today's bar triggers stop-loss or take-profit."""
@@ -568,8 +568,12 @@ class PaperService:
             "paper: closed %s %s @ %.2f (%s)", position.stock_code, quantity, exit_price, reason
         )
 
-    def _record_snapshot(self, account, as_of: date) -> Dict[str, Any]:
-        positions = self.paper_repo.list_open_positions(account.id)
+    def _record_snapshot(self, account, as_of: date, positions=None) -> Dict[str, Any]:
+        # `_valuate` already fetched open positions; pass them in to avoid a
+        # second list_open_positions query for the same batch. Fall back to a
+        # fresh query only when not provided (keeps other/legacy callers intact).
+        if positions is None:
+            positions = self.paper_repo.list_open_positions(account.id)
         market_value = sum(float(p.market_value or 0) for p in positions)
         cash = float(account.cash or 0)
         net_value = cash + market_value

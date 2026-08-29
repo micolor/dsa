@@ -83,5 +83,6 @@ export interface BackfillResult {
   fromDate: string;
   toDate: string;
   signalsReplayed: number;
+  signalsUnavailable: number;
   snapshot: PaperSnapshot;
 }

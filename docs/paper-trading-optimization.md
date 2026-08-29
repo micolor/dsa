@@ -7,7 +7,7 @@
 
 - ✅ **方向 A（前端加载与 Tab 交互）** 已实施并验证（lint 0 error、`PaperTradingPage.test.tsx` 3/3、build 成功）。见 `apps/dsa-web/src/pages/PaperTradingPage.tsx`。
 - ✅ **方向 B（行情 bar 缓存复用）** 已实施并验证：改为进程内共享的模块级缓存，见下方第 4 节「实施结果」。
-- ⏳ 方向 C（回填/批处理）未实施，按本文档第 5 节单独评审后推进。
+- 🔶 方向 C（回填/批处理）**部分实施**：已完成第 5 节的改动点 1（开放持仓读取合并：`_valuate` 把已读 `positions` 传给 `_record_snapshot`，去掉一次重复 `list_open_positions` 查询），并补充回填"被跳过信号"前端提示（`signals_unavailable` 透出）。改动点 2（repo 引入 session-per-batch / 读去 commit / 写批量提交）**未做**——需在确认回填频繁或信号量大的场景单独评审，涉及事务边界与幂等，属高收益但高风险区。
 
 ## 1. 模块现状
 
