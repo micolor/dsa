@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 告警中心页面级文案与「通知尝试记录」Tab 接入中英文（i18n）：此前 `AlertsPage` 页面本体与通知尝试记录整节为中文硬编码，而三个子组件（规则表单/列表/触发历史）均已双语，模块内部自相矛盾；现试跑状态、通知渠道/状态、Tab 标题、测试结果统计与警示、通知记录表头与空态全部走 `featureText`，复用既有 `ALERT_*_LABELS` 与新增 `ALERT_PAGE_TEXT`
+- [改进] 告警中心「触发历史」与「通知尝试记录」两个 Tab 补齐分页：此前硬编码只取前 20 条（≥21 条被静默截断且无提示），现按 rules 列表同款 `Pagination` 翻页并展示总数
+- [改进] 告警中心 Tab 内容按需加载：进入页面只在默认「规则」Tab 拉取规则列表，触发历史 / 通知记录改为首次切到对应 Tab 时才请求，不再页面挂载即三份全量预载
+- [改进] 告警后端 `GET /rules` 列表消除 cooldown N+1：每页由每行各一次 `get_rule_cooldown_summary` 单行子查询改为一次 `IN (...)` 批量取回再按行填充，列表页从「20 次额外查询」降到「1 次」
+- [改进] 告警 worker 复用 `NotificationService`：此前每条触发规则都新建一次（含配置加载与全部渠道探测），现单个 worker 懒加载一次并在整轮复用，触发越多节省越明显；注入的测试 notifier 仍优先
+- [改进] 告警评估 per-rule 超时对齐 dry-run：worker 生产路径的 `_evaluate_one` 补上 `asyncio.wait_for`（沿用 dry-run 的 `DRY_RUN_TARGET_TIMEOUT_SECONDS`），单只股票实时行情/日线查询挂起不再阻塞整轮 `gather`，超时按 skipped 降级
+- [改进] 告警 cooldown 并发 upsert 修正：`upsert_cooldown` 改为捕获 `IntegrityError` 后重取幸存行再更新，避免多 worker 并发对同一 `(rule_id, target, severity)` 竞态 INSERT 撞唯一约束、导致 cooldown 静默未写而下周期重复触发/重复通知
+- [改进] 前端告警规则参数映射补 `top_weight_pct` / `max_drawdown_pct`：`toSnakeRulePayload` 此前遗漏这两个字段（`types/alerts.ts` 已定义），设置时会静默丢弃，现补齐，与后端参数契约闭合
 - [改进] 模拟盘成交流水列表的「原因」列改为本地化徽章展示：`reason` 原始枚举（`signal_action`/`stop_loss`/`take_profit`/`ambiguous_stop_loss`）不再原样输出英文，改为按语言映射为「信号触发 / 止损退出 / 止盈退出 / 止损+止盈」，并用徽章颜色区分（信号=中性，止损+止损+止盈=红，止盈=绿），一眼区分「主动跟单」与「被动风控退出」；未知枚举回退为原样文本，不丢信息
 - [改进] 模拟盘开放持仓读取合并与回填跳过提示：`PaperService._valuate` 已读取的开放持仓结果直接传给 `_record_snapshot`，去掉一次重复的 `list_open_positions` DB 查询（同一批持仓在一次估值内不再被重复读取）；历史回填完成后若存在因缺行情被跳过的信号，Web 端 toast 额外提示「另有 N 条因缺行情被跳过，可稍后重试」（后端本已返回 `signals_unavailable`，前端此前未展示）
 - [改进] 模拟盘页面加载与 Tab 交互优化：首次进入只拉静态数据（账户 / 持仓 / 净值曲线，账户响应已内嵌快照故移除一次独立 snapshot 请求，加载由 6 个降到 3 个请求）；信号 / 成交列表改为切换到对应 Tab 或翻页时才按需拉取，不再每次切 Tab / 翻页重发全部请求；手动刷新 / 回填后仍会同步刷新当前 Tab 列表

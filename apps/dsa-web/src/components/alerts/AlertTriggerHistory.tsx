@@ -1,6 +1,6 @@
 import type React from 'react';
 import { Activity } from 'lucide-react';
-import { Badge, EmptyState, Loading } from '../common';
+import { Badge, EmptyState, Loading, Pagination } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../../i18n/uiText';
@@ -46,11 +46,23 @@ function renderPhaseQuality(trigger: AlertTriggerItem, language: UiLanguage): Re
 interface AlertTriggerHistoryProps {
   triggers: AlertTriggerItem[];
   isLoading?: boolean;
+  page?: number;
+  total?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
 }
 
-export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ triggers, isLoading = false }) => {
+export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({
+  triggers,
+  isLoading = false,
+  page = 1,
+  total = 0,
+  pageSize = 20,
+  onPageChange,
+}) => {
   const { language } = useUiLanguage();
   const text = ALERT_TRIGGER_HISTORY_TEXT[language];
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
       <DashboardPanelHeader
@@ -107,6 +119,14 @@ export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ trigge
             </tbody>
           </table>
         </div>
+      ) : null}
+      {!isLoading && triggers.length > 0 && onPageChange ? (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={onPageChange}
+          className="mt-5"
+        />
       ) : null}
     </section>
   );

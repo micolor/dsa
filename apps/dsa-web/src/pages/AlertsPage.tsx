@@ -12,8 +12,17 @@ import {
   type AlertTypeFilter,
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
-import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading, Pagination, ToastViewport } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
+import { useUiLanguage } from '../contexts/UiLanguageContext';
+import { formatUiText } from '../i18n/uiText';
+import {
+  ALERT_PAGE_TEXT,
+  ALERT_DRY_RUN_STATUS_LABELS,
+  ALERT_CHANNEL_LABELS,
+  ALERT_NOTIFICATION_STATUS_LABELS,
+  ALERT_TRIGGER_STATUS_LABELS,
+} from '../locales/featureText';
 import type {
   AlertDryRunStatus,
   AlertNotificationItem,
@@ -43,46 +52,46 @@ function testVariant(result: AlertRuleTestResponse): 'success' | 'warning' | 'da
   return result.triggered ? 'success' : 'warning';
 }
 
-/** 试跑整体状态码 → 中文标签（not_triggered 只是「未触发」，不代表数据完整）。 */
-function formatDryRunStatus(status: AlertDryRunStatus): string {
-  switch (status) {
-    case 'triggered': return '已触发';
-    case 'not_triggered': return '未触发';
-    case 'evaluation_error': return '求值出错';
-    default: return status;
-  }
+/** 试跑整体状态码 → 标签（not_triggered 只是「未触发」，不代表数据完整）。 */
+function formatDryRunStatus(status: AlertDryRunStatus, labels: Record<string, string>): string {
+  return labels[status] ?? status;
 }
 
-/** 目标级记录状态码 → 中文标签（skipped = 缺数据跳过，不是求值失败）。 */
-function formatRecordStatus(status: AlertTriggerStatus | null | undefined): string {
-  switch (status) {
-    case 'triggered': return '已触发';
-    case 'skipped': return '已跳过';
-    case 'degraded': return '降级';
-    case 'failed': return '失败';
-    default: return '';
-  }
+/** 目标级记录状态码 → 标签（skipped = 缺数据跳过，不是求值失败）。 */
+function formatRecordStatus(status: AlertTriggerStatus | null | undefined, labels: Record<string, string>): string {
+  if (!status) return '';
+  return labels[status] ?? status;
 }
 
-function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode {
+function renderTestResultMessage(
+  result: AlertRuleTestResponse,
+  text: (typeof ALERT_PAGE_TEXT)[keyof typeof ALERT_PAGE_TEXT],
+  dryRunLabels: Record<string, string>,
+  recordLabels: Record<string, string>,
+): React.ReactNode {
   const targetResults = result.targetResults ?? [];
   const hasCounts = typeof result.evaluatedCount === 'number';
   const skippedCount = result.skippedCount ?? 0;
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-medium">{formatDryRunStatus(result.status)}</span>
-        <span className="text-secondary-text">触发：{result.triggered ? '是' : '否'}</span>
-        <span className="text-secondary-text">观察值：{result.observedValue == null ? '--' : String(result.observedValue)}</span>
+        <span className="font-medium">{formatDryRunStatus(result.status, dryRunLabels)}</span>
+        <span className="text-secondary-text">{formatUiText(text.testTriggered, { value: result.triggered ? text.testYes : text.testNo })}</span>
+        <span className="text-secondary-text">{formatUiText(text.testObserved, { value: result.observedValue == null ? text.dash : String(result.observedValue) })}</span>
       </div>
       {hasCounts ? (
         <div className="text-xs text-secondary-text">
-          共评估 {result.evaluatedCount} 个目标：触发 {result.triggeredCount ?? 0} · 降级 {result.degradedCount ?? 0} · 跳过 {skippedCount}
+          {formatUiText(text.testEvaluated, {
+            count: result.evaluatedCount ?? 0,
+            triggered: result.triggeredCount ?? 0,
+            degraded: result.degradedCount ?? 0,
+            skipped: skippedCount,
+          })}
         </div>
       ) : null}
       {skippedCount > 0 ? (
         <div className="rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
-          有 {skippedCount} 个目标因缺少实时行情数据被跳过，未能参与判断——这不代表「未触发」，常见于非交易时段、停牌或实时报价缺失时。
+          {formatUiText(text.testSkippedHint, { count: skippedCount })}
         </div>
       ) : null}
       {targetResults.length > 1 ? (
@@ -91,8 +100,8 @@ function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode
             <div key={`${item.target}-${item.status}`} className="flex flex-wrap justify-between gap-2">
               <span>{item.displayTarget ?? item.target}</span>
               <span>
-                {formatDryRunStatus(item.status)}
-                {item.recordStatus ? ` / ${formatRecordStatus(item.recordStatus)}` : ''}
+                {formatDryRunStatus(item.status, dryRunLabels)}
+                {item.recordStatus ? ` / ${formatRecordStatus(item.recordStatus, recordLabels)}` : ''}
               </span>
             </div>
           ))}
@@ -102,40 +111,35 @@ function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode
   );
 }
 
-const notificationChannelLabel: Record<string, string> = {
-  __cooldown__: '业务冷却',
-  __cooldown_read_failed__: '冷却读取失败',
-  __noise_suppressed__: '通知降噪',
-  __no_channel__: '无可用渠道',
-  __dispatch__: '通知调度',
-  __context__: '会话渠道',
-};
-
-function formatNotificationChannel(channel: string): string {
-  return notificationChannelLabel[channel] ?? channel;
+function formatNotificationChannel(channel: string, labels: Record<string, string>): string {
+  return labels[channel] ?? channel;
 }
 
-function formatNotificationStatus(notification: AlertNotificationItem): string {
-  if (notification.success) return '成功';
-  if (notification.errorCode === 'cooldown_active') return '冷却抑制';
-  if (notification.errorCode === 'cooldown_read_failed') return '冷却读取失败';
-  if (notification.errorCode === 'noise_suppressed') return '降噪抑制';
-  if (notification.errorCode === 'no_channel') return '无渠道';
-  return '失败';
+function formatNotificationStatus(notification: AlertNotificationItem, labels: Record<string, string>): string {
+  if (notification.success) return labels.success ?? 'Success';
+  if (notification.errorCode) return labels[notification.errorCode] ?? labels.failed ?? 'Failed';
+  return labels.failed ?? 'Failed';
 }
 
 type AlertsTabKey = 'rules' | 'history' | 'notifications';
 
-const ALERTS_TABS: Array<{ key: AlertsTabKey; label: string }> = [
-  { key: 'rules', label: '告警规则' },
-  { key: 'history', label: '触发历史' },
-  { key: 'notifications', label: '通知尝试记录' },
-];
-
 const AlertsPage: React.FC = () => {
+  const { language } = useUiLanguage();
+  const text = ALERT_PAGE_TEXT[language];
+  const dryRunLabels = ALERT_DRY_RUN_STATUS_LABELS[language];
+  const recordLabels = ALERT_TRIGGER_STATUS_LABELS[language];
+  const channelLabels = ALERT_CHANNEL_LABELS[language];
+  const notificationLabels = ALERT_NOTIFICATION_STATUS_LABELS[language];
+
+  const tabs: Array<{ key: AlertsTabKey; label: string }> = [
+    { key: 'rules', label: text.tabsRules },
+    { key: 'history', label: text.tabsHistory },
+    { key: 'notifications', label: text.tabsNotifications },
+  ];
+
   useEffect(() => {
-    document.title = '告警中心 - DSA';
-  }, []);
+    document.title = text.documentTitle;
+  }, [text.documentTitle]);
 
   const [rules, setRules] = useState<AlertRuleItem[]>([]);
   const [rulesTotal, setRulesTotal] = useState(0);
@@ -144,13 +148,16 @@ const AlertsPage: React.FC = () => {
   const [alertTypeFilter, setAlertTypeFilter] = useState<AlertTypeFilter>('all');
   const [rulesLoading, setRulesLoading] = useState(false);
   const [rulesError, setRulesError] = useState<ParsedApiError | null>(null);
-  const [rulesLoaded, setRulesLoaded] = useState(false);
 
   const [triggers, setTriggers] = useState<AlertTriggerItem[]>([]);
+  const [triggersTotal, setTriggersTotal] = useState(0);
+  const [triggersPage, setTriggersPage] = useState(1);
   const [triggersLoading, setTriggersLoading] = useState(false);
   const [triggersError, setTriggersError] = useState<ParsedApiError | null>(null);
 
   const [notifications, setNotifications] = useState<AlertNotificationItem[]>([]);
+  const [notificationsTotal, setNotificationsTotal] = useState(0);
+  const [notificationsPage, setNotificationsPage] = useState(1);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<ParsedApiError | null>(null);
 
@@ -165,6 +172,8 @@ const AlertsPage: React.FC = () => {
   const rulesRequestIdRef = useRef(0);
   const triggersRequestIdRef = useRef(0);
   const notificationsRequestIdRef = useRef(0);
+  const triggersLoadedRef = useRef(false);
+  const notificationsLoadedRef = useRef(false);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -206,7 +215,6 @@ const AlertsPage: React.FC = () => {
       setRules(response.items);
       setRulesTotal(response.total);
       setRulesError(null);
-      setRulesLoaded(true);
       return response;
     } catch (error) {
       if (!mountedRef.current || !isLatestRequest()) return null;
@@ -219,15 +227,18 @@ const AlertsPage: React.FC = () => {
     }
   }, [alertTypeFilter, enabledFilter, rulesPage]);
 
-  const loadTriggers = useCallback(async () => {
+  const loadTriggers = useCallback(async (page?: number) => {
+    const requestedPage = page ?? triggersPage;
     const requestId = triggersRequestIdRef.current + 1;
     triggersRequestIdRef.current = requestId;
     const isLatestRequest = () => triggersRequestIdRef.current === requestId;
     setTriggersLoading(true);
     try {
-      const response = await alertsApi.listTriggers({ page: 1, pageSize: PAGE_SIZE });
+      const response = await alertsApi.listTriggers({ page: requestedPage, pageSize: PAGE_SIZE });
       if (!mountedRef.current || !isLatestRequest()) return;
       setTriggers(response.items);
+      setTriggersTotal(response.total);
+      setTriggersPage(requestedPage);
       setTriggersError(null);
     } catch (error) {
       if (!mountedRef.current || !isLatestRequest()) return;
@@ -237,17 +248,20 @@ const AlertsPage: React.FC = () => {
         setTriggersLoading(false);
       }
     }
-  }, []);
+  }, [triggersPage]);
 
-  const loadNotifications = useCallback(async () => {
+  const loadNotifications = useCallback(async (page?: number) => {
+    const requestedPage = page ?? notificationsPage;
     const requestId = notificationsRequestIdRef.current + 1;
     notificationsRequestIdRef.current = requestId;
     const isLatestRequest = () => notificationsRequestIdRef.current === requestId;
     setNotificationsLoading(true);
     try {
-      const response = await alertsApi.listNotifications({ page: 1, pageSize: PAGE_SIZE });
+      const response = await alertsApi.listNotifications({ page: requestedPage, pageSize: PAGE_SIZE });
       if (!mountedRef.current || !isLatestRequest()) return;
       setNotifications(response.items);
+      setNotificationsTotal(response.total);
+      setNotificationsPage(requestedPage);
       setNotificationsError(null);
     } catch (error) {
       if (!mountedRef.current || !isLatestRequest()) return;
@@ -257,17 +271,24 @@ const AlertsPage: React.FC = () => {
         setNotificationsLoading(false);
       }
     }
-  }, []);
+  }, [notificationsPage]);
 
   useEffect(() => {
     void loadRules();
   }, [loadRules]);
 
+  // 各 Tab 首次激活时才加载对应列表，避免进入页面即三份全量预载。
   useEffect(() => {
-    if (!rulesLoaded) return;
-    void loadTriggers();
-    void loadNotifications();
-  }, [loadNotifications, loadTriggers, rulesLoaded]);
+    if (activeTab !== 'history' || triggersLoadedRef.current) return;
+    triggersLoadedRef.current = true;
+    void loadTriggers(1);
+  }, [activeTab, loadTriggers]);
+
+  useEffect(() => {
+    if (activeTab !== 'notifications' || notificationsLoadedRef.current) return;
+    notificationsLoadedRef.current = true;
+    void loadNotifications(1);
+  }, [activeTab, loadNotifications]);
 
   const handleCreateRule = async (payload: AlertRuleCreateRequest) => {
     setCreateLoading(true);
@@ -276,10 +297,10 @@ const AlertsPage: React.FC = () => {
     try {
       if (editingRule) {
         const updated = await alertsApi.updateRule(editingRule.id, payload);
-        setCreateSuccess(`已更新告警规则「${updated.name}」`);
+        setCreateSuccess(formatUiText(text.updated, { name: updated.name }));
       } else {
         const created = await alertsApi.createRule(payload);
-        setCreateSuccess(`已创建告警规则「${created.name}」`);
+        setCreateSuccess(formatUiText(text.created, { name: created.name }));
       }
       await loadRules(1);
       return true;
@@ -327,7 +348,7 @@ const AlertsPage: React.FC = () => {
       {createSuccess ? (
         <InlineAlert
           elevated
-          title="创建成功"
+          title={text.createSuccess}
           message={createSuccess}
           variant="success"
           action={(
@@ -335,7 +356,7 @@ const AlertsPage: React.FC = () => {
               type="button"
               onClick={() => setCreateSuccess(null)}
               className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-              aria-label="关闭"
+              aria-label={text.close}
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -346,16 +367,16 @@ const AlertsPage: React.FC = () => {
         <ToastViewport>
           <InlineAlert
             elevated
-            title="测试结果"
+            title={text.testResult}
             variant={testVariant(testResult)}
-            message={renderTestResultMessage(testResult)}
+            message={renderTestResultMessage(testResult, text, dryRunLabels, recordLabels)}
             className="pointer-events-auto"
             action={(
               <button
                 type="button"
                 onClick={() => setTestResult(null)}
                 className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label="关闭"
+                aria-label={text.close}
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -365,7 +386,7 @@ const AlertsPage: React.FC = () => {
       ) : null}
       <div className="flex min-h-full flex-col gap-4">
         <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
-          {ALERTS_TABS.map((tab) => {
+          {tabs.map((tab) => {
             const selected = activeTab === tab.key;
             return (
               <button
@@ -419,7 +440,14 @@ const AlertsPage: React.FC = () => {
         {activeTab === 'history' ? (
           <>
             {triggersError ? <ApiErrorAlert error={triggersError} onDismiss={() => setTriggersError(null)} /> : null}
-            <AlertTriggerHistory triggers={triggers} isLoading={triggersLoading} />
+            <AlertTriggerHistory
+              triggers={triggers}
+              isLoading={triggersLoading}
+              page={triggersPage}
+              total={triggersTotal}
+              pageSize={PAGE_SIZE}
+              onPageChange={loadTriggers}
+            />
           </>
         ) : null}
 
@@ -429,46 +457,54 @@ const AlertsPage: React.FC = () => {
             <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
               <DashboardPanelHeader
                 className="mb-3"
-                eyebrow="通知结果"
-                title="通知尝试记录"
+                eyebrow={text.notificationEyebrow}
+                title={text.notificationTitle}
                 titleClassName="text-base font-semibold"
               />
-              {notificationsLoading ? <Loading label="正在加载通知尝试记录" /> : null}
+              {notificationsLoading ? <Loading label={text.notificationLoading} /> : null}
               {!notificationsLoading && notifications.length === 0 ? (
                 <EmptyState
                   icon={<BellRing className="h-6 w-6" />}
-                  title="暂无通知尝试记录"
-                  description="当前没有可展示的通知尝试明细；告警触发仍会按已配置通知渠道发送。"
+                  title={text.notificationEmptyTitle}
+                  description={text.notificationEmptyDescription}
                   className="flex-1 flex flex-col items-center justify-center"
                 />
               ) : null}
               {!notificationsLoading && notifications.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[680px] text-left text-sm">
-                    <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">渠道</th>
-                        <th className="px-3 py-2 font-medium">状态</th>
-                        <th className="px-3 py-2 font-medium">错误码</th>
-                        <th className="px-3 py-2 font-medium">耗时</th>
-                        <th className="px-3 py-2 font-medium">时间</th>
-                        <th className="px-3 py-2 font-medium">诊断</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/40">
-                      {notifications.map((notification) => (
-                        <tr key={notification.id}>
-                          <td className="px-3 py-3">{formatNotificationChannel(notification.channel)}</td>
-                          <td className="px-3 py-3">{formatNotificationStatus(notification)}</td>
-                          <td className="px-3 py-3">{notification.errorCode ?? '--'}</td>
-                          <td className="px-3 py-3">{notification.latencyMs == null ? '--' : `${notification.latencyMs}ms`}</td>
-                          <td className="px-3 py-3">{formatDateTime(notification.createdAt)}</td>
-                          <td className="px-3 py-3">{notification.diagnostics ?? '--'}</td>
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[680px] text-left text-sm">
+                      <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">{text.channelCol}</th>
+                          <th className="px-3 py-2 font-medium">{text.statusCol}</th>
+                          <th className="px-3 py-2 font-medium">{text.errorCodeCol}</th>
+                          <th className="px-3 py-2 font-medium">{text.latencyCol}</th>
+                          <th className="px-3 py-2 font-medium">{text.timeCol}</th>
+                          <th className="px-3 py-2 font-medium">{text.diagnosticsCol}</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {notifications.map((notification) => (
+                          <tr key={notification.id}>
+                            <td className="px-3 py-3">{formatNotificationChannel(notification.channel, channelLabels)}</td>
+                            <td className="px-3 py-3">{formatNotificationStatus(notification, notificationLabels)}</td>
+                            <td className="px-3 py-3">{notification.errorCode ?? text.dash}</td>
+                            <td className="px-3 py-3">{notification.latencyMs == null ? text.dash : `${notification.latencyMs}ms`}</td>
+                            <td className="px-3 py-3">{formatDateTime(notification.createdAt)}</td>
+                            <td className="px-3 py-3">{notification.diagnostics ?? text.dash}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination
+                    currentPage={notificationsPage}
+                    totalPages={Math.max(1, Math.ceil(notificationsTotal / PAGE_SIZE))}
+                    onPageChange={loadNotifications}
+                    className="mt-5"
+                  />
+                </>
               ) : null}
             </section>
           </>
@@ -481,9 +517,9 @@ const AlertsPage: React.FC = () => {
           setCreateOpen(false);
           setEditingRule(null);
         }}
-        title={editingRule ? '编辑告警规则' : '新建告警规则'}
-        eyebrow="告警中心"
-        ariaLabel={editingRule ? '编辑告警规则' : '新建告警规则'}
+        title={editingRule ? text.editRule : text.createRule}
+        eyebrow={text.eyebrow}
+        ariaLabel={editingRule ? text.editRule : text.createRule}
       >
         {createError ? (
           <div className="mb-4">

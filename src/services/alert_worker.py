@@ -31,7 +31,7 @@ from src.market_phase_summary import (
     format_public_phase_pack_excerpt,
     render_market_phase_summary,
 )
-from src.services.alert_service import AlertService
+from src.services.alert_service import AlertService, DRY_RUN_TARGET_TIMEOUT_SECONDS
 from src.services.decision_signal_service import DecisionSignalService
 from src.services.decision_signal_summary import (
     format_decision_signal_excerpt,
@@ -210,12 +210,30 @@ class AlertWorker:
         async def _evaluate_one(runtime_rule: RuntimeAlertRule) -> Dict[str, Any]:
             async with semaphore:
                 try:
-                    return await self.service._evaluate_rule(
-                        runtime_rule.rule,
-                        monitor,
-                        daily_cache=daily_cache,
-                        report_cache=report_cache,
+                    # Per-rule timeout aligns the worker path with the dry-run path
+                    # (``_evaluate_runtime_payloads``), so a single hung quote/daily
+                    # lookup cannot block the whole batch's ``asyncio.gather``.
+                    return await asyncio.wait_for(
+                        self.service._evaluate_rule(
+                            runtime_rule.rule,
+                            monitor,
+                            daily_cache=daily_cache,
+                            report_cache=report_cache,
+                        ),
+                        timeout=DRY_RUN_TARGET_TIMEOUT_SECONDS,
                     )
+                except asyncio.TimeoutError:
+                    return {
+                        "rule_id": self.service._runtime_rule_id(runtime_rule.rule),
+                        "record_status": "skipped",
+                        "triggered": False,
+                        "observed_value": None,
+                        "threshold": self.service._threshold_for_rule(runtime_rule.rule),
+                        "data_source": self.service._data_source_for_rule(runtime_rule.rule),
+                        "data_timestamp": None,
+                        "reason": "Alert evaluation timed out",
+                        "message": "Alert evaluation timed out",
+                    }
                 except Exception as exc:
                     return {
                         "rule_id": self.service._runtime_rule_id(runtime_rule.rule),
@@ -666,10 +684,24 @@ class AlertWorker:
     def _db_cooldown_fallback_key(rule_key: str) -> str:
         return f"db_cooldown:{rule_key}"
 
-    def _send_notification(self, runtime_rule: RuntimeAlertRule, result: Dict[str, Any]) -> "NotificationDispatchResult":
-        from src.notification import NotificationBuilder, NotificationService
+    def _get_notifier(self):
+        """Lazily build a single ``NotificationService`` per worker.
 
-        notification_service = self.notifier or NotificationService()
+        ``NotificationService`` is heavy to construct (config load + channel probing), and
+        building it per triggered rule (the prior ``self.notifier or NotificationService()``)
+        repeats that work for every rule in a cycle. Memoize it so one worker reuses one
+        instance across the whole run loop. A test-supplied ``notifier`` still wins.
+        """
+        if self.notifier is None:
+            from src.notification import NotificationService
+
+            self.notifier = NotificationService()
+        return self.notifier
+
+    def _send_notification(self, runtime_rule: RuntimeAlertRule, result: Dict[str, Any]) -> "NotificationDispatchResult":
+        from src.notification import NotificationBuilder
+
+        notification_service = self._get_notifier()
         title = f"Event Alert | {self._display_target(runtime_rule)}"
         content = result.get("reason") or result.get("message") or runtime_rule.rule.description or "Alert triggered"
         diagnostics = self._diagnostics_payload(result.get("diagnostics"))

@@ -211,8 +211,9 @@ class AlertService:
             page=page,
             page_size=page_size,
         )
+        cooldown_summaries = self._cooldown_summaries_for_rows(rows)
         return {
-            "items": [self._serialize_rule(row) for row in rows],
+            "items": [self._serialize_rule(row, cooldown_summaries.get(row.id)) for row in rows],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -1175,9 +1176,14 @@ class AlertService:
         canonical_params = json.dumps(parameters or {}, ensure_ascii=False, sort_keys=True)
         return f"{target_scope}:{target}:{alert_type}:{canonical_params}"
 
-    def _serialize_rule(self, row: AlertRuleRecord) -> Dict[str, Any]:
+    def _serialize_rule(
+        self,
+        row: AlertRuleRecord,
+        cooldown_summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         data = self._serialize_rule_base(row)
-        cooldown_summary = self._cooldown_summary_for_rule(row)
+        if cooldown_summary is None:
+            cooldown_summary = self._cooldown_summary_for_rule(row)
         data.update({
             "last_triggered_at": cooldown_summary.get("last_triggered_at"),
             "cooldown_until": cooldown_summary.get("cooldown_until"),
@@ -1237,6 +1243,45 @@ class AlertService:
             "cooldown_until": row.cooldown_until.isoformat() if row.cooldown_until else None,
             "cooldown_active": cooldown_active,
         }
+
+    def _cooldown_lookup_key(self, row: AlertRuleRecord) -> Tuple[int, str, Optional[str]]:
+        cooldown_target = (
+            portfolio_effective_target(str(row.target))
+            if str(row.target_scope) == "portfolio_account"
+            else str(row.target)
+        )
+        return (int(row.id), cooldown_target, str(row.severity) if row.severity else None)
+
+    def _cooldown_summaries_for_rows(self, rows: List[AlertRuleRecord]) -> Dict[int, Dict[str, Any]]:
+        """Batch-load cooldown summaries for a page of rules, keyed by rule id.
+
+        Replaces the pre-existing per-rule ``get_rule_cooldown_summary`` N+1 for the list
+        endpoint. Falls back to per-rule lookups on any batch failure so the list never breaks.
+        """
+        if not rows:
+            return {}
+        try:
+            keys = [self._cooldown_lookup_key(row) for row in rows]
+            records = self.repo.list_rule_cooldown_summaries(rule_ids=[key[0] for key in keys])
+        except Exception as exc:
+            logger.warning(
+                "[AlertService] Failed to batch-load alert cooldown summaries: %s",
+                self._sanitize_text(str(exc) or "cooldown batch read failed"),
+            )
+            return {row.id: self._cooldown_summary_for_rule(row) for row in rows}
+
+        summary: Dict[int, Dict[str, Any]] = {}
+        for row, key in zip(rows, keys):
+            try:
+                summary[row.id] = self._serialize_cooldown_summary(records.get(key))
+            except Exception as exc:
+                logger.warning(
+                    "[AlertService] Failed to serialize cooldown summary for rule %s: %s",
+                    getattr(row, "id", "?"),
+                    self._sanitize_text(str(exc) or "cooldown serialize failed"),
+                )
+                summary[row.id] = {"last_triggered_at": None, "cooldown_until": None, "cooldown_active": False}
+        return summary
 
     def _serialize_trigger(self, row: AlertTriggerRecord) -> Dict[str, Any]:
         visibility = self._parse_analysis_visibility(row.diagnostics)

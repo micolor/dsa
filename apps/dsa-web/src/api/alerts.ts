@@ -44,6 +44,8 @@ function toSnakeRulePayload(payload: AlertRuleCreateRequest): Record<string, unk
       mode: payload.parameters.mode,
       statuses: payload.parameters.statuses,
       min_drop: payload.parameters.minDrop,
+      top_weight_pct: payload.parameters.topWeightPct,
+      max_drawdown_pct: payload.parameters.maxDrawdownPct,
     });
   }
   return request;

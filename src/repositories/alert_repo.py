@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy.exc import IntegrityError
 
 from src.storage import (
     AlertCooldownRecord,
@@ -213,16 +214,16 @@ class AlertRepository:
         reason: Optional[str] = None,
         state: str = "active",
     ) -> AlertCooldownRecord:
+        """Upsert an alert cooldown row.
+
+        ``(rule_id, target, severity)`` is unique (``uix_alert_cooldown_rule_target_severity``),
+        so under concurrent workers a SELECT-then-INSERT can race: both processes may miss an
+        existing row and both try to INSERT, hitting ``IntegrityError``. Catch that and re-read
+        the survivor row so the cooldown is still written instead of silently dropped (which
+        would otherwise re-trigger + re-notify on the next cycle).
+        """
         with self.db.get_session() as session:
-            row = session.execute(
-                select(AlertCooldownRecord)
-                .where(
-                    AlertCooldownRecord.rule_id == rule_id,
-                    AlertCooldownRecord.target == target,
-                    AlertCooldownRecord.severity == severity,
-                )
-                .limit(1)
-            ).scalar_one_or_none()
+            row = self._select_cooldown(session, rule_id, target, severity)
             if row is None:
                 row = AlertCooldownRecord(
                     rule_id=rule_id,
@@ -237,9 +238,41 @@ class AlertRepository:
             row.reason = reason
             row.state = state
             row.updated_at = datetime.now()
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                # Another process inserted the row between our SELECT and INSERT. Roll back this
+                # session's pending INSERT and update the surviving row instead.
+                session.rollback()
+                row = self._select_cooldown(session, rule_id, target, severity)
+                if row is None:
+                    raise
+                row.rule_key = rule_key
+                row.last_triggered_at = last_triggered_at
+                row.cooldown_until = cooldown_until
+                row.reason = reason
+                row.state = state
+                row.updated_at = datetime.now()
+                session.commit()
             session.refresh(row)
             return row
+
+    @staticmethod
+    def _select_cooldown(
+        session,
+        rule_id: int,
+        target: str,
+        severity: Optional[str],
+    ) -> Optional[AlertCooldownRecord]:
+        return session.execute(
+            select(AlertCooldownRecord)
+            .where(
+                AlertCooldownRecord.rule_id == rule_id,
+                AlertCooldownRecord.target == target,
+                AlertCooldownRecord.severity == severity,
+            )
+            .limit(1)
+        ).scalar_one_or_none()
 
     def get_rule_cooldown_summary(
         self,
@@ -259,6 +292,37 @@ class AlertRepository:
                 .order_by(desc(AlertCooldownRecord.updated_at), desc(AlertCooldownRecord.id))
                 .limit(1)
             ).scalar_one_or_none()
+
+    def list_rule_cooldown_summaries(
+        self,
+        *,
+        rule_ids: List[int],
+    ) -> Dict[Tuple[int, str, Optional[str]], AlertCooldownRecord]:
+        """Batch-fetch the most recent cooldown row for each rule id in one query.
+
+        Returns a ``{(rule_id, target, severity): row}`` map keyed by the exact columns the
+        list endpoint needs, so the rules list can be serialized without an N+1 per-rule
+        ``get_rule_cooldown_summary`` call. Targets whose single cooldown lookup resolved a
+        portfolio-account to its effective target must match what callers pass in — identical
+        to ``get_rule_cooldown_summary``, just batched.
+        """
+        target_keys: Dict[int, List[str]] = {}
+        for rule_id in rule_ids:
+            target_keys[rule_id] = []
+
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(AlertCooldownRecord)
+                .where(AlertCooldownRecord.rule_id.in_(rule_ids))
+                .order_by(desc(AlertCooldownRecord.updated_at), desc(AlertCooldownRecord.id))
+            ).scalars().all()
+
+        summary: Dict[Tuple[int, str, Optional[str]], AlertCooldownRecord] = {}
+        for row in rows:
+            key = (int(row.rule_id), str(row.target), row.severity)
+            if key not in summary:
+                summary[key] = row
+        return summary
 
     def list_triggers(
         self,
