@@ -12,7 +12,7 @@ import {
   type AlertTypeFilter,
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
-import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading } from '../components/common';
+import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading, ToastViewport } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import type {
   AlertDryRunStatus,
@@ -343,7 +343,7 @@ const AlertsPage: React.FC = () => {
         />
       ) : null}
       {testResult ? (
-        <div className="pointer-events-none fixed right-5 top-5 z-50 w-[360px] max-w-[calc(100vw-24px)]">
+        <ToastViewport>
           <InlineAlert
             elevated
             title="测试结果"
@@ -361,7 +361,7 @@ const AlertsPage: React.FC = () => {
               </button>
             )}
           />
-        </div>
+        </ToastViewport>
       ) : null}
       <div className="flex min-h-full flex-col gap-4">
         <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">

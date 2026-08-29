@@ -60,6 +60,25 @@ def _account_lock(account_id: int) -> threading.RLock:
         return lock
 
 
+# Per-stock bar cache shared across ALL PaperService instances, so the daily
+# valuation task, signal-consumption pipeline, backfill and manual refresh reuse
+# one window instead of re-pulling DEFAULT_LOOKBACK_DAYS bars per run. This is
+# module-level (not per-instance) for the same reason as _account_locks: callers
+# create fresh PaperService() instances. Freshness is guarded by a window check
+# (start <= as_of <= cached_end): a request past the loaded window (e.g. a new
+# trading day) reloads, so bars never go stale across days. An LRU cap bounds
+# memory in a long-lived process.
+_BAR_CACHE: Dict[str, Tuple[date, date, Dict[date, Dict[str, float]]]] = {}
+_BAR_CACHE_LOCK = threading.Lock()
+_BAR_CACHE_MAX_ENTRIES = 1024
+
+
+def clear_bar_cache_for_tests() -> None:
+    """Clear the shared module-level bar cache (test isolation)."""
+    with _BAR_CACHE_LOCK:
+        _BAR_CACHE.clear()
+
+
 class PaperService:
     """Core paper-trading engine (signal consumption + daily valuation + backfill)."""
 
@@ -75,10 +94,6 @@ class PaperService:
         self.decision_repo = decision_repo or DecisionSignalRepository(self.db)
         # Position weight as a fraction of total assets (e.g. 0.20 == 20%).
         self.position_weight = position_weight if position_weight is not None else self._default_position_weight()
-        # Per-stock bar cache: code -> (earliest loaded date, bars). Guarded by a lock
-        # because the daily-valuation background task and analysis threads share it.
-        self._bar_cache: Dict[str, Tuple[date, Dict[date, Dict[str, float]]]] = {}
-        self._bar_cache_lock = threading.Lock()
 
     @staticmethod
     def _default_position_weight() -> float:
@@ -649,20 +664,23 @@ class PaperService:
     def _load_bars(self, code: str, as_of: date) -> Dict[date, Dict[str, float]]:
         """Load (and cache) daily bars for a stock, covering as_of through today.
 
-        The cache keeps the earliest loaded date per stock; if a later request asks
-        for an even earlier ``as_of`` (e.g. a long backfill replay), it reloads a
-        wider window instead of returning stale/empty bars.
+        The shared cache keys by stock and stores the loaded window
+        ``(start, cached_end, bars)``. A request inside the window is served from
+        cache; one asking earlier (a deep backfill replay) or later (a new trading
+        day) reloads a wider window. LRU eviction bounds memory. The window check
+        guards against stale bars: bars are loaded through ``today`` at fetch time,
+        so a request for a date past ``cached_end`` must reload to pick up newer data.
         """
-        with self._bar_cache_lock:
-            cached = self._bar_cache.get(code)
-            if cached is not None:
-                start, bars = cached
-                if start <= as_of:
+        end = date.today()
+        with _BAR_CACHE_LOCK:
+            entry = _BAR_CACHE.pop(code, None)
+            if entry is not None:
+                start, cached_end, bars = entry
+                if start <= as_of <= cached_end:
+                    _BAR_CACHE[code] = entry  # re-insert as most-recently-used
                     return bars
 
             start = as_of - timedelta(days=DEFAULT_LOOKBACK_DAYS)
-            # Load through today so later valuation dates stay within the cache.
-            end = date.today()
             rows = self.db.get_data_range(code, start, end)
             bars: Dict[date, Dict[str, float]] = {}
             for row in rows:
@@ -676,7 +694,14 @@ class PaperService:
                     "low": getattr(row, "low", None),
                     "close": getattr(row, "close", None),
                 }
-            self._bar_cache[code] = (start, bars)
+            # Only cache a non-empty window. An empty (no price yet) result must not
+            # be cached: a retryable signal waits for bars that may arrive later (e.g.
+            # after a data fetch), and a fresh instance re-querying must see them.
+            if bars:
+                _BAR_CACHE[code] = (start, end, bars)
+                # Bound memory: evict the least-recently-used entry on overflow.
+                while len(_BAR_CACHE) > _BAR_CACHE_MAX_ENTRIES:
+                    _BAR_CACHE.pop(next(iter(_BAR_CACHE)))
             return bars
 
     def _signals_in_range(self, from_date: date, to_date: date) -> List[DecisionSignalRecord]:

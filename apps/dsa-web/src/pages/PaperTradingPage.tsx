@@ -1,9 +1,9 @@
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
-import { ApiErrorAlert, Badge, DatePicker, EmptyState, InlineAlert } from '../components/common';
+import { ApiErrorAlert, Badge, DatePicker, EmptyState, InlineAlert, ToastViewport } from '../components/common';
 import { EquityCurveChart } from '../components/paper/EquityCurveChart';
 import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
@@ -30,7 +30,7 @@ export const PaperTradingPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isActioning, setIsActioning] = useState(false);
   const [error, setError] = useState<ParsedApiError | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [backfillFrom, setBackfillFrom] = useState('');
   const [activeSection, setActiveSection] = useState<'positions' | 'signals' | 'trades'>('positions');
 
@@ -38,56 +38,87 @@ export const PaperTradingPage: React.FC = () => {
     document.title = text.documentTitle;
   }, [text.documentTitle]);
 
-  const load = useCallback(async () => {
+  // 成功提示（回填/刷新）为右上角 toast，几秒后自动消失。
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  // 静态数据（账户/持仓/净值曲线）：只在首次进入、手动刷新、回填后拉取一次。
+  // account 响应内嵌 snapshot（types/paper.ts PaperAccount.snapshot），
+  // 用它填充指标卡，省掉一次独立的 /snapshot 请求。
+  const loadStatic = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [snap, pos, curveData, signalData, tradeData, acct] = await Promise.all([
-        paperApi.getSnapshot(),
+      const [pos, curveData, acct] = await Promise.all([
         paperApi.getPositions(),
         paperApi.getEquityCurve(),
-        paperApi.getSignals(page, PAGE_SIZE),
-        paperApi.getTrades(page, PAGE_SIZE),
         paperApi.getAccount(),
       ]);
-      setSnapshot(snap);
-      setAccount(acct);
       setPositions(pos);
       setCurve(curveData);
-      setSignals(signalData.items);
-      setSignalTotal(signalData.total);
-      setTrades(tradeData.items);
-      setTradeTotal(tradeData.total);
+      setAccount(acct);
+      setSnapshot(acct.snapshot);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsLoading(false);
     }
-  }, [page]);
+  }, []);
+
+  // 各 Tab 的列表：持仓来自静态 positions（无需额外请求），信号/成交按需拉取。
+  // 切 Tab 或翻页只拉当前 Tab 对应的列表，避免整页 6 个请求重发。
+  const loadList = useCallback(async (section: 'positions' | 'signals' | 'trades', p: number) => {
+    if (section === 'positions') {
+      return;
+    }
+    try {
+      if (section === 'signals') {
+        const data = await paperApi.getSignals(p, PAGE_SIZE);
+        setSignals(data.items);
+        setSignalTotal(data.total);
+      } else {
+        const data = await paperApi.getTrades(p, PAGE_SIZE);
+        setTrades(data.items);
+        setTradeTotal(data.total);
+      }
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadStatic();
+  }, [loadStatic]);
 
   const handleTabChange = useCallback((key: 'positions' | 'signals' | 'trades') => {
     setActiveSection(key);
     // Each top-level tab has its own list, so pagination resets when switching.
     setPage(1);
-  }, []);
+    void loadList(key, 1);
+  }, [loadList]);
+
+  const handlePageChange = useCallback((p: number) => {
+    setPage(p);
+    void loadList(activeSection, p);
+  }, [activeSection, loadList]);
 
   const handleRefresh = useCallback(async () => {
     setIsActioning(true);
     setError(null);
     try {
       await paperApi.refresh();
-      setNotice(text.refreshDone);
-      await load();
+      setToast(text.refreshDone);
+      await loadStatic();
+      await loadList(activeSection, page);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsActioning(false);
     }
-  }, [load, text.refreshDone]);
+  }, [loadStatic, loadList, activeSection, page, text.refreshDone]);
 
   const handleBackfill = useCallback(async () => {
     if (!backfillFrom) return;
@@ -95,15 +126,16 @@ export const PaperTradingPage: React.FC = () => {
     setError(null);
     try {
       const result = await paperApi.backfill(backfillFrom);
-      setNotice(formatUiText(text.backfillDone, { count: result.signalsReplayed }));
+      setToast(formatUiText(text.backfillDone, { count: result.signalsReplayed }));
       setBackfillFrom('');
-      await load();
+      await loadStatic();
+      await loadList(activeSection, page);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsActioning(false);
     }
-  }, [backfillFrom, load, text.backfillDone]);
+  }, [backfillFrom, loadStatic, loadList, activeSection, page, text.backfillDone]);
 
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
@@ -126,7 +158,7 @@ export const PaperTradingPage: React.FC = () => {
   return (
     <div className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
       <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-1.5">
         <div className="min-w-0">
           <p className="text-xs leading-5 text-muted-text">{text.description}</p>
         </div>
@@ -157,21 +189,25 @@ export const PaperTradingPage: React.FC = () => {
         </div>
       </div>
 
-      {notice ? (
-        <InlineAlert
-          variant="success"
-          message={notice}
-          action={(
-            <button
-              type="button"
-              onClick={() => setNotice(null)}
-              className="shrink-0 text-xs opacity-80 transition-opacity hover:opacity-100"
-              aria-label={text.retry}
-            >
-              ×
-            </button>
-          )}
-        />
+      {toast ? (
+        <ToastViewport>
+          <InlineAlert
+            elevated
+            variant="success"
+            message={toast}
+            className="pointer-events-auto"
+            action={(
+              <button
+                type="button"
+                onClick={() => setToast(null)}
+                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                aria-label={text.retry}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          />
+        </ToastViewport>
       ) : null}
       {error ? <ApiErrorAlert error={error} /> : null}
 
@@ -272,7 +308,10 @@ export const PaperTradingPage: React.FC = () => {
                       const targetText = toTarget != null ? `${toTarget.toFixed(1)}%` : '-';
                       return (
                         <tr key={p.stockCode} className="border-t border-border/60">
-                          <td className="py-2 pr-3 font-medium text-foreground">{p.stockCode}</td>
+                          <td className="py-2 pr-3 font-medium text-foreground">
+                            {p.stockName || p.stockCode}
+                            <span className="ml-1.5 font-mono text-xs text-secondary-text">{p.stockCode}</span>
+                          </td>
                           <td className="py-2 pr-3 text-secondary-text">{qty}</td>
                           <td className="py-2 pr-3 text-secondary-text">{cost?.toFixed(2)}</td>
                           <td className="py-2 pr-3 text-secondary-text">{price?.toFixed(2)}</td>
@@ -363,7 +402,7 @@ export const PaperTradingPage: React.FC = () => {
               tradeTotal={tradeTotal}
               page={page}
               pageSize={PAGE_SIZE}
-              onPageChange={setPage}
+              onPageChange={handlePageChange}
               language={language}
             />
           </div>

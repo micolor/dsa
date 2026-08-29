@@ -10,8 +10,14 @@ import pandas as pd
 import pytest
 
 from src.config import Config
-from src.services.paper_service import PaperService
+from src.services.paper_service import PaperService, clear_bar_cache_for_tests
 from src.storage import DatabaseManager, DecisionSignalRecord, utc_naive_now
+
+
+def setup_function(_function):
+    # The per-stock bar cache is a shared module-level cache keyed by stock code;
+    # clear it so each test's seeded daily data is isolated (tests reuse "600519").
+    clear_bar_cache_for_tests()
 
 
 @pytest.fixture()
