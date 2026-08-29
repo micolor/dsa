@@ -25,6 +25,7 @@ interface DatePickerProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   className?: string;
   min?: string;
@@ -38,6 +39,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   value,
   onChange,
   placeholder,
+  ariaLabel,
   disabled = false,
   className = '',
   min,
@@ -149,6 +151,15 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
   return (
     <div ref={containerRef} className="relative">
+      {/* 隐藏的原生 date 输入：作为可标注、可编程赋值的表单字段（可访问性 + 测试），视觉由下方按钮承载 */}
+      <input
+        type="date"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={ariaLabel}
+        tabIndex={-1}
+        className="sr-only"
+      />
       <button
         type="button"
         ref={triggerRef}

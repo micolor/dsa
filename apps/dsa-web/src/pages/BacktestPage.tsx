@@ -4,7 +4,7 @@ import { Check, Download, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
+import { ApiErrorAlert, Card, Badge, DatePicker, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
@@ -23,7 +23,7 @@ import type {
   PerformanceMetrics,
   BacktestPhaseFilter,
 } from '../types/backtest';
-import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../utils/decisionAction';
+import { buildDecisionActionLabelMap, getDecisionActionLabel, getDecisionActionTone } from '../utils/decisionAction';
 import { SELECT_CHEVRON_CLASS, SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { getMarketPhaseSummaryLabel } from '../utils/marketPhase';
 
@@ -492,12 +492,6 @@ const BacktestPage: React.FC = () => {
     fetchPerformance(code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleFilter();
-    }
-  };
-
   const handleShowNextDay = () => {
     const code = normalizeBacktestCode(codeFilter);
     setEvalDays('1');
@@ -519,140 +513,147 @@ const BacktestPage: React.FC = () => {
     <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 md:px-6">
       {/* Header */}
       <header className="flex-shrink-0 border-b border-border/40 px-3 py-3 sm:px-4">
-        <div className="flex max-w-5xl flex-wrap items-center gap-2">
-          <div className="relative min-w-0 flex-[1_1_220px]">
-            <StockAutocomplete
-              value={codeFilter}
-              onChange={(v) => setCodeFilter(v.toUpperCase())}
-              onSubmit={() => handleFilter()}
-              placeholder={text.codePlaceholder}
-              ariaLabel={text.codePlaceholder}
-              disabled={isRunning}
-            />
-            {codeFilter ? (
+        <div className="flex max-w-5xl flex-col gap-2 md:flex-row md:items-start">
+          {/* 查询条件：检索字段 + 应用筛选（左，占满可换行，日期成对不拆） */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2 md:flex-1">
+            <div className="relative min-w-0 flex-[2_1_260px]">
+              <StockAutocomplete
+                value={codeFilter}
+                onChange={(v) => setCodeFilter(v.toUpperCase())}
+                onSubmit={() => handleFilter()}
+                placeholder={text.codePlaceholder}
+                ariaLabel={text.codePlaceholder}
+                disabled={isRunning}
+              />
+              {codeFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setCodeFilter('')}
+                  aria-label={text.clearCodeFilter}
+                  className="absolute inset-y-0 right-2 my-auto flex h-7 w-7 items-center justify-center rounded-lg text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
+              <span className="text-xs text-muted-text">{text.evalWindow}</span>
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={evalDays}
+                onChange={(e) => setEvalDays(e.target.value)}
+                placeholder="10"
+                disabled={isRunning}
+                className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
+              />
+            </div>
+            <div className="flex items-center gap-2 whitespace-nowrap">
+              <span className="text-xs text-muted-text">{text.minAgeDays}</span>
+              <input
+                type="number"
+                min={0}
+                value={minAgeDays}
+                onChange={(e) => setMinAgeDays(e.target.value)}
+                placeholder="14"
+                disabled={isRunning}
+                className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}
+              />
+            </div>
+            <div className="flex items-center gap-2 whitespace-nowrap">
+              <span className="text-xs text-muted-text">{text.phase}</span>
+              <select
+                value={phaseFilter}
+                onChange={(e) => setPhaseFilter(e.target.value as BacktestPhaseFilter)}
+                disabled={isRunning}
+                className={`${SELECT_CHEVRON_CLASS} !h-10 w-28`}
+              >
+                {phaseFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs text-muted-text">{text.startDate}</span>
+                <DatePicker
+                  className="w-36 !h-10"
+                  value={analysisDateFrom}
+                  onChange={setAnalysisDateFrom}
+                  ariaLabel={text.startDateAria}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs text-muted-text">{text.endDate}</span>
+                <DatePicker
+                  className="w-36 !h-10"
+                  value={analysisDateTo}
+                  onChange={setAnalysisDateTo}
+                  ariaLabel={text.endDateAria}
+                  disabled={isRunning}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleFilter}
+              disabled={isLoadingResults || isRunning}
+              className="btn-secondary flex !h-10 items-center gap-1.5 whitespace-nowrap"
+            >
+              {isLoadingResults ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : null}
+              {text.filter}
+            </button>
+          </div>
+
+          {/* 执行面板（右，纵向）：切换项一行 + 运行按钮 */}
+          <div className="flex shrink-0 flex-col items-stretch gap-2 md:w-44">
+            <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setCodeFilter('')}
-                aria-label={text.clearCodeFilter}
-                className="absolute inset-y-0 right-2 my-auto flex h-7 w-7 items-center justify-center rounded-lg text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+                onClick={handleShowNextDay}
+                aria-pressed={isNextDayValidation}
+                disabled={isLoadingResults || isLoadingPerf || isRunning}
+                className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                }`}
               >
-                <X className="h-4 w-4" />
+                {text.oneDayValidation}
               </button>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={handleFilter}
-            disabled={isLoadingResults || isRunning}
-            className="btn-secondary flex !h-10 items-center gap-1.5 whitespace-nowrap"
-          >
-            {isLoadingResults ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            ) : null}
-            {text.filter}
-          </button>
-          <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
-            <span className="text-xs text-muted-text">{text.evalWindow}</span>
-            <input
-              type="number"
-              min={1}
-              max={120}
-              value={evalDays}
-              onChange={(e) => setEvalDays(e.target.value)}
-              placeholder="10"
+              <button
+                type="button"
+                onClick={() => setForceRerun(!forceRerun)}
+                aria-pressed={forceRerun}
+                disabled={isRunning}
+                className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  forceRerun ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                }`}
+              >
+                {text.forceRerun}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleRun}
               disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
-            />
-          </div>
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">{text.minAgeDays}</span>
-            <input
-              type="number"
-              min={0}
-              value={minAgeDays}
-              onChange={(e) => setMinAgeDays(e.target.value)}
-              placeholder="14"
-              disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}
-            />
-          </div>
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">{text.phase}</span>
-            <select
-              value={phaseFilter}
-              onChange={(e) => setPhaseFilter(e.target.value as BacktestPhaseFilter)}
-              disabled={isRunning}
-              className={`${SELECT_CHEVRON_CLASS} !h-10 w-28`}
+              className="btn-primary flex !h-10 w-full items-center justify-center gap-1.5 whitespace-nowrap"
             >
-              {phaseFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
+              {isRunning ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  {text.running}
+                </>
+              ) : (
+                text.runBacktest
+              )}
+            </button>
           </div>
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">{text.startDate}</span>
-            <input
-              type="date"
-              aria-label={text.startDateAria}
-              value={analysisDateFrom}
-              onChange={(e) => setAnalysisDateFrom(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isRunning}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-36 text-center tabular-nums`}
-            />
-          </div>
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">{text.endDate}</span>
-            <input
-              type="date"
-              aria-label={text.endDateAria}
-              value={analysisDateTo}
-              onChange={(e) => setAnalysisDateTo(e.target.value)}
-              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-36 text-center tabular-nums`}
-              onKeyDown={handleKeyDown}
-              disabled={isRunning}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleShowNextDay}
-            aria-pressed={isNextDayValidation}
-            disabled={isLoadingResults || isLoadingPerf || isRunning}
-            className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-              isNextDayValidation ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
-            }`}
-          >
-            {text.oneDayValidation}
-          </button>
-          <button
-            type="button"
-            onClick={() => setForceRerun(!forceRerun)}
-            aria-pressed={forceRerun}
-            disabled={isRunning}
-            className={`inline-flex !h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-              forceRerun ? 'bg-primary/15 text-primary shadow-inner' : 'text-secondary-text hover:bg-hover hover:text-foreground'
-            }`}
-          >
-            {text.forceRerun}
-          </button>
-          <button
-            type="button"
-            onClick={handleRun}
-            disabled={isRunning}
-            className="btn-primary flex !h-10 items-center gap-1.5 whitespace-nowrap !px-4"
-          >
-            {isRunning ? (
-              <>
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                {text.running}
-              </>
-            ) : (
-              text.runBacktest
-            )}
-          </button>
         </div>
         {runResult && (
           <div className="mt-2 max-w-4xl">
@@ -772,7 +773,7 @@ const BacktestPage: React.FC = () => {
                               <span className="text-xs text-muted-text">{row.stockName || '--'}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-secondary-text">{row.analysisDate || '--'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-secondary-text">{row.analysisDate || '--'}</td>
                           <td className="px-4 py-3 whitespace-nowrap text-secondary-text">{phaseLabel(row, language)}</td>
                           <td className="px-4 py-3 max-w-[220px] text-foreground">
                             {predictionParts.length ? (
@@ -781,13 +782,17 @@ const BacktestPage: React.FC = () => {
                                 focusable
                               >
                                 <div className="flex flex-col gap-1">
-                                  <span className="block truncate">{actionLabel || row.trendPrediction || '--'}</span>
-                                  {actionLabel && row.trendPrediction && (
+                                  {actionLabel ? (
+                                    <span className="flex items-center">
+                                      <Badge variant={getDecisionActionTone(row.action, row.actionLabel, null)}>{actionLabel}</Badge>
+                                    </span>
+                                  ) : null}
+                                  {row.trendPrediction && row.trendPrediction !== actionLabel ? (
                                     <span className="block truncate text-xs text-secondary-text">{row.trendPrediction}</span>
-                                  )}
-                                  {row.operationAdvice && (
+                                  ) : null}
+                                  {row.operationAdvice && row.operationAdvice !== actionLabel ? (
                                     <span className="block truncate text-xs text-secondary-text">{row.operationAdvice}</span>
-                                  )}
+                                  ) : null}
                                 </div>
                               </Tooltip>
                             ) : (
@@ -807,7 +812,7 @@ const BacktestPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-center gap-2 whitespace-nowrap">
                               {boolIcon(row.directionCorrect, text)}
                               <span className="text-muted-text">
                                 {row.directionExpected ? labelFromMap(row.directionExpected, BACKTEST_DIRECTION_EXPECTED_LABELS[language]) : ''}
