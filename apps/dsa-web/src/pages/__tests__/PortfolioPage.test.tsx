@@ -453,8 +453,8 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    expect(getSnapshot).toHaveBeenCalledWith({ accountId: undefined, costMethod: 'fifo', includeRealtime: false });
-    expect(getRisk).toHaveBeenCalledWith({ accountId: undefined, costMethod: 'fifo', includeRealtime: false });
+    expect(getSnapshot).toHaveBeenCalledWith({ accountId: undefined, costMethod: 'fifo', includeRealtime: true });
+    expect(getRisk).toHaveBeenCalledWith({ accountId: undefined, costMethod: 'fifo', includeRealtime: true });
   });
 
   it('renders stale FX status with a manual refresh button', async () => {
@@ -487,8 +487,8 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     expect(await screen.findByText('Drawdown monitor')).toBeInTheDocument();
-    expect(screen.getByText(/Max drawdown:/)).toBeInTheDocument();
-    expect(screen.getByText(/Current drawdown:/)).toBeInTheDocument();
+    expect(screen.getByText('Max drawdown')).toBeInTheDocument();
+    expect(screen.getByText('Current drawdown')).toBeInTheDocument();
     expect(screen.getByText('Stop-loss proximity warning')).toBeInTheDocument();
     expect(screen.getByText('Scope')).toBeInTheDocument();
     expect(screen.getByText('AI risk signals')).toBeInTheDocument();
@@ -524,8 +524,11 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     expect(screen.getByText('AI 风险信号')).toBeInTheDocument();
-    expect(screen.getByText(/风险信号: 2/)).toBeInTheDocument();
-    expect(screen.getByText(/卖出: 1 · 减仓: 0 · 预警: 1/)).toBeInTheDocument();
+    // MetricMetaRow 拆分 label/value，断言二者同处一行且值正确。
+    const totalLabel = screen.getByText('风险信号');
+    expect(totalLabel.closest('div')).toHaveTextContent('2');
+    const actionsLabel = screen.getByText('卖出 · 减仓 · 预警');
+    expect(actionsLabel.closest('div')).toHaveTextContent('1 · 0 · 1');
     expect(screen.getByText('600519 · 卖出')).toBeInTheDocument();
     expect(screen.getByText('300750 · 预警')).toBeInTheDocument();
     expect(screen.queryByText('600519 · sell')).not.toBeInTheDocument();
@@ -622,7 +625,7 @@ describe('PortfolioPage FX refresh', () => {
     await changeSelect(0, 'Main (#1)');
 
     await waitFor(() => {
-      expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false });
+      expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true });
     });
 
     const snapshotCallsBeforeRefresh = getSnapshot.mock.calls.length;
@@ -793,7 +796,7 @@ describe('PortfolioPage FX refresh', () => {
     await changeSelect(0, 'Alt (#2)');
 
     await waitFor(() => {
-      expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false });
+      expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: true });
     });
     // 切换到尚未加载的账户后，信号区应清空，不应有展开的 Tooltip
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
@@ -1150,13 +1153,13 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     await changeSelect(0, 'Main (#1)');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
     await changeSelect(0, 'Alt (#2)');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', includeRealtime: true }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
@@ -1198,7 +1201,7 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
     await changeSelect(1, '均价成本（AVG）');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: undefined, costMethod: 'avg', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: undefined, costMethod: 'avg', includeRealtime: true }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
@@ -1232,7 +1235,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await changeSelect(0, 'Main (#1)');
 
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
     fireEvent.click(screen.getByRole('button', { name: '删除账户' }));
 
     const dialog = await screen.findByText('删除持仓账户');
@@ -1252,7 +1255,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     await changeSelect(0, 'Main (#1)');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
     await screen.findByRole('dialog', { name: '录入交易' });
@@ -1274,7 +1277,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     await changeSelect(0, 'Main (#1)');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
     await screen.findByRole('dialog', { name: '录入交易' });
@@ -1293,7 +1296,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     await changeSelect(0, 'Main (#1)');
-    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: false }));
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
 
     fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
     const dialog = await screen.findByRole('dialog', { name: '录入交易' });
@@ -1319,15 +1322,15 @@ describe('PortfolioPage FX refresh', () => {
 
     fireEvent.click(screen.getByText('HK00700').closest('tr') as HTMLTableRowElement);
 
-    // Auto-switches to trade type + applies the symbol filter.
+    // Auto-switches to trade type + applies the symbol filter in the event dialog.
     await waitFor(() => {
       expect(listTrades).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: 'HK00700' }));
     });
-    // Position focus chip with a clear button is shown.
-    expect(screen.getByRole('button', { name: '清除股票筛选' })).toBeInTheDocument();
+    // 事件对话框的股票代码筛选输入框反映了聚焦股票，是清除过滤的入口。
+    expect(screen.getByLabelText('股票代码筛选')).toHaveValue('HK00700');
   });
 
-  it('点击「只看 XX」的清除按钮恢复全部事件', async () => {
+  it('清空持仓行聚焦后的股票筛选可恢复全部事件', async () => {
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [makePosition({ symbol: 'HK00700' })] }));
 
     render(<PortfolioPage />);
@@ -1339,10 +1342,10 @@ describe('PortfolioPage FX refresh', () => {
     });
 
     const callsAfterFocus = listTrades.mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: '清除股票筛选' }));
+    fireEvent.change(screen.getByLabelText('股票代码筛选'), { target: { value: '' } });
 
     await waitFor(() => expect(listTrades).toHaveBeenCalledTimes(callsAfterFocus + 1));
     expect(listTrades).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: undefined }));
-    expect(screen.queryByRole('button', { name: '清除股票筛选' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('股票代码筛选')).toHaveValue('');
   });
 });
