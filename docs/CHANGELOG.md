@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 告警中心新增「事件」页：从既有触发历史接口拉取最新一页（接口 page_size 上限 100）在客户端折叠出 `dragon_tiger` / `capital_flow` / `stock_events` 三类事件驱动记录，以卡片列表展示事件来源标签、标的、观察值/阈值/状态与诊断事实（龙虎榜上榜次数、主力净流入金额自动按万/亿格式化、重要公告条数）；纯前端实现，不改触发历史数据契约、不加 data_source 过滤参数，未配置事件渠道时该页为空态不报错；新增 `EventFactList`/`eventFacts` 组件与中英文案
 - [新功能] 事件驱动告警：新增 `event_dragon_tiger`（龙虎榜上榜）、`event_capital_flow`（主力净流入绝对值）、`event_announcement`（重要事件条数）三种个股级事件告警类型，并新增独立 `event` 通知路由（`NOTIFICATION_EVENT_CHANNELS` 配置项 + 配置注册表条目 + `.env.example` 说明）；事实源复用 `DataFetcherManager` 龙虎榜/主力资金流上下文与 `search_stock_events` 事件检索，取数失败静默降级为 `degraded` 不阻断告警管线；告警工单按类型分流——事件告警走 `event` 渠道、非事件告警维持原 `alert` 渠道；未配置 `event` 渠道时跳过该路由不崩；create/dry-run/指标阈值/数据源/默认命名均已接入既有告警服务契约（`SUPPORTED_ALERT_TYPES`/`SYMBOL_ALERT_TYPES`/`normalize_alert_parameters`/`_evaluate_rule`/`_to_runtime_rule`）
 - [改进] 个股分析报告新增「K 线走势」卡（`StockPriceChart`）：复用现成 `GET /api/v1/stocks/{code}/history?period=daily&days=N` 日 K 数据，recharts 自绘蜡烛实体绘制日 K，下方叠加成交量柱（涨绿跌红语义 token），插在报告概览与策略点位之间；用 ref + ResizeObserver 自测量包装规避 ResponsiveContainer 首帧 null 弹开闪烁，`isAnimationActive={false}`，加载/空况/无代码三种占位态，不改任何汇报 payload 字段或后端契约
 - [改进] 首页大盘复盘报告「结构化大盘数据」卡补轻量可视化：涨跌家数加涨跌双段占比条（`BreadthBar`），指数涨跌幅内嵌中心归零迷你条形（负数红、正数绿，组内按最大绝对值归一化，`MiniChangeBar`），板块/概念 Top5 加领涨绿/领跌红横向条组（`SectorBarList`）；纯 CSS 宽度条实现，无 recharts / 无 ResponsiveContainer，规避首帧 null 弹开闪烁，颜色复用涨绿跌红语义 token，不改任何数据契约

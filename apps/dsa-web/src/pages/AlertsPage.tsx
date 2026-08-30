@@ -12,6 +12,8 @@ import {
   type AlertTypeFilter,
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
+import { EventFactList } from '../components/alerts/EventFactList';
+import { filterEventTriggers } from '../components/alerts/eventFacts';
 import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading, Pagination, ToastViewport } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
@@ -121,7 +123,7 @@ function formatNotificationStatus(notification: AlertNotificationItem, labels: R
   return labels.failed ?? 'Failed';
 }
 
-type AlertsTabKey = 'rules' | 'history' | 'notifications';
+type AlertsTabKey = 'rules' | 'history' | 'events' | 'notifications';
 
 const AlertsPage: React.FC = () => {
   const { language } = useUiLanguage();
@@ -134,6 +136,7 @@ const AlertsPage: React.FC = () => {
   const tabs: Array<{ key: AlertsTabKey; label: string }> = [
     { key: 'rules', label: text.tabsRules },
     { key: 'history', label: text.tabsHistory },
+    { key: 'events', label: text.tabsEvents },
     { key: 'notifications', label: text.tabsNotifications },
   ];
 
@@ -161,6 +164,10 @@ const AlertsPage: React.FC = () => {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<ParsedApiError | null>(null);
 
+  const [events, setEvents] = useState<AlertTriggerItem[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<ParsedApiError | null>(null);
+
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<ParsedApiError | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
@@ -174,6 +181,7 @@ const AlertsPage: React.FC = () => {
   const notificationsRequestIdRef = useRef(0);
   const triggersLoadedRef = useRef(false);
   const notificationsLoadedRef = useRef(false);
+  const eventsLoadedRef = useRef(false);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -250,6 +258,28 @@ const AlertsPage: React.FC = () => {
     }
   }, [triggersPage]);
 
+  const loadEvents = useCallback(async () => {
+    const requestId = triggersRequestIdRef.current + 1;
+    triggersRequestIdRef.current = requestId;
+    const isLatestRequest = () => triggersRequestIdRef.current === requestId;
+    setEventsLoading(true);
+    try {
+      // 事件较稀疏，拉取最新一页（接口 page_size 上限 100）后在客户端折叠出事件项，
+      // 避免为低频事件新增 data_source 过滤参数改动 repo/service/endpoint/schema 契约。
+      const response = await alertsApi.listTriggers({ page: 1, pageSize: 100 });
+      if (!mountedRef.current || !isLatestRequest()) return;
+      setEvents(filterEventTriggers(response.items));
+      setEventsError(null);
+    } catch (error) {
+      if (!mountedRef.current || !isLatestRequest()) return;
+      setEventsError(getParsedApiError(error));
+    } finally {
+      if (mountedRef.current && isLatestRequest()) {
+        setEventsLoading(false);
+      }
+    }
+  }, []);
+
   const loadNotifications = useCallback(async (page?: number) => {
     const requestedPage = page ?? notificationsPage;
     const requestId = notificationsRequestIdRef.current + 1;
@@ -289,6 +319,12 @@ const AlertsPage: React.FC = () => {
     notificationsLoadedRef.current = true;
     void loadNotifications(1);
   }, [activeTab, loadNotifications]);
+
+  useEffect(() => {
+    if (activeTab !== 'events' || eventsLoadedRef.current) return;
+    eventsLoadedRef.current = true;
+    void loadEvents();
+  }, [activeTab, loadEvents]);
 
   const handleCreateRule = async (payload: AlertRuleCreateRequest) => {
     setCreateLoading(true);
@@ -385,7 +421,7 @@ const AlertsPage: React.FC = () => {
         </ToastViewport>
       ) : null}
       <div className="flex min-h-full flex-col gap-4">
-        <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
+        <div className="grid grid-cols-4 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
           {tabs.map((tab) => {
             const selected = activeTab === tab.key;
             return (
@@ -448,6 +484,13 @@ const AlertsPage: React.FC = () => {
               pageSize={PAGE_SIZE}
               onPageChange={loadTriggers}
             />
+          </>
+        ) : null}
+
+        {activeTab === 'events' ? (
+          <>
+            {eventsError ? <ApiErrorAlert error={eventsError} onDismiss={() => setEventsError(null)} /> : null}
+            <EventFactList triggers={events} isLoading={eventsLoading} />
           </>
         ) : null}
 
