@@ -581,6 +581,43 @@ describe('DecisionSignalsPage', () => {
     });
   });
 
+  it('deduplicates the list to the latest signal per stock and widens the fetch when toggled on', async () => {
+    const olderMoutai = makeSignal({ id: 1, createdAt: '2026-06-16T09:30:00', score: 60 });
+    const latestMoutai = makeSignal({ id: 7, createdAt: '2026-06-18T09:30:00' });
+    const tencent = makeSignal({
+      id: 8,
+      stockCode: '00700',
+      stockName: '腾讯控股',
+      market: 'hk',
+      action: 'buy',
+      createdAt: '2026-06-17T09:30:00',
+    });
+    vi.mocked(decisionSignalsApi.list).mockResolvedValue(listResponse([olderMoutai, latestMoutai, tencent]));
+
+    renderPage();
+    await screen.findAllByText('贵州茅台');
+
+    // Default: paginated, no dedup, both 茅台 rows visible.
+    expect(screen.getAllByRole('button', { name: '查看 贵州茅台 AI 建议详情' })).toHaveLength(2);
+
+    fireEvent.click(screen.getByLabelText('只显示每只股票的最新信号'));
+
+    await waitFor(() => {
+      expect(decisionSignalsApi.list).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: 'active',
+        page: 1,
+        pageSize: 100,
+      }));
+    });
+
+    // Deduped to one 茅台 (the latest) plus one 腾讯.
+    const moutaiButtons = screen.getAllByRole('button', { name: '查看 贵州茅台 AI 建议详情' });
+    expect(moutaiButtons).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '查看 腾讯控股 AI 建议详情' })).toBeInTheDocument();
+    expect(screen.queryByText('去重后共 2 只股票')).toBeInTheDocument();
+    expect(screen.queryByText(/已按股票去重，仅显示最近 3 条结果/)).toBeInTheDocument();
+  });
+
   it('uses an exact analysis source report lookup when a report id filter is applied', async () => {
     renderPage();
     await screen.findByText('贵州茅台');

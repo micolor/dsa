@@ -1072,13 +1072,7 @@
 
   /* 隐藏静态镜面高光，减少视觉噪声（超出纯动效范围的有意取舍） */
   .glass-surface::before,
-  .glass-surface-strong::before,
-  .terminal-card::before,
-  .gradient-border-card-inner::before,
-  .glass-card::after,
-  .dashboard-card::after,
-  .home-report-hero::after,
-  .home-rail-card::after {
+  .glass-surface-strong::before {
     display: none;
   }
 }
@@ -1256,79 +1250,33 @@ a {
   --terminal-card-gradient-start: var(--border-accent);
   --terminal-card-gradient-mid: var(--border-purple);
   --terminal-card-gradient-end: var(--border-dim);
-  --terminal-card-shadow: var(--shadow-soft-card);
-  --terminal-card-shadow-hover: var(--shadow-soft-card-strong);
   position: relative;
   overflow: hidden;
   border-radius: 1rem;
   border: 1px solid var(--terminal-card-border);
-  background: linear-gradient(
-    180deg,
-    hsl(var(--card) / 0.5),
-    hsl(var(--background) / 0.45)
-  );
-  backdrop-filter: blur(18px) saturate(190%);
-  -webkit-backdrop-filter: blur(18px) saturate(190%);
-  box-shadow: var(--terminal-card-shadow);
+  background: hsl(var(--card));
 }
 
 .terminal-card-hover {
   transition:
-    transform 0.24s ease,
-    box-shadow 0.24s ease,
     border-color 0.24s ease;
 }
 
 .terminal-card-hover:hover {
   --terminal-card-gradient-start: var(--terminal-card-border-hover);
-  transform: translateY(-1px);
   border-color: var(--terminal-card-border-hover);
-  box-shadow: var(--terminal-card-shadow-hover);
 }
 
 .gradient-border-card {
   position: relative;
   border-radius: 1rem;
-  padding: 1px;
-  background: linear-gradient(
-    180deg,
-    hsl(var(--foreground) / 0.12) 0%,
-    hsl(var(--foreground) / 0.05) 50%,
-    hsl(var(--foreground) / 0.09) 100%
-  );
-  box-shadow: var(--shadow-soft-card);
+  border: 1px solid var(--border-default);
+  background: hsl(var(--card));
 }
 
 .gradient-border-card-inner {
-  position: relative;
   height: 100%;
   border-radius: calc(1rem - 1px);
-  background: linear-gradient(
-    180deg,
-    hsl(var(--elevated) / 0.5),
-    hsl(var(--card) / 0.45)
-  );
-  backdrop-filter: blur(18px) saturate(190%);
-  -webkit-backdrop-filter: blur(18px) saturate(190%);
-}
-
-.terminal-card::before,
-.gradient-border-card-inner::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-  background: linear-gradient(
-    180deg,
-    var(--glass-sheen-1) 0%,
-    var(--glass-sheen-2) 45%,
-    transparent 100%
-  );
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 1;
 }
 
 .glass-card {
@@ -1336,27 +1284,7 @@ a {
   overflow: hidden;
   border-radius: 1.25rem;
   border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  box-shadow: none;
-}
-
-.glass-card::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-  background: linear-gradient(
-    180deg,
-    var(--glass-sheen-1) 0%,
-    var(--glass-sheen-2) 45%,
-    transparent 100%
-  );
-  border-radius: inherit;
-  pointer-events: none;
+  background: hsl(var(--card));
 }
 
 /* 统一 select 下拉箭头：隐藏原生箭头，使用自定义 chevron，并内缩间距 */
@@ -1393,11 +1321,6 @@ select option:checked {
 .home-panel-card {
   --terminal-card-border: var(--home-panel-border);
   --terminal-card-border-hover: var(--home-panel-border-hover);
-  --terminal-card-gradient-start: var(--home-panel-gradient-start);
-  --terminal-card-gradient-mid: var(--home-panel-gradient-mid);
-  --terminal-card-gradient-end: var(--home-panel-gradient-end);
-  --terminal-card-shadow: var(--home-panel-shadow);
-  --terminal-card-shadow-hover: var(--home-panel-shadow-hover);
 }
 
 .dashboard-card {
@@ -1405,29 +1328,7 @@ select option:checked {
   overflow: hidden;
   border-radius: 1.25rem;
   border: 1px solid var(--border-card);
-  background: hsl(var(--card) / 0.32);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  box-shadow:
-    0 2px 4px hsl(220 24% 20% / 0.04),
-    0 20px 48px hsl(220 24% 20% / 0.08);
-}
-
-.dashboard-card::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-  background: linear-gradient(
-    180deg,
-    var(--glass-sheen-1) 0%,
-    var(--glass-sheen-2) 45%,
-    transparent 100%
-  );
-  border-radius: inherit;
-  pointer-events: none;
+  background: hsl(var(--card));
 }
 
 .page-drawer-overlay {
@@ -1843,25 +1744,8 @@ select option:checked {
   --terminal-card-gradient-mid: var(--home-hero-gradient-mid);
   --terminal-card-gradient-end: var(--home-hero-gradient-end);
   --terminal-card-shadow: var(--home-hero-shadow);
-  background: linear-gradient(180deg, hsl(0 0% 100% / 0.99), hsl(214 38% 97% / 0.98));
-}
-
-.home-report-hero::after,
-.home-rail-card::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-  background: linear-gradient(
-    180deg,
-    var(--glass-sheen-1) 0%,
-    var(--glass-sheen-2) 45%,
-    transparent 100%
-  );
-  border-radius: inherit;
-  pointer-events: none;
+  background: hsl(var(--card));
+  border-color: var(--home-hero-border);
 }
 
 .home-rail-card {
@@ -1870,13 +1754,14 @@ select option:checked {
   --terminal-card-gradient-mid: hsl(247 84% 66% / 0.12);
   --terminal-card-gradient-end: hsl(218 22% 80% / 0.08);
   --terminal-card-shadow: var(--home-rail-shadow);
-  background: var(--home-rail-bg);
+  background: hsl(var(--card));
+  border-color: var(--home-rail-border);
 }
 
 .home-insight-card {
   --home-insight-tone: hsl(var(--primary));
   --home-insight-surface: hsl(0 0% 100% / 0.94);
-  background: linear-gradient(180deg, var(--home-insight-surface), hsl(214 36% 97% / 0.98));
+  background: hsl(var(--card));
 }
 
 .home-insight-card .home-insight-icon {
@@ -1905,7 +1790,7 @@ select option:checked {
 
 .home-strategy-card {
   --home-strategy-tone: hsl(var(--primary));
-  background: linear-gradient(180deg, hsl(0 0% 100% / 0.94), hsl(214 36% 97% / 0.98));
+  background: hsl(var(--card));
 }
 
 .home-strategy-card .home-strategy-label {
@@ -1926,7 +1811,7 @@ select option:checked {
 }
 
 .home-news-item {
-  background: linear-gradient(180deg, hsl(0 0% 100% / 0.92), hsl(214 36% 97% / 0.98));
+  background: hsl(var(--card));
 }
 
 .home-news-title {
@@ -1960,17 +1845,8 @@ select option:checked {
   --terminal-card-gradient-mid: hsl(247 84% 72% / 0.18);
   --terminal-card-gradient-end: hsl(var(--foreground) / 0.08);
   --terminal-card-shadow: var(--shadow-soft-card);
-  background: linear-gradient(180deg, hsl(var(--card) / 0.96), hsl(var(--background) / 0.94));
-}
-
-.dark .home-report-hero::after,
-.dark .home-rail-card::after {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    hsl(var(--primary) / 0.24) 50%,
-    transparent 100%
-  );
+  background: hsl(var(--card));
+  border-color: var(--home-panel-border-selected);
 }
 
 .dark .home-rail-card {
@@ -1979,12 +1855,13 @@ select option:checked {
   --terminal-card-gradient-mid: hsl(247 84% 72% / 0.14);
   --terminal-card-gradient-end: hsl(var(--foreground) / 0.08);
   --terminal-card-shadow: var(--shadow-soft-card);
-  background: linear-gradient(180deg, hsl(var(--card) / 0.94), hsl(var(--background) / 0.92));
+  background: hsl(var(--card));
+  border-color: var(--home-panel-border);
 }
 
 .dark .home-insight-card {
   --home-insight-surface: hsl(var(--card) / 0.9);
-  background: linear-gradient(180deg, var(--home-insight-surface), hsl(var(--elevated) / 0.82));
+  background: hsl(var(--card));
 }
 
 .dark .home-insight-card .home-insight-icon {

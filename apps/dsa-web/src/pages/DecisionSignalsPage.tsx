@@ -60,6 +60,7 @@ import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
 import { areStockCodesEquivalent } from '../utils/stockCode';
 
 const PAGE_SIZE = 20;
+const DEDUPE_PAGE_SIZE = 100;
 const TIMELINE_PAGE_SIZE = 100;
 const STOCK_CANDIDATE_LIMIT = 8;
 const DAY_MS = 86400_000;
@@ -190,14 +191,14 @@ function getInitialFilters(search = typeof window === 'undefined' ? '' : window.
   };
 }
 
-function toListParams(filters: ListFilters, page: number): DecisionSignalListParams {
+function toListParams(filters: ListFilters, page: number, pageSize: number = PAGE_SIZE): DecisionSignalListParams {
   const sourceReportId = parseSourceReportId(filters.sourceReportId);
   if (sourceReportId !== undefined) {
     return {
       sourceReportId,
       sourceType: 'analysis',
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
     };
   }
 
@@ -209,8 +210,22 @@ function toListParams(filters: ListFilters, page: number): DecisionSignalListPar
     sourceType: filters.sourceType || undefined,
     status: filters.status || undefined,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   };
+}
+
+function dedupeByLatest(items: DecisionSignalItem[]): DecisionSignalItem[] {
+  const map = new Map<string, DecisionSignalItem>();
+  for (const item of items) {
+    const key = `${item.market}:${item.stockCode}`;
+    const prev = map.get(key);
+    const itemTs = item.createdAt ?? '';
+    const prevTs = prev?.createdAt ?? '';
+    if (!prev || itemTs > prevTs || (itemTs === prevTs && item.id > prev.id)) {
+      map.set(key, item);
+    }
+  }
+  return [...map.values()].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id - a.id);
 }
 
 function refreshLatestSelection(
@@ -411,6 +426,7 @@ const DecisionSignalsPage: React.FC = () => {
   const [filters, setFilters] = useState<ListFilters>(() => getInitialFilters());
   const [appliedFilters, setAppliedFilters] = useState<ListFilters>(() => getInitialFilters());
   const [page, setPage] = useState(1);
+  const [dedupeLatest, setDedupeLatest] = useState(false);
   const [items, setItems] = useState<DecisionSignalItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -509,11 +525,13 @@ const DecisionSignalsPage: React.FC = () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
+    const effectivePageSize = dedupeLatest ? DEDUPE_PAGE_SIZE : PAGE_SIZE;
+    const effectivePage = dedupeLatest ? 1 : nextPage;
     try {
-      const response = await decisionSignalsApi.list(toListParams(appliedFilters, nextPage));
+      const response = await decisionSignalsApi.list(toListParams(appliedFilters, effectivePage, effectivePageSize));
       if (requestIdRef.current !== requestId) return;
-      const lastPage = Math.max(1, Math.ceil(response.total / PAGE_SIZE));
-      if (response.total > 0 && nextPage > lastPage) {
+      const lastPage = Math.max(1, Math.ceil(response.total / effectivePageSize));
+      if (response.total > 0 && effectivePage > lastPage) {
         setPage(lastPage);
         return;
       }
@@ -537,7 +555,7 @@ const DecisionSignalsPage: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [appliedFilters]);
+  }, [appliedFilters, dedupeLatest]);
 
   const loadSignals = useCallback(async () => {
     await loadSignalsForPage(page);
@@ -1232,95 +1250,31 @@ const DecisionSignalsPage: React.FC = () => {
     ].filter(Boolean).join(' / ')
     : null;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const visibleItems = useMemo(() => (dedupeLatest ? dedupeByLatest(items) : items), [dedupeLatest, items]);
   const activeFilterChips = buildActiveFilterChips(appliedFilters, actionLabels, t);
 
   return (
     <AppPage>
       <div className="space-y-5">
-        <div className="flex justify-end">
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center justify-center gap-2"
-            onClick={() => {
-              void loadSignals();
-              void loadOutcomeStats();
-            }}
-            disabled={loading}
-          >
-            <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
-            <span>{t('decisionSignals.refresh')}</span>
-          </button>
-        </div>
-
-        <Card title={t('decisionSignals.stockContextTitle')} subtitle={t('decisionSignals.stockContextDescription')} padding="md">
-          <form
-            className="flex flex-col gap-3 md:flex-row"
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleStockFormSubmit(stockDraft);
-            }}
-          >
-            <div className="min-w-0 flex-1">
-              <StockAutocomplete
-                value={stockDraft}
-                onChange={setStockDraft}
-                onSubmit={handleStockSubmit}
-                placeholder={t('decisionSignals.stockContextPlaceholder')}
-                ariaLabel={t('decisionSignals.stockContextInput')}
-              />
-            </div>
-            <button
-              type="submit"
-              className="btn-primary inline-flex h-11 items-center justify-center gap-2"
-              disabled={!stockDraft.trim()}
-            >
-              <Search className="h-4 w-4" />
-              {t('decisionSignals.stockContextApply')}
-            </button>
+        <div className="flex items-start justify-between gap-3">
+          <p className="max-w-2xl text-sm text-secondary-text">{t('decisionSignals.pagePurpose')}</p>
+          <div className="flex shrink-0 justify-end">
             <button
               type="button"
-              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
-              onClick={handleClearStockContext}
-              disabled={!activeStockContext && !stockDraft}
+              className="btn-secondary inline-flex items-center justify-center gap-2"
+              onClick={() => {
+                void loadSignals();
+                void loadOutcomeStats();
+              }}
+              disabled={loading}
             >
-              {t('decisionSignals.stockContextClear')}
+              <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
+              <span>{t('decisionSignals.refresh')}</span>
             </button>
-          </form>
+          </div>
+        </div>
 
-          {activeStockLabel ? (
-            <p className="mt-3 text-sm text-secondary-text">
-              {t('decisionSignals.stockContextCurrent', { stock: activeStockLabel })}
-            </p>
-          ) : (
-            <p className="mt-3 text-sm text-secondary-text">{t('decisionSignals.stockContextEmpty')}</p>
-          )}
-
-          {historyCandidatesLoaded && stockCandidates.length > 0 ? (
-            <div className="mt-4">
-              <p className="text-xs font-medium uppercase text-muted-text">
-                {stockCandidateMode === 'history'
-                  ? t('decisionSignals.stockContextRecent')
-                  : t('decisionSignals.stockContextPopular')}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {stockCandidates.map((candidate) => (
-                  <button
-                    key={`${candidate.source}:${getCandidateKey(candidate)}`}
-                    type="button"
-                    className="rounded-full border border-border/70 bg-elevated/40 px-3 py-1.5 text-sm text-foreground transition-colors hover:border-primary/60 hover:text-primary"
-                    onClick={() => handleCandidateSelect(candidate)}
-                  >
-                    <span className="font-mono">{candidate.displayCode ?? candidate.code}</span>
-                    {candidate.name ? <span className="ml-1 text-secondary-text">{candidate.name}</span> : null}
-                    {candidate.market ? <span className="ml-1 text-muted-text">/ {candidate.market}</span> : null}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : historyCandidatesLoaded ? (
-            <p className="mt-4 text-sm text-secondary-text">{t('decisionSignals.stockContextNoCandidates')}</p>
-          ) : null}
-        </Card>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">{t('decisionSignals.sectionAll')}</p>
 
         <Card title={t('decisionSignals.filter')} padding="md">
           <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-7" onSubmit={handleApplyFilters}>
@@ -1404,6 +1358,18 @@ const DecisionSignalsPage: React.FC = () => {
               {t('decisionSignals.resetFilter')}
             </button>
           </form>
+          <label className="mt-3 inline-flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={dedupeLatest}
+              onChange={(event) => {
+                setDedupeLatest(event.target.checked);
+                setPage(1);
+              }}
+              className="h-4 w-4 accent-primary"
+            />
+            <span className="text-sm text-foreground">{t('decisionSignals.dedupeLabel')}</span>
+          </label>
         </Card>
 
         {!selected && appliedSourceReportId ? (
@@ -1411,6 +1377,69 @@ const DecisionSignalsPage: React.FC = () => {
             {renderReassessPanel()}
           </Card>
         ) : null}
+
+        {error ? (
+          <ApiErrorAlert
+            error={{ ...error, title: t('decisionSignals.errorTitle') }}
+            actionLabel={t('common.retry')}
+            onAction={() => void loadSignals()}
+          />
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3">
+          {dedupeLatest ? (
+            <p className="text-sm text-secondary-text">{t('decisionSignals.dedupeCount', { count: visibleItems.length })}</p>
+          ) : (
+            <p className="text-sm text-secondary-text">{t('decisionSignals.total', { total })}</p>
+          )}
+          {loading ? <span className="text-xs text-secondary-text">{t('common.loading')}...</span> : null}
+        </div>
+
+        {activeFilterChips.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeFilterChips.map((chip) => (
+              <span key={chip.key} className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-elevated/40 px-2.5 py-1 text-xs text-secondary-text">
+                {chip.label}
+                <button
+                  type="button"
+                  onClick={() => removeFilter(chip.key)}
+                  className="text-secondary-text transition-colors hover:text-danger"
+                  aria-label={`${t('decisionSignals.resetFilter')} ${chip.label}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <button type="button" onClick={resetFilters} className="text-xs text-secondary-text underline hover:text-foreground">
+              {t('decisionSignals.resetFilter')}
+            </button>
+          </div>
+        ) : null}
+
+        {!loading && visibleItems.length === 0 ? (
+          <EmptyState
+            title={t('decisionSignals.emptyTitle')}
+            description={t('decisionSignals.emptyDescription')}
+            icon={<Activity className="h-7 w-7" />}
+          />
+        ) : (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {visibleItems.map((item) => (
+              <DecisionSignalCard
+                key={item.id}
+                item={item}
+                onSelect={(selectedItem) => setSelected({ source: 'list', item: selectedItem })}
+                selected={selected?.item.id === item.id}
+              />
+            ))}
+          </div>
+        )}
+
+        {dedupeLatest ? (
+          <p className="text-xs text-secondary-text">{t('decisionSignals.dedupeNote', { fetched: items.length })}</p>
+        ) : (
+          <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
+        )}
 
         <Card title={t('decisionSignals.statsTitle')} subtitle={t('decisionSignals.statsDescription')} padding="md">
           <p className="mb-3 text-sm text-secondary-text">{t('decisionSignals.statsGlobalScope')}</p>
@@ -1446,6 +1475,7 @@ const DecisionSignalsPage: React.FC = () => {
                   <p className="mt-1 text-2xl font-semibold text-warning">{outcomeStats.unable}</p>
                 </div>
               </div>
+              <p className="mt-3 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
               {outcomeStats.profileCalibration ? (
                 <DecisionSignalProfileCalibration calibration={outcomeStats.profileCalibration} />
               ) : null}
@@ -1497,6 +1527,78 @@ const DecisionSignalsPage: React.FC = () => {
               icon={<BarChart3 className="h-6 w-6" />}
             />
           )}
+        </Card>
+
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">{t('decisionSignals.sectionStock')}</p>
+
+        <Card title={t('decisionSignals.stockContextTitle')} subtitle={t('decisionSignals.stockContextDescription')} padding="md">
+          <form
+            className="flex flex-col gap-3 md:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleStockFormSubmit(stockDraft);
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <StockAutocomplete
+                value={stockDraft}
+                onChange={setStockDraft}
+                onSubmit={handleStockSubmit}
+                placeholder={t('decisionSignals.stockContextPlaceholder')}
+                ariaLabel={t('decisionSignals.stockContextInput')}
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn-primary inline-flex h-11 items-center justify-center gap-2"
+              disabled={!stockDraft.trim()}
+            >
+              <Search className="h-4 w-4" />
+              {t('decisionSignals.stockContextApply')}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+              onClick={handleClearStockContext}
+              disabled={!activeStockContext && !stockDraft}
+            >
+              {t('decisionSignals.stockContextClear')}
+            </button>
+          </form>
+
+          {activeStockLabel ? (
+            <p className="mt-3 text-sm text-secondary-text">
+              {t('decisionSignals.stockContextCurrent', { stock: activeStockLabel })}
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-secondary-text">{t('decisionSignals.stockContextEmpty')}</p>
+          )}
+
+          {historyCandidatesLoaded && stockCandidates.length > 0 ? (
+            <div className="mt-4">
+              <p className="text-xs font-medium uppercase text-muted-text">
+                {stockCandidateMode === 'history'
+                  ? t('decisionSignals.stockContextRecent')
+                  : t('decisionSignals.stockContextPopular')}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {stockCandidates.map((candidate) => (
+                  <button
+                    key={`${candidate.source}:${getCandidateKey(candidate)}`}
+                    type="button"
+                    className="rounded-full border border-border/70 bg-elevated/40 px-3 py-1.5 text-sm text-foreground transition-colors hover:border-primary/60 hover:text-primary"
+                    onClick={() => handleCandidateSelect(candidate)}
+                  >
+                    <span className="font-mono">{candidate.displayCode ?? candidate.code}</span>
+                    {candidate.name ? <span className="ml-1 text-secondary-text">{candidate.name}</span> : null}
+                    {candidate.market ? <span className="ml-1 text-muted-text">/ {candidate.market}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : historyCandidatesLoaded ? (
+            <p className="mt-4 text-sm text-secondary-text">{t('decisionSignals.stockContextNoCandidates')}</p>
+          ) : null}
         </Card>
 
         <div ref={latestSectionRef}>
@@ -1598,11 +1700,13 @@ const DecisionSignalsPage: React.FC = () => {
             </button>
           </form>
           <div className="mt-4">
-            {!timelineSearched ? (
+            {!activeStockContext ? (
+              <p className="text-sm text-secondary-text">{t('decisionSignals.timelineNoStockHint')}</p>
+            ) : !timelineSearched ? (
               <EmptyState
                 className="border-none bg-transparent py-6 shadow-none"
-                title={activeStockContext ? t('decisionSignals.timelineGuideTitle') : t('decisionSignals.stockContextGuideTitle')}
-                description={activeStockContext ? t('decisionSignals.timelineGuideDescription') : t('decisionSignals.stockContextGuideDescription')}
+                title={t('decisionSignals.timelineGuideTitle')}
+                description={t('decisionSignals.timelineGuideDescription')}
                 icon={<Activity className="h-6 w-6" />}
               />
             ) : (
@@ -1617,61 +1721,6 @@ const DecisionSignalsPage: React.FC = () => {
             )}
           </div>
         </Card>
-
-        {error ? (
-          <ApiErrorAlert
-            error={{ ...error, title: t('decisionSignals.errorTitle') }}
-            actionLabel={t('common.retry')}
-            onAction={() => void loadSignals()}
-          />
-        ) : null}
-
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-secondary-text">{t('decisionSignals.total', { total })}</p>
-          {loading ? <span className="text-xs text-secondary-text">{t('common.loading')}...</span> : null}
-        </div>
-
-        {activeFilterChips.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {activeFilterChips.map((chip) => (
-              <span key={chip.key} className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-elevated/40 px-2.5 py-1 text-xs text-secondary-text">
-                {chip.label}
-                <button
-                  type="button"
-                  onClick={() => removeFilter(chip.key)}
-                  className="text-secondary-text transition-colors hover:text-danger"
-                  aria-label={`${t('decisionSignals.resetFilter')} ${chip.label}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-            <button type="button" onClick={resetFilters} className="text-xs text-secondary-text underline hover:text-foreground">
-              {t('decisionSignals.resetFilter')}
-            </button>
-          </div>
-        ) : null}
-
-        {!loading && items.length === 0 ? (
-          <EmptyState
-            title={t('decisionSignals.emptyTitle')}
-            description={t('decisionSignals.emptyDescription')}
-            icon={<Activity className="h-7 w-7" />}
-          />
-        ) : (
-          <div className="grid gap-3 xl:grid-cols-2">
-            {items.map((item) => (
-              <DecisionSignalCard
-                key={item.id}
-                item={item}
-                onSelect={(selectedItem) => setSelected({ source: 'list', item: selectedItem })}
-                selected={selected?.item.id === item.id}
-              />
-            ))}
-          </div>
-        )}
-
-        <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
       </div>
 
       <Drawer
