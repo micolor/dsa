@@ -159,6 +159,7 @@ const zh = {
   'login.validationFailed': '验证未通过',
 
   'home.analyze': '分析',
+  'home.analyzeHint': '输入股票代码，分析单只个股历史与信号。',
   'home.analyzing': '分析中',
   'home.askAi': '追问 AI',
   'home.defaultStrategyDescription': '沿用系统默认分析框架',
@@ -170,6 +171,7 @@ const zh = {
   'home.inputInvalid': '输入有误',
   'home.loadingReport': '加载报告中...',
   'home.marketReview': '大盘复盘',
+  'home.marketReviewHint': '无需输入代码，一键生成全市场大盘复盘。',
   'home.marketReviewCompleted': '大盘复盘已完成',
   'home.marketReviewCompletedWithReport': '大盘复盘任务已完成，结果如下：',
   'home.marketReviewCompletedWithoutReport': '大盘复盘任务已完成，结果已生成并按配置推送。',
@@ -1173,6 +1175,7 @@ const en: Record<UiTextKey, string> = {
   'login.validationFailed': 'Validation failed',
 
   'home.analyze': 'Analyze',
+  'home.analyzeHint': 'Enter a stock code to analyze a single stock.',
   'home.analyzing': 'Analyzing',
   'home.askAi': 'Ask AI',
   'home.defaultStrategyDescription': 'Use the system default analysis framework',
@@ -1184,6 +1187,7 @@ const en: Record<UiTextKey, string> = {
   'home.inputInvalid': 'Invalid input',
   'home.loadingReport': 'Loading report...',
   'home.marketReview': 'Market review',
+  'home.marketReviewHint': 'No stock code needed - generate a full-market review.',
   'home.marketReviewCompleted': 'Market review completed',
   'home.marketReviewCompletedWithReport': 'Market review completed. Result:',
   'home.marketReviewCompletedWithoutReport': 'Market review completed. The result was generated and sent according to your configuration.',

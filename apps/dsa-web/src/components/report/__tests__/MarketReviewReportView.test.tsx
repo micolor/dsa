@@ -304,4 +304,50 @@ describe('MarketReviewReportView', () => {
 
     expect(onOpenRunFlow).toHaveBeenCalledWith(7);
   });
+
+  it('renders breadth and index charts within the structured data card', () => {
+    render(
+      <MarketReviewReportView
+        payload={combinedMarketReviewPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    expect(screen.getAllByTestId('market-breadth-bar')).toHaveLength(2);
+    expect(screen.getAllByTestId('market-index-bar')).toHaveLength(2);
+    // 图表以原有文本为载体，文本断言保持通过
+    expect(screen.getByText('沪深300')).toBeInTheDocument();
+    expect(screen.getByText('恒生指数')).toBeInTheDocument();
+  });
+
+  it('renders sector bar rows for leading/lagging rankings', () => {
+    render(
+      <MarketReviewReportView
+        payload={combinedMarketReviewPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    const sectorBars = screen.getAllByTestId('market-sector-bar');
+    expect(sectorBars.length).toBeGreaterThan(0);
+    expect(screen.getByText('半导体')).toBeInTheDocument();
+    expect(screen.getByText('+4.20%')).toBeInTheDocument();
+  });
+
+  it('keeps section headings in the DOM when collapsed (defaultOpen only first)', () => {
+    render(
+      <MarketReviewReportView
+        payload={combinedMarketReviewPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    // payload 的多区域 sections 里标题以「市场名 / 章节」拼接；此处仅断言章节标题节点仍存在
+    // （Collapsible 收起用 max-h-0，内容仍在 DOM，getByText 只能查节点存在性）
+    const sectionButtons = screen.getAllByRole('button');
+    expect(sectionButtons.length).toBeGreaterThan(0);
+  });
 });

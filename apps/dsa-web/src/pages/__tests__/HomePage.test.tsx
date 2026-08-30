@@ -2460,8 +2460,8 @@ describe('HomePage', () => {
     expect(screen.getByText('3200')).toBeInTheDocument();
     expect(screen.getByText('3150.20')).toBeInTheDocument();
     expect(marketReviewReport.querySelector('h2, h3')?.textContent).not.toBe('A股市场复盘');
-    expect(screen.getByRole('heading', { name: '指数概览' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '风险提示' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '指数概览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '风险提示' })).toBeInTheDocument();
     expect(screen.getAllByRole('table').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('# A股市场复盘')).not.toBeInTheDocument();
     expect(screen.queryByText('开始分析')).not.toBeInTheDocument();
@@ -2788,8 +2788,8 @@ describe('HomePage', () => {
 
     await screen.findByText('大盘复盘摘要');
     expect(screen.queryByRole('heading', { name: '大盘复盘详情' })).not.toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '行业/主题轮动' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '行业/主题轮动' })).toBeInTheDocument();
     expect(screen.getByText('赚钱效应')).toBeInTheDocument();
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument();
@@ -2889,7 +2889,7 @@ describe('HomePage', () => {
       expect(screen.queryByText('大盘复盘已完成')).not.toBeInTheDocument();
     });
     expect(await screen.findByText('大盘复盘摘要')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
     expect(vi.mocked(historyApi.getDetail)).toHaveBeenCalledWith(2);
   });
 });

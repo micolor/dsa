@@ -8,7 +8,7 @@ import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { Button, Drawer, InlineAlert } from '../components/common';
+import { Button, Drawer, InlineAlert, Tooltip } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
 import { HomeReportRegion, type MarketReviewNotice } from '../components/report/HomeReportRegion';
@@ -1545,30 +1545,34 @@ const HomePage: React.FC = () => {
                 />
                 {t('home.notify')}
               </label>
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                isLoading={isSubmittingMarketReview}
-                loadingText={t('home.submitMarketReview')}
-                onClick={() => void handleTriggerMarketReview()}
-                className="h-10 flex-1 whitespace-nowrap md:flex-none"
-              >
-                <BarChart3 className="h-4 w-4" aria-hidden="true" />
-                {t('home.marketReview')}
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="md"
-                isLoading={isAnalyzing}
-                loadingText={t('home.analyzing')}
-                onClick={() => handleSubmitAnalysis()}
-                disabled={!query}
-                className="flex-1 whitespace-nowrap md:flex-none"
-              >
-                {t('home.analyze')}
-              </Button>
+              <Tooltip content={t('home.marketReviewHint')} className="flex-1 md:flex-none">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  isLoading={isSubmittingMarketReview}
+                  loadingText={t('home.submitMarketReview')}
+                  onClick={() => void handleTriggerMarketReview()}
+                  className="h-10 w-full whitespace-nowrap md:w-auto"
+                >
+                  <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                  {t('home.marketReview')}
+                </Button>
+              </Tooltip>
+              <Tooltip content={t('home.analyzeHint')} className="flex-1 md:flex-none">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  isLoading={isAnalyzing}
+                  loadingText={t('home.analyzing')}
+                  onClick={() => handleSubmitAnalysis()}
+                  disabled={!query}
+                  className="h-10 w-full whitespace-nowrap md:w-auto"
+                >
+                  {t('home.analyze')}
+                </Button>
+              </Tooltip>
             </div>
           </div>
         </header>

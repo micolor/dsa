@@ -11,8 +11,9 @@ import type {
 } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
-import { Card } from '../common';
+import { Card, Collapsible } from '../common';
 import { Tooltip } from '../common/Tooltip';
+import { BreadthBar, MiniChangeBar, SectorBarList, type MarketBarRow } from './MarketReviewBarChart';
 import { ReportMarkdownBody } from './ReportMarkdownBody';
 import { ShareImageButton } from './ShareImageButton';
 
@@ -257,6 +258,28 @@ const formatMarketHighLow = (high: unknown, low: unknown): string => {
   return highText === '-' && lowText === '-' ? '-' : `${highText} / ${lowText}`;
 };
 
+const formatRankingChange = (value: unknown): string => {
+  const numeric = typeof value === 'number' ? value : Number(String(value ?? '').replace(/%$/, ''));
+  if (!Number.isFinite(numeric)) {
+    return '-';
+  }
+  const sign = numeric > 0 ? '+' : '';
+  return `${sign}${numeric.toFixed(2)}%`;
+};
+
+const toMarketBarRow = (name: string, changePct: unknown, label: string): MarketBarRow => ({
+  name,
+  value: coerceFiniteNumber(changePct),
+  label,
+});
+
+const toSectorBarRows = (items?: Array<{ name: string; changePct?: number }>): MarketBarRow[] =>
+  (items || []).map((item) => toMarketBarRow(
+    item.name,
+    item.changePct,
+    formatRankingChange(item.changePct),
+  ));
+
 const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   reviewSummary: string;
   noReviewSummary: string;
@@ -279,6 +302,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   conceptBoards: string;
   leading: string;
   lagging: string;
+  breadthAria: (up: number, down: number) => string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -302,6 +326,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     conceptBoards: '概念板块',
     leading: '领涨',
     lagging: '领跌',
+    breadthAria: (up: number, down: number) => `上涨 ${up} 家 / 下跌 ${down} 家`,
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -325,6 +350,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     conceptBoards: 'Concept Themes',
     leading: 'Leading',
     lagging: 'Lagging',
+    breadthAria: (up: number, down: number) => `${up} up / ${down} down`,
   },
   ko: {
     reviewSummary: '리뷰 요약',
@@ -348,16 +374,8 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     conceptBoards: '테마 섹터',
     leading: '강세',
     lagging: '약세',
+    breadthAria: (up: number, down: number) => `상승 ${up} 종목 / 하락 ${down} 종목`,
   },
-};
-
-const formatRankingChange = (value: unknown): string => {
-  const numeric = typeof value === 'number' ? value : Number(String(value ?? '').replace(/%$/, ''));
-  if (!Number.isFinite(numeric)) {
-    return '-';
-  }
-  const sign = numeric > 0 ? '+' : '';
-  return `${sign}${numeric.toFixed(2)}%`;
 };
 
 export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
@@ -588,7 +606,16 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <h4 className="text-sm font-semibold text-foreground">{marketData.title}</h4>
                 ) : null}
                 {marketData.breadth ? (
-                  <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                  <>
+                    <BreadthBar
+                      upCount={coerceFiniteNumber(marketData.breadth.upCount) ?? 0}
+                      downCount={coerceFiniteNumber(marketData.breadth.downCount) ?? 0}
+                      ariaLabel={marketReviewText.breadthAria(
+                        coerceFiniteNumber(marketData.breadth.upCount) ?? 0,
+                        coerceFiniteNumber(marketData.breadth.downCount) ?? 0,
+                      )}
+                    />
+                    <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
                     <div className="rounded-lg border border-subtle p-3">
                       <p className="label-uppercase">{marketReviewText.advancers}</p>
                       <p className="mt-1 font-semibold text-foreground">
@@ -615,6 +642,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                       </p>
                     </div>
                   </div>
+                  </>
                 ) : (
                   <p className="text-sm text-secondary-text">{marketReviewText.noBreadthData}</p>
                 )}
@@ -630,14 +658,25 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-subtle">
-                        {marketData.indices.map((index) => (
-                          <tr key={index.code || index.name}>
-                            <td className="px-2 py-2 font-medium text-foreground">{index.name}</td>
-                            <td className="px-2 py-2 text-secondary-text">{formatMarketNumber(index.current)}</td>
-                            <td className="px-2 py-2 text-secondary-text">{formatMarketPercent(index.changePct)}</td>
-                            <td className="px-2 py-2 text-secondary-text">{formatMarketHighLow(index.high, index.low)}</td>
-                          </tr>
-                        ))}
+                        {(() => {
+                          const maxAbs = marketData.indices.reduce(
+                            (max, index) => Math.max(max, Math.abs(coerceFiniteNumber(index.changePct) ?? 0)),
+                            0,
+                          );
+                          return marketData.indices.map((index) => (
+                            <tr key={index.code || index.name}>
+                              <td className="px-2 py-2 font-medium text-foreground">{index.name}</td>
+                              <td className="px-2 py-2 text-secondary-text">{formatMarketNumber(index.current)}</td>
+                              <td className="px-2 py-2">
+                                <span className="inline-flex items-center gap-2 text-secondary-text">
+                                  <MiniChangeBar value={coerceFiniteNumber(index.changePct)} maxAbs={maxAbs} />
+                                  {formatMarketPercent(index.changePct)}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2 text-secondary-text">{formatMarketHighLow(index.high, index.low)}</td>
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -672,16 +711,10 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                             {side === 'top' ? marketReviewText.leading : marketReviewText.lagging}
                           </span>
                         </div>
-                        <div className="space-y-1.5">
-                          {rows.slice(0, 5).map((item, index) => (
-                            <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 text-sm">
-                              <span className="min-w-0 truncate text-foreground">{item.name}</span>
-                              <span className="shrink-0 font-mono text-secondary-text">
-                                {formatRankingChange(item.changePct)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                        <SectorBarList
+                          rows={toSectorBarRows(rows.slice(0, 5))}
+                          direction={side === 'top' ? 'up' : 'down'}
+                        />
                       </div>
                     );
                   });
@@ -728,19 +761,19 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
         </Card>
       ) : (
         <div data-testid="market-review-report" className="space-y-4">
-          {sections.map(({ id, title, content: sectionContent, icon: Icon }) => (
-            <Card key={id} variant="bordered" padding="md" className="home-panel-card text-left">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <h3 className="text-base font-semibold text-foreground">{title}</h3>
-              </div>
+          {sections.map(({ id, title, content: sectionContent, icon: Icon }, index) => (
+            <Collapsible
+              key={id}
+              defaultOpen={index === 0}
+              title={title}
+              icon={<Icon className="h-4 w-4 text-cyan" aria-hidden="true" />}
+              className="home-panel-card"
+            >
               <ReportMarkdownBody
                 content={sectionContent}
                 className="market-review-markdown"
               />
-            </Card>
+            </Collapsible>
           ))}
         </div>
       )}
