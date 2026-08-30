@@ -365,5 +365,63 @@ class TestAskCommandSilentExceptionFix(unittest.TestCase):
         self.assertTrue(any("_get_default_skill_id failed" in line for line in cm.output))
 
 
+class TestAskCommandAgenticSession(unittest.TestCase):
+    """Verify /ask uses a persistent session id and no longer forces a single skill."""
+
+    @staticmethod
+    def _message(chat_type: ChatType = ChatType.PRIVATE, chat_id: str = "chat-1") -> BotMessage:
+        return BotMessage(
+            platform="feishu",
+            message_id="msg-1",
+            user_id="user-1",
+            user_name="tester",
+            chat_id=chat_id,
+            chat_type=chat_type,
+            content="/ask 600519",
+        )
+
+    def test_ask_session_id_is_persistent_and_scopes_by_user(self) -> None:
+        command = AskCommand()
+        message = self._message()
+        session_id = command._ask_session_id(message)
+        # Same message scope -> same id (no per-call uuid, no stock embedding).
+        self.assertEqual(session_id, "feishu_user-1:ask")
+        self.assertEqual(session_id, command._ask_session_id(message))
+
+    def test_ask_session_id_is_room_scoped_for_group_chats(self) -> None:
+        command = AskCommand()
+        message = self._message(chat_type=ChatType.GROUP, chat_id="room-9")
+        self.assertEqual(command._ask_session_id(message), "feishu_user-1:room-9:ask")
+
+    def test_single_passes_no_forced_skill_and_reuses_persistent_session(self) -> None:
+        command = AskCommand()
+        config = SimpleNamespace()
+        message = self._message()
+        captured_sessions = []
+
+        class FakeExecutor:
+            def chat(self, message, session_id, progress_callback=None, context=None):
+                captured_sessions.append(session_id)
+                return SimpleNamespace(success=True, content="analysis ok")
+
+        with patch(
+            "src.agent.factory.build_agent_executor",
+            return_value=FakeExecutor(),
+        ) as mock_builder:
+            with patch.object(command, "_resolve_skill_name", return_value="缠论"):
+                command._analyze_single(config, message, "600519", "chan_theory", "")
+                command._analyze_single(config, message, "600519", "", "换个话题")
+
+        # No single-skill gate: builder is invoked with skills=None (default/config set).
+        self.assertEqual(mock_builder.call_count, 2)
+        for call in mock_builder.call_args_list:
+            self.assertIsNone(call.kwargs.get("skills"))
+
+        # Persistent session: both calls reuse the same id, no uuid/stock-embedded suffix.
+        self.assertEqual(len(captured_sessions), 2)
+        self.assertEqual(captured_sessions[0], captured_sessions[1])
+        self.assertEqual(captured_sessions[0], "feishu_user-1:ask")
+
+
 if __name__ == "__main__":
     unittest.main()

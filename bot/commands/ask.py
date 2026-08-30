@@ -12,11 +12,10 @@ Usage:
 import logging
 import re
 import time
-import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from bot.commands.base import BotCommand
-from bot.models import BotMessage, BotResponse
+from bot.models import BotMessage, BotResponse, ChatType
 from data_provider.base import canonical_stock_code
 from src.config import get_config
 from src.storage import get_db
@@ -185,6 +184,21 @@ class AskCommand(BotCommand):
                 return display_name or skill_id
         return skill_id
 
+    def _ask_session_id(self, message: BotMessage) -> str:
+        """Return a persistent session id for the user's 问股 conversation.
+
+        Historical ask commands generated a fresh ``uuid`` per call (and keyed on
+        the stock code), so every ask was a one-shot with no cross-turn memory.
+        We now scope by (platform, user) so repeated asks — including switching
+        stock mid-conversation — thread into one agent session, with
+        ``resolve_stock_scope`` handling the active-stock switch. The ``:ask``
+        suffix keeps ask sessions distinct from ``/chat`` (``:chat``) sessions.
+        """
+        base_session_id = f"{message.platform}_{message.user_id}"
+        if message.chat_type == ChatType.GROUP and message.chat_id:
+            return f"{base_session_id}:{message.chat_id}:ask"
+        return f"{base_session_id}:ask"
+
     @staticmethod
     def _build_execution_context(stock_code: str, skill_id: str) -> Dict[str, Any]:
         selected = [skill_id] if skill_id else []
@@ -236,19 +250,44 @@ class AskCommand(BotCommand):
         try:
             from src.agent.factory import build_agent_executor
 
-            executor = build_agent_executor(config, skills=[skill_id] if skill_id else None)
+            # skills=None activates the default / configured skill set so the agent is
+            # free to drive every tool conversationally instead of being locked to a
+            # single strategy emphasis. User-typed skill_text stays in the message.
+            executor = build_agent_executor(config, skills=None)
             user_msg = self._build_user_message(code, skill_id, skill_text)
-            session_id = f"{message.platform}_{message.user_id}:ask_{code}_{uuid.uuid4()}"
+            session_id = self._ask_session_id(message)
+
+            # Fold the most useful progress signal (a propose_alert outcome) into the
+            # final reply. BotResponse has no streaming surface, so we capture the
+            # alert_proposal event and append a one-line hint instead.
+            alert_hint: Dict[str, str] = {}
+
+            def _on_progress(event: Any) -> None:
+                if not isinstance(event, dict):
+                    return
+                if event.get("type") != "alert_proposal":
+                    return
+                summary = event.get("summary")
+                if isinstance(summary, str) and summary.strip():
+                    alert_hint["summary"] = summary.strip()
+
             result = executor.chat(
                 message=user_msg,
                 session_id=session_id,
                 context=self._build_execution_context(code, skill_id),
+                progress_callback=_on_progress,
             )
 
             if result.success:
                 skill_name = self._resolve_skill_name(skill_id)
                 header = f"📊 {code} | 技能: {skill_name}\n{'─' * 30}\n"
-                return BotResponse.text_response(header + result.content)
+                content = header + result.content
+                if alert_hint.get("summary"):
+                    content += (
+                        f"\n\n🤖 检测到可创建的预警：{alert_hint['summary']}\n"
+                        "（可用 /alert 或 Web 端落库）"
+                    )
+                return BotResponse.text_response(content)
             return BotResponse.text_response(f"⚠️ 分析失败: {result.error}")
 
         except Exception as exc:
@@ -273,17 +312,18 @@ class AskCommand(BotCommand):
         started_at = time.monotonic()
         overall_timeout_s = self._MULTI_ANALYZE_TIMEOUT_S
 
-        platform = message.platform
-        user_id = message.user_id
+        session_id = self._ask_session_id(message)
 
         def _run_one(stock_code: str) -> Tuple[str, Optional[Dict[str, Any]], Optional[str]]:
             try:
                 from src.agent.conversation import conversation_manager
                 from src.agent.factory import build_agent_executor
 
-                executor = build_agent_executor(config, skills=[skill_id] if skill_id else None)
+                # skills=None frees the agent to drive every tool; the multi-stock
+                # comparison keeps .run() (dashboard) for structured output but now
+                # persists into the shared persistent session so follow-up asks thread.
+                executor = build_agent_executor(config, skills=None)
                 user_msg = self._build_user_message(stock_code, skill_id, skill_text)
-                session_id = f"{platform}_{user_id}:ask_{stock_code}_{uuid.uuid4()}"
                 conversation_manager.add_message(session_id, "user", user_msg)
 
                 result = executor.run(
