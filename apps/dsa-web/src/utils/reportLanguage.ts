@@ -53,6 +53,10 @@ const REPORT_TEXT = {
     laggingBoard: '领跌',
     neutralBoard: '中性',
     reanalyze: '重新分析',
+    priceChart: 'K 线走势',
+    priceChartLoading: '加载行情中...',
+    priceChartFailed: '行情加载失败',
+    noPriceData: '暂无行情数据',
   },
   en: {
     keyInsights: 'KEY INSIGHTS',
@@ -103,6 +107,10 @@ const REPORT_TEXT = {
     laggingBoard: 'Lagging',
     neutralBoard: 'Neutral',
     reanalyze: 'Reanalyze',
+    priceChart: 'PRICE CHART',
+    priceChartLoading: 'Loading price data...',
+    priceChartFailed: 'Failed to load price data',
+    noPriceData: 'No price data',
   },
   ko: {
     keyInsights: '핵심 인사이트',
@@ -153,6 +161,10 @@ const REPORT_TEXT = {
     laggingBoard: '약세',
     neutralBoard: '중립',
     reanalyze: '재분석',
+    priceChart: '주가 차트',
+    priceChartLoading: '시세 불러오는 중...',
+    priceChartFailed: '시세 불러오기 실패',
+    noPriceData: '시세 데이터 없음',
   },
 } as const;
 

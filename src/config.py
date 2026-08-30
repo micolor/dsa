@@ -1101,6 +1101,7 @@ class Config:
     notification_report_channels: List[str] = field(default_factory=list)
     notification_alert_channels: List[str] = field(default_factory=list)
     notification_system_error_channels: List[str] = field(default_factory=list)
+    notification_event_channels: List[str] = field(default_factory=list)
 
     # 通知降噪机制（Issue #1200 P4）：默认全部关闭，仅对静态通知渠道生效
     notification_dedup_ttl_seconds: int = 0
@@ -2055,6 +2056,9 @@ class Config:
             ),
             notification_system_error_channels=parse_notification_route_channels(
                 os.getenv('NOTIFICATION_SYSTEM_ERROR_CHANNELS')
+            ),
+            notification_event_channels=parse_notification_route_channels(
+                os.getenv('NOTIFICATION_EVENT_CHANNELS')
             ),
             notification_dedup_ttl_seconds=parse_env_int(
                 os.getenv('NOTIFICATION_DEDUP_TTL_SECONDS'),

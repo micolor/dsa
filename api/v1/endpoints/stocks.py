@@ -26,7 +26,12 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
 )
-from api.v1.schemas.history import WatchlistRequest, WatchlistResponse
+from api.v1.schemas.history import (
+    WatchlistListInfo,
+    WatchlistListsResponse,
+    WatchlistRequest,
+    WatchlistResponse,
+)
 from api.v1.schemas.common import ErrorResponse
 from src.services.image_stock_extractor import (
     ALLOWED_MIME,
@@ -51,27 +56,65 @@ router = APIRouter()
 ALLOWED_MIME_STR = ", ".join(ALLOWED_MIME)
 
 
-def _read_watchlist_codes(service: SystemConfigService) -> list:
-    """Read STOCK_LIST codes as-is (no normalization)."""
+def _watchlist_env_key(list_name: Optional[str]) -> str:
+    """Resolve the config-item key for a watchlist.
+
+    Named lists map to ``WATCHLIST_<UPPER_NAME>``; the default (no name) maps to
+    the legacy ``STOCK_LIST`` so existing clients keep their behavior unchanged.
+
+    The key keeps CJK/字母/数字/下划线 (Unicode word chars), collapses any other
+    character run into a single underscore, so Chinese list names like 「短线池」
+    remain human-readable rather than being stripped to underscores.
+    """
+    if not list_name or not str(list_name).strip():
+        return "STOCK_LIST"
+    name = str(list_name).strip().upper()
+    name = re.sub(r"[\W]+", "_", name)
+    return f"WATCHLIST_{name}"
+
+
+def _read_watchlist_codes(service: SystemConfigService, list_name: Optional[str] = None) -> list:
+    """Read watchlist codes as-is (no normalization).
+
+    Reads ``WATCHLIST_<NAME>`` when ``list_name`` is given, else the legacy
+    ``STOCK_LIST``. Named lists that do not exist yet resolve to an empty list.
+    """
+    key = _watchlist_env_key(list_name)
     config_data = service.get_config(include_schema=False)
     stock_list_str = ""
     for item in config_data.get("items", []):
-        if item.get("key") == "STOCK_LIST":
+        if item.get("key") == key:
             stock_list_str = str(item.get("value", ""))
             break
     return split_stock_list(stock_list_str)
 
 
-def _write_watchlist_codes(service: SystemConfigService, codes: list) -> None:
-    """Persist stock codes to STOCK_LIST as-is (no normalization)."""
+def _write_watchlist_codes(service: SystemConfigService, codes: list, list_name: Optional[str] = None) -> None:
+    """Persist watchlist codes as-is (no normalization)."""
+    key = _watchlist_env_key(list_name)
     config_data = service.get_config(include_schema=False)
     config_version = config_data.get("config_version", "")
     service.update(
         config_version=config_version,
-        items=[{"key": "STOCK_LIST", "value": ",".join(codes)}],
+        items=[{"key": key, "value": ",".join(codes)}],
         mask_token="******",
         reload_now=True,
     )
+
+
+def _list_named_watchlists(service: SystemConfigService) -> list:
+    """Enumerate configured named watchlists (``WATCHLIST_<NAME>`` keys)."""
+    config_data = service.get_config(include_schema=False)
+    named = []
+    for item in config_data.get("items", []):
+        key = str(item.get("key", ""))
+        if not key.startswith("WATCHLIST_"):
+            continue
+        name = key[len("WATCHLIST_"):].lower()
+        codes = split_stock_list(str(item.get("value", "")))
+        named.append({"name": name, "key": key, "count": len(codes)})
+    named.sort(key=lambda x: x["name"])
+    return named
 
 
 # Stock code validation patterns (aligned with frontend validateStockCode)
@@ -329,16 +372,43 @@ async def parse_import(request: Request) -> ExtractFromImageResponse:
     description="返回当前 STOCK_LIST 配置中的所有股票代码。",
 )
 def get_watchlist(
+    list_name: Optional[str] = None,
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> WatchlistResponse:
     try:
-        codes = _read_watchlist_codes(service)
-        return WatchlistResponse(stock_codes=codes, message=f"当前自选 {len(codes)} 只股票")
+        codes = _read_watchlist_codes(service, list_name)
+        return WatchlistResponse(stock_codes=codes, message=f"当前自选 {len(codes)} 只股票", list_name=list_name)
     except Exception as e:
         logger.error("获取自选队列失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"error": "internal_error", "message": "获取自选队列失败"},
+        )
+
+
+@router.get(
+    "/watchlist/lists",
+    response_model=WatchlistListsResponse,
+    responses={
+        200: {"description": "已配置的命名自选列表"},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="获取命名自选列表明细",
+    description="返回所有已配置的 WATCHLIST_<NAME> 命名列表及其股票数量；不含默认 STOCK_LIST。",
+)
+def get_watchlist_lists(
+    service: SystemConfigService = Depends(get_system_config_service),
+) -> WatchlistListsResponse:
+    try:
+        named = _list_named_watchlists(service)
+        return WatchlistListsResponse(
+            lists=[WatchlistListInfo(name=n["name"], key=n["key"], count=n["count"]) for n in named]
+        )
+    except Exception as e:
+        logger.error("获取命名自选列表失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": "获取命名自选列表失败"},
         )
 
 
@@ -359,12 +429,16 @@ def add_to_watchlist(
 ) -> WatchlistResponse:
     try:
         validated = _validate_and_normalize_stock_code(request.stock_code)
-        codes = _read_watchlist_codes(service)
+        codes = _read_watchlist_codes(service, request.list_name)
         existing_keys = [_watchlist_match_key(c) for c in codes]
         if _watchlist_match_key(validated) not in existing_keys:
             codes.append(request.stock_code.strip())
-            _write_watchlist_codes(service, codes)
-        return WatchlistResponse(stock_codes=codes, message=f"已加入 {request.stock_code.strip()}")
+            _write_watchlist_codes(service, codes, request.list_name)
+        return WatchlistResponse(
+            stock_codes=codes,
+            message=f"已加入 {request.stock_code.strip()}",
+            list_name=request.list_name,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -392,14 +466,18 @@ def remove_from_watchlist(
 ) -> WatchlistResponse:
     try:
         validated = _validate_and_normalize_stock_code(request.stock_code)
-        codes = _read_watchlist_codes(service)
+        codes = _read_watchlist_codes(service, request.list_name)
         existing_keys = [_watchlist_match_key(c) for c in codes]
         requested_key = _watchlist_match_key(validated)
         if requested_key in existing_keys:
             idx = existing_keys.index(requested_key)
             codes.pop(idx)
-            _write_watchlist_codes(service, codes)
-        return WatchlistResponse(stock_codes=codes, message=f"已移除 {request.stock_code.strip()}")
+            _write_watchlist_codes(service, codes, request.list_name)
+        return WatchlistResponse(
+            stock_codes=codes,
+            message=f"已移除 {request.stock_code.strip()}",
+            list_name=request.list_name,
+        )
     except HTTPException:
         raise
     except Exception as e:

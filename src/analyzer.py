@@ -3966,6 +3966,8 @@ class GeminiAnalyzer:
                 volume_change_ratio=context.get('volume_change_ratio'),
             )
             consistency_notes = trend.get('prompt_consistency_notes', [])
+            kdj = trend.get('kdj') or {}
+            boll = trend.get('boll') or {}
             if use_legacy_default_prompt:
                 bias_warning = "🚨 超过5%，严禁追高！" if trend.get('bias_ma5', 0) > 5 else "✅ 安全范围"
                 prompt += f"""
@@ -3980,6 +3982,8 @@ class GeminiAnalyzer:
 | 量能状态 | {trend.get('volume_status', unknown_text)} | {trend.get('volume_trend', '')} |
 | 系统信号 | {trend.get('buy_signal', unknown_text)} | |
 | 系统评分 | {trend.get('signal_score', 0)}/100 | |
+| KDJ | K={kdj.get('k', 0):.1f} D={kdj.get('d', 0):.1f} J={kdj.get('j', 0):.1f} | {kdj.get('status', '')} |
+| BOLL | 上轨={boll.get('upper', 0):.2f} 中轨={boll.get('mid', 0):.2f} 下轨={boll.get('lower', 0):.2f} | {boll.get('status', '')} |
 
 #### 系统分析理由
 **买入理由**：
@@ -4012,6 +4016,8 @@ class GeminiAnalyzer:
 | 量能状态 | {trend.get('volume_status', unknown_text)} | {trend.get('volume_trend', '')} |
 | 系统信号 | {trend.get('buy_signal', unknown_text)} | |
 | 系统评分 | {trend.get('signal_score', 0)}/100 | |
+| KDJ | K={kdj.get('k', 0):.1f} D={kdj.get('d', 0):.1f} J={kdj.get('j', 0):.1f} | {kdj.get('status', '')} |
+| BOLL | 上轨={boll.get('upper', 0):.2f} 中轨={boll.get('mid', 0):.2f} 下轨={boll.get('lower', 0):.2f} | {boll.get('status', '')} |
 
 #### 系统分析理由
 **支持因素**：

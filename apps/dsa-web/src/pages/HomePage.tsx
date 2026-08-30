@@ -1380,6 +1380,10 @@ const HomePage: React.FC = () => {
           onHistoryItemClick={handleHistoryItemClick}
           onDeleteStock={handleDeleteStock}
           isDeleting={isDeletingStock}
+          watchlistOptions={watchlistState.watchlistOptions}
+          activeListId={watchlistState.activeListId}
+          onSwitchList={watchlistState.onSwitchList}
+          onCreateList={watchlistState.onCreateList}
           className="flex-1 overflow-hidden"
         />
       </div>
@@ -1408,6 +1412,10 @@ const HomePage: React.FC = () => {
       watchlistState.isActioning,
       watchlistState.isLoading,
       watchlistState.removeFromWatchlist,
+      watchlistState.activeListId,
+      watchlistState.onCreateList,
+      watchlistState.onSwitchList,
+      watchlistState.watchlistOptions,
     ],
   );
 

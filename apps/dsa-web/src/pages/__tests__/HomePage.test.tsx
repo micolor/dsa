@@ -525,7 +525,7 @@ describe('HomePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '从自选股移除 600519' }));
 
     await waitFor(() => {
-      expect(systemConfigApi.removeFromWatchlist).toHaveBeenCalledWith('600519');
+      expect(systemConfigApi.removeFromWatchlist).toHaveBeenCalledWith('600519', undefined);
     });
     expect(historyApi.getDetail).not.toHaveBeenCalled();
   });

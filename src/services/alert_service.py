@@ -56,6 +56,14 @@ from src.services.market_light_alerts import (
     normalize_market_alert_parameters,
 )
 from src.services.market_light_service import normalize_market_alert_region
+from src.services.event_alerts import (
+    EVENT_ALERT_TYPES,
+    EVENT_DATA_SOURCES,
+    EventAlert,
+    evaluate_event_alert,
+    event_threshold,
+    normalize_event_alert_parameters,
+)
 from src.services.decision_signal_summary import summarize_decision_signal
 from src.analysis_context_pack_overview import (
     ANALYSIS_CONTEXT_PACK_OVERVIEW_KEY,
@@ -75,7 +83,7 @@ from src.core.trading_calendar import get_market_for_stock, get_open_markets_tod
 
 
 LEGACY_RUNTIME_ALERT_TYPES = frozenset({"price_cross", "price_change_percent", "volume_spike"})
-SYMBOL_ALERT_TYPES = LEGACY_RUNTIME_ALERT_TYPES | TECHNICAL_ALERT_TYPES
+SYMBOL_ALERT_TYPES = LEGACY_RUNTIME_ALERT_TYPES | TECHNICAL_ALERT_TYPES | EVENT_ALERT_TYPES
 SUPPORTED_ALERT_TYPES = SYMBOL_ALERT_TYPES | PORTFOLIO_ALERT_TYPES | MARKET_ALERT_TYPES
 SUPPORTED_TARGET_SCOPES = frozenset({"single_symbol", "watchlist", "portfolio_holdings", "portfolio_account", "market"})
 SUPPORTED_SEVERITIES = frozenset({"info", "warning", "critical"})
@@ -175,6 +183,12 @@ def normalize_alert_parameters(alert_type: str, parameters: Dict[str, Any]) -> D
     if alert_type in MARKET_ALERT_TYPES:
         try:
             return normalize_market_alert_parameters(alert_type, parameters)
+        except ValueError as exc:
+            raise AlertServiceError(str(exc)) from exc
+
+    if alert_type in EVENT_ALERT_TYPES:
+        try:
+            return normalize_event_alert_parameters(alert_type, parameters)
         except ValueError as exc:
             raise AlertServiceError(str(exc)) from exc
 
@@ -306,6 +320,8 @@ class AlertService:
             return await asyncio.to_thread(evaluate_market_light_alert, rule, cache=daily_cache)
         if isinstance(rule, StaticAlertEvaluation):
             return evaluate_static_alert(rule)
+        if isinstance(rule, EventAlert):
+            return await asyncio.to_thread(evaluate_event_alert, rule, cache=daily_cache)
         return self._evaluation_error(rule, f"unsupported runtime alert type: {rule.alert_type}")
 
     async def _evaluate_runtime_payloads(
@@ -815,6 +831,8 @@ class AlertService:
             if rule.alert_type == "market_light_score_drop":
                 return float(rule.parameters.get("min_drop", 0) or 0)
             return None
+        if isinstance(rule, EventAlert):
+            return event_threshold(rule.alert_type, rule.parameters)
         return None
 
     @staticmethod
@@ -829,6 +847,8 @@ class AlertService:
             return "portfolio_risk"
         if isinstance(rule, MarketLightAlert):
             return MARKET_LIGHT_DATA_SOURCE
+        if isinstance(rule, EventAlert):
+            return EVENT_DATA_SOURCES.get(rule.alert_type)
         return None
 
     @classmethod
@@ -1227,6 +1247,14 @@ class AlertService:
                 indicator_params=parameters,
                 metadata=metadata,
             )
+        if data["alert_type"] in EVENT_ALERT_TYPES:
+            return EventAlert(
+                target_scope=data["target_scope"],
+                target=data["target"],
+                alert_type=data["alert_type"],
+                parameters=parameters,
+                metadata=metadata,
+            )
         raise UnsupportedAlertTypeError(f"unsupported alert_type for Alert API: {data['alert_type']}")
 
     @staticmethod
@@ -1437,6 +1465,12 @@ class AlertService:
             return f"{target} market light status {statuses}"
         if alert_type == "market_light_score_drop":
             return f"{target} market light score drop {parameters['min_drop']}"
+        if alert_type == "event_dragon_tiger":
+            return f"{target} 龙虎榜近{int(parameters.get('min_recent_count', 1))}次"
+        if alert_type == "event_capital_flow":
+            return f"{target} 主力净流入≥{float(parameters.get('min_abs_inflow', 0)):,.0f}"
+        if alert_type == "event_announcement":
+            return f"{target} 重要事件≥{int(parameters.get('min_count', 1))}条"
         return f"{target} {alert_type}"
 
     @staticmethod

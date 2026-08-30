@@ -27,7 +27,53 @@ export type StockQuote = {
   updateTime?: string | null;
 };
 
+export type KLineItem = {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+  amount?: number | null;
+  changePercent?: number | null;
+};
+
+export type StockHistory = {
+  stockCode: string;
+  stockName?: string;
+  period: string;
+  data: KLineItem[];
+};
+
 export const stocksApi = {
+  /**
+   * 获取日 K 历史行情（period=daily）。
+   * @param days 获取的天数
+   */
+  async getStockHistory(code: string, days = 60): Promise<StockHistory> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/stocks/${encodeURIComponent(code)}/history`,
+      { params: { period: 'daily', days } },
+    );
+    const d = response.data;
+    const raw = (Array.isArray(d.data) ? d.data : []) as Array<Record<string, unknown>>;
+    return {
+      stockCode: String(d.stock_code ?? code),
+      stockName: d.stock_name == null ? undefined : String(d.stock_name),
+      period: String(d.period ?? 'daily'),
+      data: raw.map((item) => ({
+        date: String(item.date ?? ''),
+        open: Number(item.open ?? 0),
+        high: Number(item.high ?? 0),
+        low: Number(item.low ?? 0),
+        close: Number(item.close ?? 0),
+        volume: item.volume == null ? undefined : Number(item.volume),
+        amount: item.amount == null ? undefined : Number(item.amount),
+        changePercent: item.change_percent == null ? undefined : Number(item.change_percent),
+      })),
+    };
+  },
+
   async getQuote(code: string): Promise<StockQuote> {
     const response = await apiClient.get<Record<string, unknown>>(
       `/api/v1/stocks/${encodeURIComponent(code)}/quote`,

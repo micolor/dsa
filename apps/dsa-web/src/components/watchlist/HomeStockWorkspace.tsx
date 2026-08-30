@@ -25,6 +25,8 @@ import { areStockCodesEquivalent, normalizeStockCode } from '../../utils/stockCo
 import { truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiTextKey, UiTextParams } from '../../i18n/uiText';
+import type { WatchlistOption } from '../../hooks/useWatchlist';
+import { DEFAULT_WATCHLIST_ID } from '../../hooks/useWatchlist';
 
 /** 归一化股票代码键，与 HomePage 的自选/任务 key 保持一致。 */
 function getStockCodeKey(code?: string | null): string {
@@ -93,6 +95,12 @@ interface HomeStockWorkspaceProps {
   onDeleteStock?: (stockCode: string) => Promise<void> | void;
   isDeleting?: boolean;
   className?: string;
+  /** 命名自选列表选项；缺省时隐藏列表切换器（向后兼容）。 */
+  watchlistOptions?: WatchlistOption[];
+  /** 当前激活列表标识（默认列表为 DEFAULT_WATCHLIST_ID）。 */
+  activeListId?: string;
+  onSwitchList?: (listId: string) => Promise<void>;
+  onCreateList?: (name: string) => Promise<void>;
 }
 
 function getTaskStatusLabel(task: TaskInfo | undefined, t: (key: UiTextKey, params?: UiTextParams) => string) {
@@ -295,6 +303,10 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   onDeleteStock,
   isDeleting = false,
   className = '',
+  watchlistOptions,
+  activeListId,
+  onSwitchList,
+  onCreateList,
 }) => {
   const { t } = useUiLanguage();
   const activeTasks = useStockPoolStore(useShallow((state) => state.activeTasks));
@@ -362,6 +374,19 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     setWorkspaceNoticeCode(null);
     await onRemoveFromWatchlist(code);
   }, [onRemoveFromWatchlist]);
+
+  const handleSwitchList = useCallback(async (listId: string) => {
+    setWorkspaceNoticeCode(null);
+    await onSwitchList?.(listId);
+  }, [onSwitchList]);
+
+  const handleCreateList = useCallback(async () => {
+    setWorkspaceNoticeCode(null);
+    const name = window.prompt(t('watchlist.createListPlaceholder'));
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    await onCreateList?.(trimmed);
+  }, [onCreateList, t]);
 
   const renderTabs = (
     <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
@@ -432,6 +457,38 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 </div>
               )}
             />
+            {watchlistOptions && activeListId !== undefined && onSwitchList ? (
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
+                <label className="flex min-w-0 items-center gap-1.5">
+                  <span className="sr-only">{t('watchlist.listSwitcherLabel')}</span>
+                  <select
+                    value={activeListId}
+                    onChange={(event) => void handleSwitchList(event.target.value)}
+                    className="h-8 w-full truncate rounded-lg border border-subtle bg-base/40 px-2 text-xs text-secondary-text"
+                    aria-label={t('watchlist.listSwitcherLabel')}
+                  >
+                    {watchlistOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.name}
+                        {option.isDefault || option.count === 0 ? '' : ` (${option.count})`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {onCreateList ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 w-8 px-0"
+                    onClick={() => void handleCreateList()}
+                    aria-label={t('watchlist.createList')}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-text">
               <span>
                 {t('watchlist.todayCoverage')}{' '}
@@ -555,7 +612,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
           ) : watchlistRows.length === 0 ? (
             <DashboardStateBlock
               compact
-              title={t('watchlist.emptyTitle')}
+              title={activeListId && activeListId !== DEFAULT_WATCHLIST_ID ? t('watchlist.emptyListTitle') : t('watchlist.emptyTitle')}
               description={t('watchlist.emptyDescription')}
             />
           ) : (

@@ -68,6 +68,13 @@ from src.agent.stream_events import stream_event
 from src.agent.tools.registry import ToolRegistry
 from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
 from src.report_language import normalize_report_language
+from src.services.risk_position_engine import (
+    compute_atr,
+    compute_position_size,
+    derive_stop_loss,
+    derive_take_profit,
+    position_size_to_cheng,
+)
 
 if TYPE_CHECKING:
     from src.agent.executor import AgentResult
@@ -1527,6 +1534,10 @@ class AgentOrchestrator:
                 "risk_control": f"止损参考 {sniper.get('stop_loss', '待补充')}",
             }
 
+        # 确定性风险/仓位兜底：LLM 未给出可用止损/止盈/仓位时，用 ATR 计算补全。
+        # 仅在关键值缺失(哨兵值)时填充，不覆盖 LLM 给出的合理值，避免 flip-flop。
+        self._fill_atr_based_risk(ctx, sniper, battle.get("position_strategy"), decision_type)
+
         data_perspective = dashboard_block.get("data_perspective")
         if not isinstance(data_perspective, dict):
             data_perspective = {}
@@ -1592,6 +1603,88 @@ class AgentOrchestrator:
                     opinion.raw_data = payload
                     break
         return payload
+
+    def _fill_atr_based_risk(
+        self,
+        ctx: AgentContext,
+        sniper: Dict[str, Any],
+        position_strategy: Optional[Dict[str, Any]],
+        decision_type: str,
+    ) -> None:
+        """用 ATR 确定性补齐缺失的止损/止盈/仓位。
+
+        仅在 LLM 输出为哨兵值(如 "待补充"/"N/A")或不作数时兜底填充，
+        不覆盖 LLM 已给出的合理数值，避免 flip-flop。无 OHLC 数据则直接跳过。
+        """
+        # 1. 取 OHLC 计算 ATR
+        daily_history = ctx.get_data("daily_history")
+        bars = None
+        if isinstance(daily_history, dict):
+            records = daily_history.get("data")
+            if isinstance(records, list) and records:
+                bars = records
+        elif isinstance(daily_history, list) and daily_history:
+            bars = daily_history
+
+        atr = compute_atr(bars)
+        if atr is None:
+            return
+
+        # 2. 取入场价（优先狙击位，其次实时价/最新收盘）
+        entry = _coerce_level_value(sniper.get("ideal_buy"))
+        if entry is None:
+            realtime = ctx.get_data("realtime_quote")
+            if isinstance(realtime, dict):
+                entry = _coerce_level_value(realtime.get("price"))
+        if entry is None:
+            last_close = self._latest_history_close(bars)
+            entry = last_close
+        if entry is None:
+            return
+
+        # 3. 止损：仅当 LLM 未给出可用止损时补
+        stop_loss = _coerce_level_value(sniper.get("stop_loss"))
+        if stop_loss is None:
+            derived_stop = derive_stop_loss(entry, atr)
+            if derived_stop is not None:
+                sniper["stop_loss"] = derived_stop
+
+        # 4. 止盈：仅当 LLM 未给出可用止盈时补
+        take_profit = _coerce_level_value(sniper.get("take_profit"))
+        if take_profit is None:
+            derived_tp = derive_take_profit(entry, atr)
+            if derived_tp is not None:
+                sniper["take_profit"] = derived_tp
+
+        # 5. 仓位：需组合资金；ctx 中当前无 equity 数据，仅在出现时才计算。
+        #    有组合集中度信号时传入 concentration_scale 压缩；暂无条件，默认 1.0。
+        if not isinstance(position_strategy, dict):
+            return
+        equity = ctx.get_data("equity")
+        if equity is None:
+            return
+        try:
+            equity = float(equity)
+        except (TypeError, ValueError):
+            return
+
+        position_ratio = compute_position_size(entry, atr, equity=equity, concentration_scale=1.0)
+        cheng = position_size_to_cheng(position_ratio)
+        if cheng is not None:
+            position_strategy["suggested_position"] = cheng
+            position_strategy["risk_control"] = (
+                f"止损 {sniper.get('stop_loss', '待补充')}，单笔风险≤1%"
+            )
+
+    def _latest_history_close(self, bars: Any) -> Optional[float]:
+        """取最近一日收盘价作为兜底入场价。"""
+        if not bars:
+            return None
+        if isinstance(bars, list):
+            last = bars[-1]
+            if isinstance(last, dict):
+                return _coerce_level_value(last.get("close"))
+        return None
 
     def _collect_strategy_synthesis(
         self,

@@ -2812,6 +2812,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "NOTIFICATION_EVENT_CHANNELS": {
+        "title": "Event Notification Channels",
+        "description": "Comma-separated route for event-driven facts (dragon-tiger, capital flow, announcements). Empty keeps all configured channels.",
+        "category": "notification",
+        "data_type": "array",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "",
+        "options": [{"label": channel, "value": channel} for channel in ROUTABLE_NOTIFICATION_CHANNELS],
+        "validation": {"allowed_values": list(ROUTABLE_NOTIFICATION_CHANNELS), "delimiter": ","},
+        "display_order": 65,
+        "help_key": "settings.notification.channel_routing",
+        "examples": [
+            "NOTIFICATION_EVENT_CHANNELS=feishu",
+            "NOTIFICATION_EVENT_CHANNELS=",
+        ],
+        "docs": [
+            {
+                "label": "通知渠道与路由",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/notifications.md",
+            },
+        ],
+        "warning_codes": [],
+    },
     "NOTIFICATION_DEDUP_TTL_SECONDS": {
         "title": "Notification Dedup TTL Seconds",
         "description": "Suppress duplicate static notifications with the same dedup key within this TTL. 0 disables deduplication.",

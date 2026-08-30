@@ -339,33 +339,56 @@ export const systemConfigApi = {
   },
 
   /**
-   * 获取自选队列股票代码列表
+   * 获取自选队列股票代码列表。
+   * @param listName 命名列表名；缺省时作用于默认 STOCK_LIST。
    */
-  getWatchlist: async (): Promise<string[]> => {
-    const response = await apiClient.get<Record<string, unknown>>('/api/v1/stocks/watchlist');
+  getWatchlist: async (listName?: string): Promise<string[]> => {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/stocks/watchlist', {
+      params: listName ? { list_name: listName } : undefined,
+    });
     const data = toCamelCase<{ stockCodes: string[] }>(response.data);
     return data.stockCodes || [];
   },
 
   /**
-   * 添加股票到自选队列
+   * 添加股票到自选队列。
+   * @param listName 命名列表名；缺省时作用于默认 STOCK_LIST。
    */
-  addToWatchlist: async (stockCode: string): Promise<string[]> => {
+  addToWatchlist: async (stockCode: string, listName?: string): Promise<string[]> => {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/stocks/watchlist/add', {
       stock_code: stockCode,
+      ...(listName ? { list_name: listName } : {}),
     });
     const data = toCamelCase<{ stockCodes: string[] }>(response.data);
     return data.stockCodes || [];
   },
 
   /**
-   * 从自选队列移除股票
+   * 从自选队列移除股票。
+   * @param listName 命名列表名；缺省时作用于默认 STOCK_LIST。
    */
-  removeFromWatchlist: async (stockCode: string): Promise<string[]> => {
+  removeFromWatchlist: async (stockCode: string, listName?: string): Promise<string[]> => {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/stocks/watchlist/remove', {
       stock_code: stockCode,
+      ...(listName ? { list_name: listName } : {}),
     });
     const data = toCamelCase<{ stockCodes: string[] }>(response.data);
     return data.stockCodes || [];
   },
+
+  /**
+   * 获取已配置的命名自选列表明细（不含默认 STOCK_LIST）。
+   */
+  getWatchlistLists: async (): Promise<WatchlistSetInfo[]> => {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/stocks/watchlist/lists');
+    const data = toCamelCase<{ lists: WatchlistSetInfo[] }>(response.data);
+    return data.lists || [];
+  },
 };
+
+/** 单个命名自选列表的摘要（来自 GET /watchlist/lists）。 */
+export interface WatchlistSetInfo {
+  key: string;
+  name: string;
+  count: number;
+}

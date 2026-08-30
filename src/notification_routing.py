@@ -39,6 +39,11 @@ NOTIFICATION_ROUTE_CONFIGS: Dict[str, Dict[str, str]] = {
         "config_attr": "notification_alert_channels",
         "description": "Routes event-driven alert notifications.",
     },
+    "event": {
+        "env_key": "NOTIFICATION_EVENT_CHANNELS",
+        "config_attr": "notification_event_channels",
+        "description": "Routes event-driven facts (dragon-tiger, capital flow, announcements) notifications.",
+    },
     "system_error": {
         "env_key": "NOTIFICATION_SYSTEM_ERROR_CHANNELS",
         "config_attr": "notification_system_error_channels",

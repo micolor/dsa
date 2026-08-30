@@ -37,6 +37,8 @@ class TrendStatus(BaseModel):
     ma_alignment: Optional[str] = None
     is_bullish: Optional[bool] = None
     trend_score: Optional[Union[int, float, str]] = None
+    kdj: Optional[dict] = None
+    boll: Optional[dict] = None
 
 
 class PricePosition(BaseModel):
@@ -77,6 +79,8 @@ class DataPerspective(BaseModel):
     price_position: Optional[PricePosition] = None
     volume_analysis: Optional[VolumeAnalysis] = None
     chip_structure: Optional[ChipStructure] = None
+    kdj: Optional[dict] = None
+    boll: Optional[dict] = None
 
 
 class Intelligence(BaseModel):

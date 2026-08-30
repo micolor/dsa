@@ -998,6 +998,20 @@ class StockAnalysisPipeline:
                 'signal_score': trend_result.signal_score,
                 'signal_reasons': trend_result.signal_reasons,
                 'risk_factors': trend_result.risk_factors,
+                'kdj': {
+                    'k': trend_result.kdj_k,
+                    'd': trend_result.kdj_d,
+                    'j': trend_result.kdj_j,
+                    'status': trend_result.kdj_status.value,
+                    'signal': trend_result.kdj_signal,
+                },
+                'boll': {
+                    'upper': trend_result.boll_upper,
+                    'mid': trend_result.boll_mid,
+                    'lower': trend_result.boll_lower,
+                    'status': trend_result.boll_status.value,
+                    'signal': trend_result.boll_signal,
+                },
             }
 
         # Issue #234：盘中分析使用实时 OHLC 与趋势 MA 覆盖 today。

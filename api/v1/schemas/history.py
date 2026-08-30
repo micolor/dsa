@@ -390,6 +390,7 @@ class WatchlistRequest(BaseModel):
     """自选队列操作请求"""
 
     stock_code: str = Field(..., description="股票代码", min_length=1)
+    list_name: Optional[str] = Field(None, description="目标自选列表名；为空时作用于默认 STOCK_LIST")
 
 
 class WatchlistResponse(BaseModel):
@@ -397,6 +398,21 @@ class WatchlistResponse(BaseModel):
 
     stock_codes: List[str] = Field(default_factory=list, description="当前自选队列股票代码列表")
     message: str = Field(..., description="操作结果描述")
+    list_name: Optional[str] = Field(None, description="本次操作作用的列表名；为空表示默认 STOCK_LIST")
+
+
+class WatchlistListInfo(BaseModel):
+    """单个命名自选列表的摘要。"""
+
+    name: str = Field(..., description="列表名")
+    key: str = Field(..., description="配置项键名")
+    count: int = Field(0, description="列表内股票数量")
+
+
+class WatchlistListsResponse(BaseModel):
+    """命名自选列表明细。"""
+
+    lists: List[WatchlistListInfo] = Field(default_factory=list, description="已配置的命名列表")
 
 
 class RunDiagnosticComponent(BaseModel):

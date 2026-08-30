@@ -7,6 +7,7 @@ import { ReportDetails } from './ReportDetails';
 import { ReportDiagnostics } from './ReportDiagnostics';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
+import { StockPriceChart } from './StockPriceChart';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -67,6 +68,9 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
         isHistory={isHistory}
         watchlist={watchlist}
       />
+
+      {/* 行情图（K 线 + 成交量） */}
+      <StockPriceChart stockCode={meta.stockCode} language={reportLanguage} />
 
       {/* 策略点位区 */}
       <ReportStrategy strategy={strategy} language={reportLanguage} />

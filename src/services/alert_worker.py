@@ -36,6 +36,7 @@ from src.services.alert_service import (
     DRY_RUN_TARGET_TIMEOUT_SECONDS,
     _resolve_stock_trading_day_flags,
 )
+from src.services.event_alerts import EVENT_ALERT_TYPES
 from src.services.decision_signal_service import DecisionSignalService
 from src.services.decision_signal_summary import (
     format_decision_signal_excerpt,
@@ -726,7 +727,8 @@ class AlertWorker:
             content = f"{content}\n\n{signal_excerpt}"
         alert_text = NotificationBuilder.build_simple_alert(title=title, content=content, alert_type="warning")
 
-        return notification_service.send_with_results(alert_text, route_type="alert")
+        route_type = "event" if runtime_rule.rule.alert_type in EVENT_ALERT_TYPES else "alert"
+        return notification_service.send_with_results(alert_text, route_type=route_type)
 
     def _send_notification_safely(self, runtime_rule: RuntimeAlertRule, result: Dict[str, Any]) -> "NotificationDispatchResult":
         try:
