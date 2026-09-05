@@ -6,6 +6,21 @@ interface ValidationResult {
 
 const SUPPORTED_QUERY_CHARACTERS = /^[A-Z0-9.\u3400-\u9FFF\s]+$/;
 
+const FUND_CODE_PATTERN = /^fund:(\d{6})$/;
+
+/**
+ * 是否为显式场外基金前缀：`fund:` + 6 位数字，例如 `fund:003095`。
+ * 大小写均接受，归一化后一律为小写前缀。
+ */
+export const isFundQuery = (value: string): boolean =>
+  FUND_CODE_PATTERN.test(value.trim().toLowerCase());
+
+/** 归一化后的基金标记（小写前缀），例如 `fund:006229`；非法输入返回空串。 */
+export const canonicalFundCode = (value: string): string => {
+  const match = FUND_CODE_PATTERN.exec(value.trim().toLowerCase());
+  return match ? `fund:${match[1]}` : '';
+};
+
 const STOCK_CODE_PATTERNS = [
   /^\d{6}$/, // A-share 6-digit code
   /^(SH|SZ|BJ)\d{6}$/, // A-share code with exchange prefix
@@ -22,6 +37,9 @@ const STOCK_CODE_PATTERNS = [
  * Check whether the input looks like a stock code.
  */
 export const looksLikeStockCode = (value: string): boolean => {
+  if (isFundQuery(value)) {
+    return true;
+  }
   const normalized = value.trim().toUpperCase();
   return STOCK_CODE_PATTERNS.some((regex) => regex.test(normalized));
 };
@@ -30,12 +48,18 @@ export const looksLikeStockCode = (value: string): boolean => {
  * Validate common A-share, HK, US, JP, and KR stock code formats.
  */
 export const validateStockCode = (value: string): ValidationResult => {
-  const normalized = value.trim().toUpperCase();
+  const trimmed = value.trim();
 
-  if (!normalized) {
-    return { valid: false, message: '请输入股票代码', normalized };
+  if (!trimmed) {
+    return { valid: false, message: '请输入股票代码', normalized: '' };
   }
 
+  // 基金标记单独归一化：保留小写 `fund:` 前缀，并非从大写化后的股票代码。
+  if (isFundQuery(trimmed)) {
+    return { valid: true, normalized: canonicalFundCode(trimmed) };
+  }
+
+  const normalized = trimmed.toUpperCase();
   const valid = looksLikeStockCode(normalized);
 
   return {

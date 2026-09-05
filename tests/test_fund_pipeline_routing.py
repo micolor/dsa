@@ -11,6 +11,9 @@ def test_report_type_has_fund():
 
 def test_route_marker():
     assert is_fund_code("fund:003095") is True
+    # 大小写不敏感：async 任务队列会经 normalize_stock_code 大写化前缀（FUND:…），
+    # pipeline 仍须将其判为基金，而非当作股票代码。
+    assert is_fund_code("FUND:003095") is True
     assert is_fund_code("600519") is False
 
 

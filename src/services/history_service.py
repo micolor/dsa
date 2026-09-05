@@ -979,6 +979,26 @@ class HistoryService:
         except (TypeError, ValueError):
             return str(value)
 
+    @staticmethod
+    def _fund_num(value: Any) -> str:
+        """普通数值（持股数/市值/净资产等），保留两位小数并加千分位。"""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value):,.2f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _fund_pct_plain(value: Any) -> str:
+        """东财解析出的占比（如 pct_of_nav=10.39）本身就是百分数值，不再乘 100。"""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value):.1f}%"
+        except (TypeError, ValueError):
+            return str(value)
+
     def _generate_fund_markdown(
         self,
         result: AnalysisResult,
@@ -1037,6 +1057,50 @@ class HistoryService:
             "---",
             "",
         ]
+
+        # 十大重仓股 + 资产配置：来自东财 F10，仅做信息展示，不作任何买卖判断。
+        holdings = dashboard.get("holdings") or []
+        alloc = dashboard.get("asset_allocation")
+        if alloc:
+            alloc_date = self._escape_md(str(alloc.get("report_date", "")))
+            lines.extend([
+                "### 🧭 资产配置",
+                "",
+                f"> 报告期: {alloc_date or 'N/A'}",
+                "",
+                "| 类别 | 占净值比例 |",
+                "|------|-----------|",
+                f"| 股票 | **{self._fund_pct_plain(alloc.get('stock_pct'))}** |",
+                f"| 债券 | **{self._fund_pct_plain(alloc.get('bond_pct'))}** |",
+                f"| 现金 | **{self._fund_pct_plain(alloc.get('cash_pct'))}** |",
+                f"| 净资产 | {self._fund_num(alloc.get('net_asset'))} 亿元 |",
+                "",
+                "---",
+                "",
+            ])
+        if holdings:
+            lines.extend([
+                "### 📦 十大重仓股",
+                "",
+                "| 排名 | 股票 | 占净值比例 | 持股(万股) | 市值(万元) |",
+                "|------|------|-----------|-----------|-----------|",
+            ])
+            for h in holdings:
+                name_stock = self._escape_md(str(h.get("stock_name", "") or ""))
+                stock_code = self._escape_md(str(h.get("stock_code", "") or ""))
+                stock = f"{name_stock} ({stock_code})".strip()
+                lines.append(
+                    f"| {h.get('rank')} | {stock} | "
+                    f"{self._fund_pct_plain(h.get('pct_of_nav'))} | "
+                    f"{self._fund_num(h.get('share_count'))} | "
+                    f"{self._fund_num(h.get('market_value'))} |"
+                )
+            lines.extend([
+                "",
+                "---",
+                "",
+            ])
+
         if summary:
             lines.extend([
                 "### 💬 分析摘要",

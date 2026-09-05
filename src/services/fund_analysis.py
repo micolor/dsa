@@ -16,6 +16,34 @@ def _risk_grade(mdd, vol):
         return "中"
     return "低"
 
+def _holdings_to_dicts(holdings) -> list:
+    """把 FundProfile.holdings（FundHolding 列表）序列化为可存储字典。"""
+    return [
+        {
+            "rank": h.rank,
+            "stock_code": h.stock_code,
+            "stock_name": h.stock_name,
+            "pct_of_nav": h.pct_of_nav,
+            "share_count": h.share_count,
+            "market_value": h.market_value,
+        }
+        for h in holdings
+    ]
+
+
+def _alloc_to_dict(a) -> Optional[dict]:
+    """把 FundProfile.asset_allocation（FundAssetAllocation）序列化为字典。"""
+    if a is None:
+        return None
+    return {
+        "report_date": a.report_date,
+        "stock_pct": a.stock_pct,
+        "bond_pct": a.bond_pct,
+        "cash_pct": a.cash_pct,
+        "net_asset": a.net_asset,
+    }
+
+
 def build_fund_report(fund: FundProfile, risk_free: float = 0.02) -> dict:
     latest = fund.nav_history[-1] if fund.nav_history else None
     m = {
@@ -50,6 +78,8 @@ def build_fund_report(fund: FundProfile, risk_free: float = 0.02) -> dict:
         "summary": summary,
         "metrics": m, "latest_nav": latest.unit_nav if latest else None,
         "not_investment_advice": True,
+        "holdings": _holdings_to_dicts(fund.holdings),
+        "asset_allocation": _alloc_to_dict(fund.asset_allocation),
     }
 
 def fmt(x: Optional[float]) -> str:
@@ -92,5 +122,7 @@ def map_fund_report_to_report_result(
             "metrics": report.get("metrics"),
             "latest_nav": report.get("latest_nav"),
             "not_investment_advice": True,
+            "holdings": report.get("holdings"),
+            "asset_allocation": report.get("asset_allocation"),
         },
     )

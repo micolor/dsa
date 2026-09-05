@@ -237,6 +237,12 @@ def _resolve_and_normalize_input(raw_value: str) -> str:
     if not text:
         return ""
 
+    # 显式场外基金前缀 fund:<6位代码>：直接透传（不当作股票代码去解析）。
+    # 后续 pipeline 依 is_fund_code 路由到基金净值体检链路；归一化为小写前缀。
+    fund_match = re.fullmatch(r"fund:(\d{6})", text, re.IGNORECASE)
+    if fund_match:
+        return f"fund:{fund_match.group(1)}"
+
     if is_code_like(text):
         return resolve_index_stock_code_for_analysis(text)
 

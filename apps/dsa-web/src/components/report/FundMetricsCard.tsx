@@ -23,6 +23,21 @@ interface FundDashboard {
   };
   latestNav?: number | string;
   notInvestmentAdvice?: boolean;
+  holdings?: Array<{
+    rank?: number | string;
+    stockCode?: string;
+    stockName?: string;
+    pctOfNav?: number | string;
+    shareCount?: number | string;
+    marketValue?: number | string;
+  }>;
+  assetAllocation?: {
+    reportDate?: string;
+    stockPct?: number | string;
+    bondPct?: number | string;
+    cashPct?: number | string;
+    netAsset?: number | string;
+  };
 }
 
 /** 读取成有限数值，非法值统一回退为 null，避免 NaN/Infinity 污染展示。 */
@@ -64,10 +79,23 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
   // getDetail 会把整个响应（含 rawResult.dashboard）做 deep camel 转换，
   // 因此这里读取 camelCase 键（return1M/maxDrawdown/latestNav/notInvestmentAdvice）。
   const latestNav = toFiniteNumber(raw?.latestNav);
+  const holdings = raw?.holdings ?? [];
+  const assetAllocation = raw?.assetAllocation;
 
   const percent = (value: unknown): string => {
     const numeric = toFiniteNumber(value);
     return numeric === null ? text.noValue : `${(numeric * 100).toFixed(1)}%`;
+  };
+
+  // 东财解析出的占比（pctOfNav / stockPct 等）本身已是百分数值（如 10.39），不再乘 100。
+  const percentRaw = (value: unknown): string => {
+    const numeric = toFiniteNumber(value);
+    return numeric === null ? text.noValue : `${numeric.toFixed(1)}%`;
+  };
+
+  const num = (value: unknown): string => {
+    const numeric = toFiniteNumber(value);
+    return numeric === null ? text.noValue : numeric.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
   };
 
   const sharpe = toFiniteNumber(metrics.sharpe);
@@ -124,6 +152,61 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
           </div>
         ))}
       </div>
+        {assetAllocation && (
+          <div className="mt-4" data-testid="fund-asset-allocation">
+            <p className="label-uppercase mb-2">{text.assetAllocation}</p>
+            <p className="mb-2 text-xs text-muted-text">
+              {text.reportDate}: {assetAllocation.reportDate || text.noValue}
+            </p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: text.assetStock, unit: '%', value: percentRaw(assetAllocation.stockPct) },
+                { label: text.assetBond, unit: '%', value: percentRaw(assetAllocation.bondPct) },
+                { label: text.assetCash, unit: '%', value: percentRaw(assetAllocation.cashPct) },
+                { label: text.netAsset, unit: text.oneHundredMillion, value: num(assetAllocation.netAsset) },
+              ].map((row) => (
+                <div key={row.label} className="rounded-lg border border-subtle p-3">
+                  <p className="label-uppercase">{row.label}</p>
+                  <p className="mt-1 font-mono font-semibold text-foreground">
+                    {row.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {holdings.length > 0 && (
+          <div className="mt-4" data-testid="fund-holdings">
+            <p className="label-uppercase mb-2">{text.topHoldings}</p>
+            <div className="overflow-x-auto rounded-lg border border-subtle">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-subtle bg-muted/30 text-left label-uppercase">
+                    <th className="px-3 py-2">{text.holdingsRank}</th>
+                    <th className="px-3 py-2">{text.holdingsStock}</th>
+                    <th className="px-3 py-2">{text.percentOfNav}</th>
+                    <th className="px-3 py-2">{text.shareCount}</th>
+                    <th className="px-3 py-2">{text.marketValue}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdings.map((h, idx) => (
+                    <tr key={`${h.stockCode}-${idx}`} className="border-b border-subtle last:border-0">
+                      <td className="px-3 py-2 font-mono">{toFiniteNumber(h.rank) ?? text.noValue}</td>
+                      <td className="px-3 py-2">
+                        {h.stockName || text.noValue}
+                        {h.stockCode ? <span className="ml-1 font-mono text-muted-text">({h.stockCode})</span> : null}
+                      </td>
+                      <td className="px-3 py-2 font-mono">{percentRaw(h.pctOfNav)}</td>
+                      <td className="px-3 py-2 font-mono">{num(h.shareCount)}</td>
+                      <td className="px-3 py-2 font-mono">{num(h.marketValue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         {shouldShowDisclaimer && (
           <p className="mt-4 rounded-lg border border-subtle bg-muted/30 px-3 py-2 text-xs text-muted-text" data-testid="fund-disclaimer">
             {text.fundDisclaimer}

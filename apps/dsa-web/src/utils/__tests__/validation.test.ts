@@ -28,3 +28,30 @@ describe('stock code validation', () => {
     }
   );
 });
+
+describe('off-exchange fund query (fund: prefix)', () => {
+  test.each([
+    ['fund:006229', 'fund:006229'],
+    ['FUND:006229', 'fund:006229'],
+    ['fund:003095', 'fund:003095'],
+  ])('accepts and normalizes fund query %s', (input, normalized) => {
+    expect(looksLikeStockCode(input)).toBe(true);
+    expect(validateStockCode(input)).toEqual({
+      valid: true,
+      normalized,
+    });
+    expect(isObviouslyInvalidStockQuery(input)).toBe(false);
+  });
+
+  test.each(['fund:', 'fund:12345', 'fund:006229.XX', 'fund:abc'])(
+    'rejects malformed fund-like query %s',
+    (input) => {
+      expect(validateStockCode(input).valid).toBe(false);
+    }
+  );
+
+  test('keeps lowercase fund prefix (backend is_fund_code requires lowercase startswith)', () => {
+    // 后端路由依据 is_fund_code("fund:…") 的小写前缀判定，前端不得将其大写化。
+    expect(validateStockCode('FUND:006229').normalized).toBe('fund:006229');
+  });
+});
