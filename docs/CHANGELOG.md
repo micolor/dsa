@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 信号后验自动化：每日自动评估决策信号与 skill 意见后验
+- [新功能] Skill 表现聚合 API（/decision-signals/skill-outcomes/*）与 Web 面板
 - [新功能] 管线自愈与失败告警：调度分析失败时主动推送系统告警（复用 system_error 路由，未配置回退报告主渠道，同类型当日去重一次）、设置中心「系统设置」调度卡片补充展示上次失败时间与连续失败次数、数据源连续失败达到阈值进入短期熔断并通知一次（熔断阈值与恢复冷却可配置为 `DATA_SOURCE_QUARANTINE_THRESHOLD` / `DATA_SOURCE_QUARANTINE_RECOVERY_SECONDS`，默认 3 / 300，不改变现状）、跨发行日自动补跑（`RUNTIME_BACKFILL_ENABLED` / `RUNTIME_BACKFILL_MAX_DAYS`，默认开 / 1）
 - [文档] `.env.example` 补管线自愈相关开关说明
 - [新功能] 告警中心新增「事件」页：从既有触发历史接口拉取最新一页（接口 page_size 上限 100）在客户端折叠出 `dragon_tiger` / `capital_flow` / `stock_events` 三类事件驱动记录，以卡片列表展示事件来源标签、标的、观察值/阈值/状态与诊断事实（龙虎榜上榜次数、主力净流入金额自动按万/亿格式化、重要公告条数）；纯前端实现，不改触发历史数据契约、不加 data_source 过滤参数，未配置事件渠道时该页为空态不报错；新增 `EventFactList`/`eventFacts` 组件与中英文案

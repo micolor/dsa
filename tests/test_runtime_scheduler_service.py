@@ -399,6 +399,7 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             schedule_times=["18:00"],
             agent_event_monitor_enabled=True,
             agent_event_monitor_interval_minutes=7,
+            signal_outcome_auto_eval_enabled=False,
         )
 
         service = RuntimeSchedulerService(config_provider=lambda: config)

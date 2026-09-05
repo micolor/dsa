@@ -1210,6 +1210,8 @@ class Config:
     # 失败任务运行回填是否启用及最大回填天数
     runtime_backfill_enabled: bool = True
     runtime_backfill_max_days: int = 1
+    # 是否启用每日信号后验自动评估（决策信号 + skill 意见）
+    signal_outcome_auto_eval_enabled: bool = True
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2190,6 +2192,9 @@ class Config:
             ),
             runtime_backfill_enabled=os.getenv('RUNTIME_BACKFILL_ENABLED', 'true').lower() != 'false',
             runtime_backfill_max_days=int(os.getenv('RUNTIME_BACKFILL_MAX_DAYS', '1')),
+            signal_outcome_auto_eval_enabled=(
+                os.getenv('SIGNAL_OUTCOME_AUTO_EVAL_ENABLED', 'true').lower() != 'false'
+            ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=parse_env_int(os.getenv('WEBUI_PORT'), 8000, field_name='WEBUI_PORT', minimum=1, maximum=65535),

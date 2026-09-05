@@ -22,6 +22,10 @@ import type {
   DecisionSignalReassessBlockedError,
   DecisionSignalReassessResponse,
   DecisionSignalStatusUpdateRequest,
+  SkillOpinionOutcomeRunRequest,
+  SkillOpinionOutcomeRunResponse,
+  SkillOpinionPerformanceBucket,
+  SkillOpinionPerformanceStatsResponse,
 } from '../types/decisionSignals';
 
 function omitUndefined(input: Record<string, unknown>): Record<string, unknown> {
@@ -174,6 +178,39 @@ function toDecisionSignalOutcomeStatsResponse(data: Record<string, unknown>): De
     response.profileCalibration = undefined;
   }
   return response;
+}
+
+function toSkillOpinionPerformanceStatsResponse(data: Record<string, unknown>): SkillOpinionPerformanceStatsResponse {
+  const response = toCamelCase<SkillOpinionPerformanceStatsResponse>(data);
+  response.buckets = Array.isArray(data.buckets)
+    ? data.buckets.map((bucket) => toCamelCase<SkillOpinionPerformanceBucket>(bucket as Record<string, unknown>))
+    : [];
+  return response;
+}
+
+function toSkillOpinionOutcomeRunResponse(data: Record<string, unknown>): SkillOpinionOutcomeRunResponse {
+  return toCamelCase<SkillOpinionOutcomeRunResponse>(data);
+}
+
+function toSkillOutcomeStatsParams(
+  params: { skillId?: string; skillIds?: string[]; horizons?: string[] } = {},
+): Record<string, string | string[]> {
+  return omitUndefined({
+    skill_id: params.skillId,
+    skill_ids: params.skillIds,
+    horizons: params.horizons,
+  }) as Record<string, string | string[]>;
+}
+
+function toSnakeSkillOutcomeRunPayload(payload: SkillOpinionOutcomeRunRequest): Record<string, unknown> {
+  return omitUndefined({
+    sample_id: payload.sampleId,
+    analysis_history_id: payload.analysisHistoryId,
+    skill_id: payload.skillId,
+    stock_code: payload.stockCode,
+    horizons: payload.horizons,
+    limit: payload.limit,
+  });
 }
 
 function toDecisionSignalFeedbackItem(data: Record<string, unknown>): DecisionSignalFeedbackItem {
@@ -389,6 +426,26 @@ export const decisionSignalsApi = {
       },
     });
     return toDecisionSignalOutcomeStatsResponse(response.data);
+  },
+
+  async getSkillOutcomeStats(
+    params: { skillId?: string; skillIds?: string[]; horizons?: string[] } = {},
+  ): Promise<SkillOpinionPerformanceStatsResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/decision-signals/skill-outcomes/stats', {
+      params: toSkillOutcomeStatsParams(params),
+      paramsSerializer: {
+        serialize: serializeRepeatedQueryParams,
+      },
+    });
+    return toSkillOpinionPerformanceStatsResponse(response.data);
+  },
+
+  async runSkillOutcomes(params: SkillOpinionOutcomeRunRequest): Promise<SkillOpinionOutcomeRunResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(
+      '/api/v1/decision-signals/skill-outcomes/run',
+      toSnakeSkillOutcomeRunPayload(params),
+    );
+    return toSkillOpinionOutcomeRunResponse(response.data);
   },
 
   async getSignalOutcomes(signalId: number): Promise<DecisionSignalOutcomeListResponse> {

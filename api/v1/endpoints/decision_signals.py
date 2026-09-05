@@ -25,6 +25,9 @@ from api.v1.schemas.decision_signals import (
     DecisionSignalReassessErrorResponse,
     DecisionSignalReassessResponse,
     DecisionSignalStatusUpdateRequest,
+    SkillOpinionOutcomeRunRequest,
+    SkillOpinionOutcomeRunResponse,
+    SkillOpinionPerformanceStatsResponse,
 )
 from src.auth import COOKIE_NAME
 from src.services.decision_signal_service import (
@@ -40,6 +43,8 @@ from src.services.decision_signal_reassess_service import (
     DecisionSignalUnsupportedReportSnapshotError,
     DecisionSignalUnsupportedReportTypeError,
 )
+from src.services.skill_opinion_outcome_service import SkillOpinionOutcomeService
+from src.services.skill_opinion_performance_service import SkillOpinionPerformanceService
 
 
 logger = logging.getLogger(__name__)
@@ -539,3 +544,74 @@ def update_status(signal_id: int, request: DecisionSignalStatusUpdateRequest) ->
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Update decision signal status failed", exc)
+
+
+@router.post(
+    "/skill-outcomes/run",
+    response_model=SkillOpinionOutcomeRunResponse,
+    responses={
+        **AUTH_RESPONSE,
+        400: {"model": ErrorResponse, "description": "请求字段非法"},
+        422: {"model": ErrorResponse, "description": "请求体校验失败"},
+        500: {"model": ErrorResponse, "description": "后验计算失败"},
+    },
+    summary="触发 skill 意见后验评估",
+    description=(
+        "显式触发 skill-level outcome 计算；默认只处理缺失/待评估 outcome key，"
+        "limit 控制单次最多评估的 key 数。"
+    ),
+    operation_id="runSkillOpinionOutcomes",
+)
+def run_skill_outcomes(request: SkillOpinionOutcomeRunRequest) -> SkillOpinionOutcomeRunResponse:
+    service = SkillOpinionOutcomeService()
+    try:
+        return SkillOpinionOutcomeRunResponse(
+            **service.run_outcomes(
+                sample_id=request.sample_id,
+                analysis_history_id=request.analysis_history_id,
+                skill_id=request.skill_id,
+                stock_code=request.stock_code,
+                horizons=request.horizons,
+                limit=request.limit,
+            )
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Run skill opinion outcomes failed", exc)
+
+
+@router.get(
+    "/skill-outcomes/stats",
+    response_model=SkillOpinionPerformanceStatsResponse,
+    responses={
+        **AUTH_RESPONSE,
+        400: {"model": ErrorResponse, "description": "查询参数非法"},
+        422: {"model": ErrorResponse, "description": "查询参数校验失败"},
+        500: {"model": ErrorResponse, "description": "统计失败"},
+    },
+    summary="查询 skill 意见后验统计",
+    description=(
+        "按 skill / horizon 聚合命中率统计；低于最小评估样本数（30）的 bucket "
+        "标记为 observational（sample_sufficient=false），hit_rate_pct 为 null。"
+    ),
+    operation_id="getSkillOpinionOutcomeStats",
+)
+def get_skill_outcome_stats(
+    skill_id: Optional[str] = Query(None),
+    skill_ids: Optional[List[str]] = Query(None),
+    horizons: Optional[List[str]] = Query(None),
+) -> SkillOpinionPerformanceStatsResponse:
+    service = SkillOpinionPerformanceService()
+    try:
+        return SkillOpinionPerformanceStatsResponse(
+            **service.get_stats(
+                skill_id=skill_id,
+                skill_ids=skill_ids,
+                horizons=horizons,
+            )
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get skill opinion outcome stats failed", exc)

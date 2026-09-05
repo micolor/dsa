@@ -327,3 +327,49 @@ export interface DecisionSignalFeedbackRequest {
   note?: string | null;
   source?: DecisionSignalFeedbackSource;
 }
+
+export interface SkillOpinionPerformanceBucket {
+  skillId: string;
+  horizon: string;
+  engineVersion: string;
+  total: number;
+  pending: number;
+  evaluated: number;
+  observational: number;
+  unable: number;
+  hit: number;
+  miss: number;
+  sampleSufficient: boolean;
+  sampleStatus: string;
+  hitRatePct: number | null;
+  missRatePct: number | null;
+  avgDirectionalReturnPct: number | null;
+  unableRatePct: number | null;
+}
+
+export interface SkillOpinionPerformanceStatsResponse {
+  engineVersion: string;
+  minimumEvaluatedSampleSize: number;
+  buckets: SkillOpinionPerformanceBucket[];
+}
+
+export interface SkillOpinionOutcomeRunRequest {
+  sampleId?: number;
+  analysisHistoryId?: number;
+  skillId?: string;
+  stockCode?: string;
+  horizons?: string[];
+  limit?: number;
+}
+
+export interface SkillOpinionOutcomeRunResponse {
+  engineVersion: string;
+  processedKeys: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  items?: unknown[];
+  errors?: unknown[];
+  limitUnit?: string;
+}

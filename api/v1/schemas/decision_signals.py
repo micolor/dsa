@@ -316,3 +316,75 @@ class DecisionSignalListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class SkillOpinionOutcomeItem(BaseModel):
+    id: int
+    skill_opinion_sample_id: int
+    analysis_history_id: Optional[int] = None
+    stock_code: str
+    skill_id: str
+    signal: Optional[Any] = None
+    horizon: str
+    engine_version: str
+    eval_status: str
+    outcome: Optional[str] = None
+    direction_correct: Optional[bool] = None
+    unable_reason: Optional[str] = None
+    analysis_date: Optional[str] = None
+    start_trade_date: Optional[str] = None
+    end_trade_date: Optional[str] = None
+    start_price: Optional[float] = None
+    end_close: Optional[float] = None
+    stock_return_pct: Optional[float] = None
+    directional_return_pct: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class SkillOpinionOutcomeRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: Optional[int] = Field(None, gt=0)
+    analysis_history_id: Optional[int] = Field(None, gt=0)
+    skill_id: Optional[str] = Field(None, json_schema_extra={"maxLength": 64})
+    stock_code: Optional[str] = Field(None, json_schema_extra={"maxLength": 32})
+    horizons: Optional[List[str]] = None
+    limit: int = Field(100, ge=1, le=500)
+
+
+class SkillOpinionOutcomeRunResponse(BaseModel):
+    items: List[SkillOpinionOutcomeItem] = Field(default_factory=list)
+    processed_keys: int
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    limit_unit: str
+    engine_version: str
+
+
+class SkillOpinionPerformanceBucket(BaseModel):
+    skill_id: str
+    horizon: str
+    engine_version: str
+    total: int
+    pending: int
+    evaluated: int
+    observational: int
+    unable: int
+    hit: int
+    miss: int
+    sample_sufficient: bool
+    sample_status: str
+    hit_rate_pct: Optional[float] = None
+    miss_rate_pct: Optional[float] = None
+    avg_directional_return_pct: Optional[float] = None
+    unable_rate_pct: Optional[float] = None
+
+
+class SkillOpinionPerformanceStatsResponse(BaseModel):
+    engine_version: str
+    minimum_evaluated_sample_size: int
+    buckets: List[SkillOpinionPerformanceBucket] = Field(default_factory=list)

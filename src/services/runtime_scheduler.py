@@ -408,6 +408,7 @@ class RuntimeSchedulerService:
             return self._background_tasks_provider(config)
         tasks = list(self._current_agent_event_monitor_background_tasks(config))
         tasks.extend(self._current_paper_valuation_background_tasks(config))
+        tasks.extend(self._current_signal_outcome_background_tasks(config))
         return tasks
 
     def _current_paper_valuation_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
@@ -431,6 +432,46 @@ class RuntimeSchedulerService:
                     logger.warning("paper daily valuation failed: %s", exc)
 
             cached = {"task": paper_valuation_task, "interval_seconds": interval_seconds}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_signal_outcome_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "signal_outcome_evaluation"
+        if not getattr(config, "signal_outcome_auto_eval_enabled", True):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            interval_seconds = 1800  # 30 min; run_outcomes is idempotent per outcome key
+
+            def signal_outcome_task() -> None:
+                from src.services.skill_opinion_outcome_service import (
+                    SkillOpinionOutcomeService,
+                )
+                from src.services.decision_signal_outcome_service import (
+                    DecisionSignalOutcomeService,
+                )
+
+                try:
+                    SkillOpinionOutcomeService().run_outcomes()
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("skill opinion outcome evaluation failed: %s", exc)
+                try:
+                    DecisionSignalOutcomeService().run_outcomes()
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("decision signal outcome evaluation failed: %s", exc)
+
+            cached = {"task": signal_outcome_task, "interval_seconds": interval_seconds}
             self._background_task_cache[name] = cached
 
         run_immediately = name not in self._background_task_registered_names

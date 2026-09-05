@@ -44,6 +44,7 @@ import type {
   DecisionSignalStatus,
   DecisionProfile,
   DecisionProfileDisplay,
+  SkillOpinionPerformanceStatsResponse,
 } from '../types/decisionSignals';
 import type { Market, StockIndexItem } from '../types/stockIndex';
 import { cn } from '../utils/cn';
@@ -437,6 +438,10 @@ const DecisionSignalsPage: React.FC = () => {
   const [outcomeStats, setOutcomeStats] = useState<DecisionSignalOutcomeStatsResponse | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<ParsedApiError | null>(null);
+  const [skillStats, setSkillStats] = useState<SkillOpinionPerformanceStatsResponse | null>(null);
+  const [skillStatsLoading, setSkillStatsLoading] = useState(true);
+  const [skillStatsError, setSkillStatsError] = useState<ParsedApiError | null>(null);
+  const [skillStatsRunning, setSkillStatsRunning] = useState(false);
   const [stockDraft, setStockDraft] = useState('');
   const [activeStockContext, setActiveStockContext] = useState<StockContext | null>(null);
   const [historyCandidates, setHistoryCandidates] = useState<StockCandidate[]>([]);
@@ -468,6 +473,7 @@ const DecisionSignalsPage: React.FC = () => {
   const [reassessError, setReassessError] = useState<ParsedApiError | null>(null);
   const requestIdRef = useRef(0);
   const statsRequestIdRef = useRef(0);
+  const skillStatsRequestIdRef = useRef(0);
   const latestRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
@@ -581,6 +587,40 @@ const DecisionSignalsPage: React.FC = () => {
     }
   }, []);
 
+  const loadSkillOutcomeStats = useCallback(async () => {
+    const requestId = skillStatsRequestIdRef.current + 1;
+    skillStatsRequestIdRef.current = requestId;
+    setSkillStatsLoading(true);
+    try {
+      const response = await decisionSignalsApi.getSkillOutcomeStats();
+      if (skillStatsRequestIdRef.current !== requestId) return;
+      setSkillStats(response);
+      setSkillStatsError(null);
+    } catch (err) {
+      if (skillStatsRequestIdRef.current !== requestId) return;
+      setSkillStats(null);
+      setSkillStatsError(getParsedApiError(err));
+    } finally {
+      if (skillStatsRequestIdRef.current === requestId) {
+        setSkillStatsLoading(false);
+      }
+    }
+  }, []);
+
+  const handleRunSkillOutcomes = useCallback(async () => {
+    if (skillStatsRunning) return;
+    setSkillStatsRunning(true);
+    try {
+      await decisionSignalsApi.runSkillOutcomes({});
+      await loadSkillOutcomeStats();
+    } catch (err) {
+      const parsed = getParsedApiError(err);
+      setSkillStatsError((current) => parsed ?? current);
+    } finally {
+      setSkillStatsRunning(false);
+    }
+  }, [loadSkillOutcomeStats, skillStatsRunning]);
+
   useEffect(() => {
     void loadSignals();
     return () => {
@@ -594,6 +634,13 @@ const DecisionSignalsPage: React.FC = () => {
       statsRequestIdRef.current += 1;
     };
   }, [loadOutcomeStats]);
+
+  useEffect(() => {
+    void loadSkillOutcomeStats();
+    return () => {
+      skillStatsRequestIdRef.current += 1;
+    };
+  }, [loadSkillOutcomeStats]);
 
   useEffect(() => () => {
     latestRequestIdRef.current += 1;
@@ -1518,6 +1565,109 @@ const DecisionSignalsPage: React.FC = () => {
                   ))}
                 </div>
               ) : null}
+            </div>
+          ) : (
+            <EmptyState
+              className="border-none bg-transparent py-6 shadow-none"
+              title={t('decisionSignals.noReviewedStatsTitle')}
+              description={t('decisionSignals.noReviewedStatsDescription')}
+              icon={<BarChart3 className="h-6 w-6" />}
+            />
+          )}
+        </Card>
+
+        <Card
+          title={t('decisionSignals.skillStatsTitle')}
+          subtitle={t('decisionSignals.skillStatsDescription')}
+          padding="md"
+        >
+          <div className="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <p className="text-sm text-secondary-text">
+              {t('decisionSignals.skillStatsSampleSize')}: {skillStats?.minimumEvaluatedSampleSize ?? '-'}
+            </p>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
+                onClick={() => void loadSkillOutcomeStats()}
+                disabled={skillStatsLoading}
+              >
+                <RefreshCw className={cn('h-4 w-4', skillStatsLoading ? 'animate-spin' : '')} />
+                {t('decisionSignals.skillStatsRefresh')}
+              </button>
+              <button
+                type="button"
+                className="btn-primary inline-flex h-10 items-center justify-center gap-2"
+                onClick={() => void handleRunSkillOutcomes()}
+                disabled={skillStatsLoading || skillStatsRunning}
+              >
+                <Activity className={cn('h-4 w-4', skillStatsRunning ? 'animate-spin' : '')} />
+                {skillStatsRunning
+                  ? t('common.loading')
+                  : t('decisionSignals.skillStatsRun')}
+              </button>
+            </div>
+          </div>
+
+          {skillStatsError ? (
+            <ApiErrorAlert
+              error={{ ...skillStatsError, title: t('decisionSignals.skillStatsErrorTitle') }}
+              actionLabel={t('common.retry')}
+              onAction={() => void loadSkillOutcomeStats()}
+            />
+          ) : skillStatsLoading ? (
+            <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
+          ) : skillStats && skillStats.buckets.length > 0 ? (
+            <div className="space-y-1">
+              <div className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-text">
+                <span>{t('decisionSignals.skillStatsTitle')}</span>
+                <span>{t('decisionSignals.skillStatsPending')}</span>
+                <span>{t('decisionSignals.skillStatsEvaluated')}</span>
+                <span>{t('decisionSignals.statsTotal')}</span>
+                <span>{t('decisionSignals.outcome.hit')}</span>
+                <span>{t('decisionSignals.outcome.miss')}</span>
+                <span>{t('decisionSignals.skillStatsHitRate')}</span>
+                <span>{t('decisionSignals.skillStatsAvgReturn')}</span>
+                <span>{t('decisionSignals.skillStatsSampleStatus')}</span>
+              </div>
+              {skillStats.buckets.map((bucket) => (
+                <div
+                  key={`${bucket.skillId}-${bucket.horizon}`}
+                  className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                >
+                  <span className="min-w-0 truncate font-medium text-foreground">
+                    {bucket.skillId}
+                    <span className="ml-2 text-secondary-text">{bucket.horizon}</span>
+                  </span>
+                  <span className="text-secondary-text" title={t('decisionSignals.skillStatsPending')}>
+                    {bucket.pending}
+                  </span>
+                  <span className="text-secondary-text" title={t('decisionSignals.skillStatsEvaluated')}>
+                    {bucket.evaluated}
+                  </span>
+                  <span className="text-secondary-text" title={t('decisionSignals.statsTotal')}>
+                    {bucket.total}
+                  </span>
+                  <span className="text-success">{bucket.hit}</span>
+                  <span className="text-danger">{bucket.miss}</span>
+                  <span
+                    className={`tabular-nums text-secondary-text ${bucket.sampleSufficient ? '' : 'text-warning'}`}
+                    title={t('decisionSignals.skillStatsHitRate')}
+                  >
+                    {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
+                  </span>
+                  <span className="tabular-nums text-secondary-text" title={t('decisionSignals.skillStatsAvgReturn')}>
+                    {bucket.avgDirectionalReturnPct != null ? `${bucket.avgDirectionalReturnPct.toFixed(1)}%` : '-'}
+                  </span>
+                  <span
+                    className={bucket.sampleSufficient ? 'text-secondary-text' : 'text-warning'}
+                    title={t('decisionSignals.skillStatsSampleStatus')}
+                  >
+                    {bucket.sampleStatus}
+                  </span>
+                </div>
+              ))}
+              <p className="pt-1 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
             </div>
           ) : (
             <EmptyState
