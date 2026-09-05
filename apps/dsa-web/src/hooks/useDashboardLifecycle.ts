@@ -6,7 +6,6 @@ type UseDashboardLifecycleOptions = {
   loadInitialHistory: () => Promise<void>;
   refreshHistory: (silent?: boolean) => Promise<void>;
   refreshHistoryForCompletedTask?: (task: TaskInfo) => Promise<void>;
-  refreshActiveTasks: () => Promise<void>;
   loadStockBar: () => Promise<void>;
   refreshStockBar: () => Promise<void>;
   loadMarketReviewHistory?: () => Promise<void>;
@@ -25,7 +24,6 @@ export function useDashboardLifecycle({
   loadInitialHistory,
   refreshHistory,
   refreshHistoryForCompletedTask,
-  refreshActiveTasks,
   loadStockBar,
   refreshStockBar,
   loadMarketReviewHistory,
@@ -49,8 +47,7 @@ export function useDashboardLifecycle({
     void loadInitialHistory();
     void loadStockBar();
     void loadMarketReviewHistory?.();
-    void refreshActiveTasks();
-  }, [enabled, loadInitialHistory, loadMarketReviewHistory, loadStockBar, refreshActiveTasks]);
+  }, [enabled, loadInitialHistory, loadMarketReviewHistory, loadStockBar]);
 
   useEffect(() => {
     if (!enabled) {
@@ -61,12 +58,11 @@ export function useDashboardLifecycle({
       void refreshHistory(true);
       void refreshStockBar();
       void refreshMarketReviewHistory?.(true);
-      void refreshActiveTasks();
       onDashboardDataRefresh?.();
     }, 30_000);
 
     return () => window.clearInterval(intervalId);
-  }, [enabled, onDashboardDataRefresh, refreshHistory, refreshMarketReviewHistory, refreshStockBar, refreshActiveTasks]);
+  }, [enabled, onDashboardDataRefresh, refreshHistory, refreshMarketReviewHistory, refreshStockBar]);
 
   useEffect(() => {
     if (!enabled) {
@@ -78,14 +74,13 @@ export function useDashboardLifecycle({
         void refreshHistory(true);
         void refreshStockBar();
         void refreshMarketReviewHistory?.(true);
-        void refreshActiveTasks();
         onDashboardDataRefresh?.();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [enabled, onDashboardDataRefresh, refreshHistory, refreshMarketReviewHistory, refreshStockBar, refreshActiveTasks]);
+  }, [enabled, onDashboardDataRefresh, refreshHistory, refreshMarketReviewHistory, refreshStockBar]);
 
   useEffect(() => {
     return () => {
@@ -107,9 +102,6 @@ export function useDashboardLifecycle({
     onTaskCreated: syncTaskCreated,
     onTaskStarted: syncTaskUpdated,
     onTaskProgress: syncTaskUpdated,
-    onConnected: () => {
-      void refreshActiveTasks();
-    },
     onTaskCompleted: (task) => {
       syncTaskUpdated(task);
       onCompletedTaskDataRefreshStarted?.(task);

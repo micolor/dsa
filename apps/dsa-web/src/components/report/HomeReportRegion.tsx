@@ -1,11 +1,10 @@
 import type React from 'react';
-import { memo, useCallback, useMemo } from 'react';
+import { lazy, memo, Suspense, useCallback, useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../common';
 import { DashboardStateBlock } from '../dashboard';
 import { StockHistoryTrendDrawer } from '../history';
 import { MarketReviewReportView } from './MarketReviewReportView';
-import { ReportSummary } from './ReportSummary';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { ParsedApiError } from '../../api/error';
 import { normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -17,6 +16,13 @@ import type {
   StockHistoryFilters,
   StockHistoryRange,
 } from '../../types/analysis';
+
+// ReportSummary 承载 chart 重子树（StockPriceChart -> recharts，vendor-charts 392K）。
+// 它仅在某只个股报告被选中时渲染（首页裸空态不渲染），所以懒加载可把 recharts
+// 从首屏同步 bundle 剥离：空态挂载时完全不拉该 chunk，选报告时才按需加载。
+const ReportSummary = lazy(() =>
+  import('./ReportSummary').then((m) => ({ default: m.ReportSummary })),
+);
 
 export type MarketReviewNotice = {
   variant: 'success' | 'warning' | 'danger';
@@ -259,12 +265,20 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
               onRetry={handleRetry}
             />
           ) : (
-            <ReportSummary
-              data={selectedReport}
-              isHistory
-              onOpenRunFlow={onOpenRunFlow}
-              watchlist={watchlistBlock}
-            />
+            <Suspense
+              fallback={(
+                <div className="flex min-h-[16rem] items-center justify-center">
+                  <DashboardStateBlock title={t('home.loadingReport')} loading />
+                </div>
+              )}
+            >
+              <ReportSummary
+                data={selectedReport}
+                isHistory
+                onOpenRunFlow={onOpenRunFlow}
+                watchlist={watchlistBlock}
+              />
+            </Suspense>
           )}
         </div>
       ) : !marketReviewReport ? (

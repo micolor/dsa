@@ -1,0 +1,20 @@
+# LLMs.txt
+
+> DSA 股票智能分析系统：面向 A 股、港股、美股的多行情数据源抓取与智能分析。仓库: https://github.com/micolor/dsa
+
+## 项目定位
+
+自动完成「数据抓取 → 技术分析 / 新闻检索 → LLM 分析 → 报告生成 → 通知推送」的全链路，覆盖 A 股、港股、美股，支持多数据源适配与跨源一致性对账。
+
+## 关键技术入口
+
+- [主流程入口 main.py](https://github.com/micolor/dsa/blob/main/main.py): 分析任务主入口
+- [FastAPI 服务入口 server.py / api/app.py](https://github.com/micolor/dsa/blob/main/api/app.py): 服务与静态前端托管
+- [Web 前端 apps/dsa-web](https://github.com/micolor/dsa/tree/main/apps/dsa-web): React SPA 前端
+- [桌面端 apps/dsa-desktop](https://github.com/micolor/dsa/tree/main/apps/dsa-desktop): Electron 桌面端
+
+## 数据源
+
+- [多数据源适配 data_provider](https://github.com/micolor/dsa/tree/main/data_provider): 适配与 fallback、跨源一致性对账
+- [数据质量异常仓库 src/repositories/data_quality_discrepancy_repo.py](https://github.com/micolor/dsa/blob/main/src/repositories/data_quality_discrepancy_repo.py): 跨源一致性异常记录
+- [数据源稳定性说明 docs/data-source-stability.md](https://github.com/micolor/dsa/blob/main/docs/data-source-stability.md): 数据源行为与告警说明

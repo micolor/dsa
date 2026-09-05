@@ -64,7 +64,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
           size="sm"
           className="shrink-0 shadow-none text-[10px] font-semibold leading-none"
           style={{
-            color: 'hsl(247 84% 62%)',
+            color: 'hsl(247 84% 72%)',
             borderColor: 'hsl(247 84% 58% / 0.32)',
             backgroundColor: 'hsl(247 84% 58% / 0.1)',
           }}

@@ -612,7 +612,6 @@ const HomePage: React.FC = () => {
     syncTaskCreated,
     syncTaskUpdated,
     syncTaskFailed,
-    refreshActiveTasks,
     removeTask,
     onDashboardDataRefresh: handleDashboardDataRefresh,
     onCompletedTaskDataRefreshStarted: handleCompletedTaskDataRefreshStarted,
@@ -1449,6 +1448,7 @@ const HomePage: React.FC = () => {
 
   return (
     <MotionConfig reducedMotion="user">
+    <h1 className="sr-only">{t('home.pageTitle')}</h1>
     <div
       data-testid="home-dashboard"
       onWheel={handleDashboardWheel}

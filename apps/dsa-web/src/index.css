@@ -349,10 +349,10 @@
   --elevated: 230 22% 12%;
   --hover: 231 20% 16%;
   --secondary-text: 228 16% 72%;
-  --muted-text: 228 10% 56%;
+  --muted-text: 228 10% 61%;
 
-  --color-cyan: hsl(var(--primary));
-  --color-cyan-dim: hsl(var(--primary) / 0.8);
+  --color-cyan: hsl(247 84% 72%);
+  --color-cyan-dim: hsl(247 84% 62% / 0.8);
   --color-cyan-glow: hsl(var(--primary) / 0.4);
   --color-purple: 247 84% 72%;
   --color-purple-dim: 247 84% 62%;
@@ -443,17 +443,17 @@
   --home-mobile-overlay-bg: var(--page-drawer-overlay-bg);
   --home-action-ai-bg: hsl(0 0% 100% / 0.06);
   --home-action-ai-border: hsl(0 0% 100% / 0.12);
-  --home-action-ai-text: hsl(var(--foreground) / 0.85);
+  --home-action-ai-text: hsl(var(--foreground) / 0.92);
   --home-action-ai-hover-bg: hsl(0 0% 100% / 0.12);
   --home-action-report-bg: hsl(0 0% 100% / 0.06);
   --home-action-report-border: hsl(0 0% 100% / 0.12);
-  --home-action-report-text: hsl(var(--foreground) / 0.85);
+  --home-action-report-text: hsl(var(--foreground) / 0.92);
   --home-action-report-hover-bg: hsl(0 0% 100% / 0.12);
   --home-accent-bg: hsl(var(--primary) / 0.1);
   --home-accent-bg-hover: hsl(var(--primary) / 0.18);
   --home-accent-border: hsl(var(--primary) / 0.22);
   --home-accent-border-hover: hsl(var(--primary) / 0.34);
-  --home-accent-text: hsl(var(--primary));
+  --home-accent-text: hsl(247 84% 72%);
   --home-secondary-accent-text: hsl(247 84% 72%);
   --home-title-accent: hsl(247 84% 72%);
   --home-price-up: hsl(0 88% 64%);
