@@ -157,7 +157,9 @@ class TestFetcherSourceOptimization(unittest.TestCase):
 
     @patch("src.config.get_config")
     def test_daily_fallback_tries_akshare_before_tencent(self, mock_get_config):
-        mock_get_config.return_value = SimpleNamespace()
+        mock_get_config.return_value = SimpleNamespace(
+            data_quality_reconciliation_enabled=False,
+        )
         DataFetcherManager.reset_daily_source_health()
         try:
             efinance = MagicMock()
@@ -265,6 +267,7 @@ class TestFetcherSourceOptimization(unittest.TestCase):
             enable_realtime_quote=True,
             realtime_source_priority="efinance,akshare_em,tushare",
             realtime_cache_ttl=600,
+            data_quality_reconciliation_enabled=False,
         )
 
         longbridge = MagicMock()
@@ -412,7 +415,9 @@ class TestFetcherSourceOptimization(unittest.TestCase):
 
     @patch("src.config.get_config")
     def test_daily_source_health_does_not_preconsume_half_open_fallback(self, mock_get_config):
-        mock_get_config.return_value = SimpleNamespace()
+        mock_get_config.return_value = SimpleNamespace(
+            data_quality_reconciliation_enabled=False,
+        )
         DataFetcherManager.reset_daily_source_health()
         try:
             primary = MagicMock()

@@ -995,6 +995,14 @@ class Config:
     newsnow_base_url: str = "https://newsnow.busiyi.world"  # NewsNow HTTP API base URL (数据源侧，不影响 LLM/provider base URL)
     bias_threshold: float = 5.0  # 乖离率阈值（%），超过此值提示不追高
 
+    # === 跨源一致性对账配置 ===
+    # 是否在选源成功后用次选源做跨源比对（价差/交易日/字段缺失）；关闭则零调用零比对
+    data_quality_reconciliation_enabled: bool = True
+    # 两源价差超过该百分比判定为价差异常（%）
+    data_quality_price_diff_threshold_pct: float = 1.0
+    # 两源行情时间相差超过该秒数判定为错日/时间错位（秒）
+    data_quality_date_mismatch_tolerance_seconds: int = 3600
+
     # === Agent 模式配置 ===
     agent_backend: str = "auto"
     agent_generation_backend: str = AUTO_AGENT_BACKEND_ID
@@ -2193,6 +2201,17 @@ class Config:
             data_source_quarantine_threshold=int(os.getenv('DATA_SOURCE_QUARANTINE_THRESHOLD', '3')),
             data_source_quarantine_recovery_seconds=float(
                 os.getenv('DATA_SOURCE_QUARANTINE_RECOVERY_SECONDS', '300')
+            ),
+            # === 跨源一致性对账配置 ===
+            data_quality_reconciliation_enabled=parse_env_bool(
+                os.getenv('DATA_QUALITY_RECONCILIATION_ENABLED', 'true'), default=True,
+            ),
+            data_quality_price_diff_threshold_pct=parse_env_float(
+                os.getenv('DATA_QUALITY_PRICE_DIFF_THRESHOLD_PCT', '1.0'), default=1.0,
+                field_name='DATA_QUALITY_PRICE_DIFF_THRESHOLD_PCT',
+            ),
+            data_quality_date_mismatch_tolerance_seconds=int(
+                os.getenv('DATA_QUALITY_DATE_MISMATCH_TOLERANCE_SECONDS', '3600')
             ),
             runtime_backfill_enabled=os.getenv('RUNTIME_BACKFILL_ENABLED', 'true').lower() != 'false',
             runtime_backfill_max_days=int(os.getenv('RUNTIME_BACKFILL_MAX_DAYS', '1')),

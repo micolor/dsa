@@ -180,6 +180,8 @@ LONGBRIDGE_ACCESS_TOKEN=your_access_token
 
 ## 后续可做的产品化增强
 
+跨源一致性对账已提供（不属于未来可做项）：选源成功后，系统会用配置优先级链里的次选源比对价差、交易日与字段缺失，命中即记录数据质量异常并路由告警。该能力由 `DATA_QUALITY_RECONCILIATION_ENABLED` / `DATA_QUALITY_PRICE_DIFF_THRESHOLD_PCT` / `DATA_QUALITY_DATE_MISMATCH_TOLERANCE_SECONDS` 配置，关闭即停用，不影响既有选源与熔断。以下仍是从产品化角度可继续增强的方向：
+
 1. 数据源 Doctor 页面：展示每个源最近成功时间、失败原因、熔断状态和下一次恢复探测时间。
 2. 一键推荐配置：根据市场选择生成 `.env` 片段，例如“A 股稳定模式”“港美股稳定模式”“免费模式”。
 3. 选股状态面板：直接展示 snapshot/daily source health，让用户知道是 Sina、Efinance、AkShare 还是 Tushare 出问题。

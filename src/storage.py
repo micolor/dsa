@@ -1023,6 +1023,36 @@ class NotificationDeliveryRecord(Base):
     )
 
 
+class DataQualityDiscrepancyRecord(Base):
+    """Cross-source reconciliation discrepancy row.
+
+    Captures a data-quality anomaly detected when the chosen primary source's
+    value disagrees with an alternate source beyond the configured threshold
+    (price diff / trade-date mismatch / missing field). Purely observational:
+    never mutates the chosen value or the source-priority selection.
+    """
+
+    __tablename__ = 'data_quality_discrepancies'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market = Column(String(16), nullable=False, index=True)
+    stock_code = Column(String(32), nullable=False, index=True)
+    issue_type = Column(String(32), nullable=False, index=True)
+    primary_source = Column(String(32), default=None)
+    secondary_source = Column(String(32), default=None)
+    primary_price = Column(Float)
+    secondary_price = Column(Float)
+    price_diff_pct = Column(Float)
+    primary_ts = Column(String(32))
+    secondary_ts = Column(String(32))
+    detail = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_data_quality_discrepancy_mkt_code_issue_time', 'market', 'stock_code', 'issue_type', 'created_at'),
+    )
+
+
 class AlertCooldownRecord(Base):
     """Persisted alert cooldown state for DB-managed alert rules."""
 

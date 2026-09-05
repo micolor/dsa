@@ -37,6 +37,180 @@ from .realtime_types import CircuitBreaker
 logger = logging.getLogger(__name__)
 
 
+# ---- 跨源一致性对账（纯函数，无 IO） ----
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_trade_date(df):
+    """Return the last row's trade date as an ISO date string, or None.
+
+    ``_clean_data`` sorts the daily-close DataFrame by ``date`` then
+    ``reset_index(drop=True)``, so the frame carries a RangeIndex (integer row
+    numbers) and the trade date lives in the ``date`` column — NOT the index.
+    Reading ``df.index[-1]`` would yield an integer, which
+    ``detect_daily_cross_source_issue`` cannot parse and would misreport as
+    ``field_missing``.
+    """
+    if df is None or df.empty or "date" not in df.columns:
+        return None
+    try:
+        return pd.to_datetime(df.iloc[-1]["date"]).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def _source_label(value):
+    """Return a cleaned source name for reconciliation records.
+
+    ``UnifiedRealtimeQuote.source`` is a ``RealtimeSource`` enum, whose ``str()``
+    renders as ``RealtimeSource.TENCENT``; map it to a plain lowercase token
+    (e.g. ``tencent``) to match the ``fetcher.name`` style of the other source
+    fields. Non-enum values are returned unchanged.
+    """
+    if value is None:
+        return None
+    try:
+        from data_provider.realtime_types import RealtimeSource
+        if isinstance(value, RealtimeSource):
+            return value.name.lower()
+    except Exception:  # noqa: BLE001
+        pass
+    s = str(value)
+    if s.startswith("RealtimeSource."):
+        return s[len("RealtimeSource."):].lower()
+    return s
+
+
+def detect_cross_source_issue(primary, cross, *, price_threshold_pct, date_tolerance_seconds):
+    """Return a discrepancy dict, or None if the two sources agree within tolerance.
+
+    Pure: no IO, no DB, no alerting. ``primary``/``cross`` are UnifiedRealtimeQuote.
+    Issue types: price_discrepancy | date_mismatch | field_missing.
+    """
+    if primary is None or cross is None:
+        return None
+    p_price = _safe_float(getattr(primary, "price", None))
+    c_price = _safe_float(getattr(cross, "price", None))
+    p_ts = getattr(primary, "provider_timestamp", None)
+    c_ts = getattr(cross, "provider_timestamp", None)
+
+    # field_missing: price 或 provider_timestamp 至少一侧为空，或任一侧价格 <= 0 无法计算价差比
+    if p_price is None or c_price is None or p_price <= 0 or c_price <= 0 or p_ts is None or c_ts is None:
+        return {
+            "issue_type": "field_missing",
+            "primary_price": p_price,
+            "secondary_price": c_price,
+            "price_diff_pct": None,
+            "primary_ts": p_ts,
+            "secondary_ts": c_ts,
+            "detail": "关键字段缺失（price 或 provider_timestamp 至少一侧为空）",
+        }
+
+    # date/timestamp mismatch
+    try:
+        from datetime import datetime
+        p_dt = datetime.fromisoformat(str(p_ts))
+        c_dt = datetime.fromisoformat(str(c_ts))
+        if abs((p_dt - c_dt).total_seconds()) > date_tolerance_seconds:
+            return {
+                "issue_type": "date_mismatch",
+                "primary_price": p_price,
+                "secondary_price": c_price,
+                "price_diff_pct": None,
+                "primary_ts": p_ts,
+                "secondary_ts": c_ts,
+                "detail": f"两端行情时间错位: {p_ts} vs {c_ts}",
+            }
+    except (TypeError, ValueError) as exc:
+        # 时间戳解析失败，按缺字段对待（保守告警）
+        return {
+            "issue_type": "field_missing",
+            "primary_price": p_price,
+            "secondary_price": c_price,
+            "price_diff_pct": None,
+            "primary_ts": p_ts,
+            "secondary_ts": c_ts,
+            "detail": f"时间戳无法解析: {exc}",
+        }
+
+    # price discrepancy (Both sides above zero already ensured; keep guard for safety)
+    if p_price > 0 and c_price > 0:
+        diff_pct = abs(p_price - c_price) / p_price * 100.0
+        if diff_pct > price_threshold_pct:
+            return {
+                "issue_type": "price_discrepancy",
+                "primary_price": p_price,
+                "secondary_price": c_price,
+                "price_diff_pct": round(diff_pct, 4),
+                "primary_ts": p_ts,
+                "secondary_ts": c_ts,
+                "detail": f"两端收盘/报价价差 {diff_pct:.2f}% 超过阈值 {price_threshold_pct}%",
+            }
+    return None
+
+
+def detect_daily_cross_source_issue(primary_close, primary_date, cross_close, cross_date, *, price_threshold_pct, date_tolerance_seconds):
+    """Return a discrepancy dict for daily-close reconciliation, or None.
+
+    ``primary_date``/``cross_date`` are trade date strings (the ``date`` column
+    of the daily-close DataFrame); ``primary_close``/``cross_close`` floats.
+    """
+    p_close = _safe_float(primary_close)
+    c_close = _safe_float(cross_close)
+    if p_close is None or c_close is None or p_close <= 0 or c_close <= 0 or primary_date is None or cross_date is None:
+        return {
+            "issue_type": "field_missing",
+            "primary_price": p_close,
+            "secondary_price": c_close,
+            "price_diff_pct": None,
+            "primary_ts": str(primary_date),
+            "secondary_ts": str(cross_date),
+            "detail": "日K关键字段缺失（close 或 交易日至少一侧为空）",
+        }
+    try:
+        from datetime import datetime
+        p_dt = datetime.fromisoformat(str(primary_date))
+        c_dt = datetime.fromisoformat(str(cross_date))
+        if abs((p_dt - c_dt).total_seconds()) > date_tolerance_seconds:
+            return {
+                "issue_type": "date_mismatch",
+                "primary_price": p_close,
+                "secondary_price": c_close,
+                "price_diff_pct": None,
+                "primary_ts": str(primary_date),
+                "secondary_ts": str(cross_date),
+                "detail": f"日K交易日错位: {primary_date} vs {cross_date}",
+            }
+    except (TypeError, ValueError) as exc:
+        return {
+            "issue_type": "field_missing",
+            "primary_price": p_close,
+            "secondary_price": c_close,
+            "price_diff_pct": None,
+            "primary_ts": str(primary_date),
+            "secondary_ts": str(cross_date),
+            "detail": f"日K日期无法解析: {exc}",
+        }
+    if p_close > 0 and c_close > 0:
+        diff_pct = abs(p_close - c_close) / p_close * 100.0
+        if diff_pct > price_threshold_pct:
+            return {
+                "issue_type": "price_discrepancy",
+                "primary_price": p_close,
+                "secondary_price": c_close,
+                "price_diff_pct": round(diff_pct, 4),
+                "primary_ts": str(primary_date),
+                "secondary_ts": str(cross_date),
+                "detail": f"日K收盘价差 {diff_pct:.2f}% 超过阈值 {price_threshold_pct}%",
+            }
+    return None
+
+
 # === 标准化列名定义 ===
 STANDARD_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']
 
@@ -1416,6 +1590,22 @@ class DataFetcherManager:
                                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
                             )
                             self._record_daily_source_success(fetcher, market)
+                            # 跨源一致性对账：用 fallback_to 再取一次日K做交叉验校（受门控），失败静默跳过
+                            if fallback_to:
+                                from src.config import get_config as _get_config
+                                if getattr(_get_config(), "data_quality_reconciliation_enabled", True):
+                                    try:
+                                        cross_df = self._call_fetcher_method(
+                                            self._get_fetcher_by_name(fallback_to, capability="daily_data"),
+                                            "get_daily_data",
+                                            stock_code=stock_code, start_date=start_date, end_date=end_date, days=days,
+                                        )
+                                        self._reconcile_daily_cross_source(
+                                            df, cross_df, market=market, stock_code=stock_code,
+                                            primary_source=fetcher.name, secondary_source=fallback_to,
+                                        )
+                                    except Exception as exc:  # noqa: BLE001
+                                        logger.warning("数据质量日K对账取数异常: %s", exc)
                             return df, fetcher.name
                         duration_ms = int((time.time() - attempt_start) * 1000)
                         record_provider_run(
@@ -1496,6 +1686,22 @@ class DataFetcherManager:
                         f"rows={len(df)}, elapsed={elapsed:.2f}s"
                     )
                     self._record_daily_source_success(fetcher, market)
+                    # 跨源一致性对账：用 fallback_to 再取一次日K做交叉验校（受门控），失败静默跳过
+                    if fallback_to:
+                        from src.config import get_config as _get_config
+                        if getattr(_get_config(), "data_quality_reconciliation_enabled", True):
+                            try:
+                                cross_df = self._call_fetcher_method(
+                                    self._get_fetcher_by_name(fallback_to, capability="daily_data"),
+                                    "get_daily_data",
+                                    stock_code=stock_code, start_date=start_date, end_date=end_date, days=days,
+                                )
+                                self._reconcile_daily_cross_source(
+                                    df, cross_df, market=market, stock_code=stock_code,
+                                    primary_source=fetcher.name, secondary_source=fallback_to,
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("数据质量日K对账取数异常: %s", exc)
                     return df, fetcher.name
                 duration_ms = int((time.time() - attempt_start) * 1000)
                 record_provider_run(
@@ -1854,15 +2060,37 @@ class DataFetcherManager:
             fallback_from = primary_token if primary_quote is None else None
             if primary_quote is not None:
                 logger.info(f"[实时行情] {market_label} {stock_code} 成功获取 (来源: {primary_src})")
-            primary_quote = self._supplement_quote(
-                stock_code, primary_quote, secondary_src, **secondary_kw,
-            )
+            # 取 secondary_src 一次：若主源缺字段则用于补字段；其结果同时被对账复用，
+            # 避免对同一数据源在一次实时取数里重复取数（_try_fetcher_quote 无缓存、真实走网络）。
+            cross_quote = None
+            if primary_quote is None:
+                # 主源失败：以 secondary_src 作为独立来源（保持 _supplement_quote 既有行为）
+                cross_quote = self._try_fetcher_quote(stock_code, secondary_src, **secondary_kw)
+                if cross_quote is not None:
+                    primary_quote = cross_quote
+                    logger.info(f"[实时行情] {stock_code} 从 {secondary_src} 获取成功 (独立数据源)")
+            else:
+                if self._quote_needs_supplement(primary_quote):
+                    cross_quote = self._try_fetcher_quote(stock_code, secondary_src, **secondary_kw)
+                    if cross_quote is not None:
+                        filled = self._merge_quote_fields(primary_quote, cross_quote)
+                        if filled:
+                            logger.info(f"[实时行情] {stock_code} 从 {secondary_src} 补充了: {filled}")
             # 美股个股（非指数）尝试从 Finnhub/AlphaVantage 补充缺失字段
             if is_us and not is_us_index and primary_quote is not None:
                 for extra_src in ["FinnhubFetcher", "AlphaVantageFetcher"]:
                     primary_quote = self._supplement_quote(
                         stock_code, primary_quote, extra_src,
                     )
+            # 跨源一致性对账：主源成功才做。cross_quote 已覆盖「主源用 secondary 补字段取过一次」
+            # 与「主源独立来自 secondary_src」两种情况；仅当主源完整（未从 secondary 补充）时才
+            # 在这里补一次对账取数，确保对 secondary_src 恰好一次取数。
+            if primary_quote is not None and getattr(config, "data_quality_reconciliation_enabled", True):
+                if cross_quote is None:
+                    cross_quote = self._try_fetcher_quote(stock_code, secondary_src, **secondary_kw)
+                self._reconcile_realtime_cross_source(
+                    primary_quote, cross_quote, market=("us" if is_us else "hk"), stock_code=stock_code,
+                )
             if primary_quote is not None:
                 return self._enrich_realtime_quote(
                     primary_quote,
@@ -1990,6 +2218,11 @@ class DataFetcherManager:
                         merged = self._merge_quote_fields(primary_quote, quote)
                         if merged:
                             logger.info(f"[实时行情] {stock_code} 从 {source} 补充了缺失字段: {merged}")
+                        # 跨源一致性对账：quote 已是下一源的成功值，零额外网络开销
+                        if primary_quote is not None and quote is not None:
+                            self._reconcile_realtime_cross_source(
+                                primary_quote, quote, market="cn", stock_code=stock_code,
+                            )
                         # Stop supplementing once all key fields are filled
                         if not self._quote_needs_supplement(primary_quote):
                             break
@@ -2074,6 +2307,104 @@ class DataFetcherManager:
                     setattr(primary, f, val)
                     filled.append(f)
         return filled
+
+    def _update_data_quality_alert(self, *, market, stock_code, issue_type,
+                                   primary_source, secondary_source,
+                                   primary_price, secondary_price, price_diff_pct,
+                                   primary_ts, secondary_ts, detail):
+        """Persist + alert a cross-source discrepancy. Never raises.
+
+        Wrapped in try/except + warning: a receipt/alert failure must never
+        propagate back to the fetch path or change its success semantics.
+        """
+        try:
+            from src.repositories.data_quality_discrepancy_repo import DataQualityDiscrepancyRepository
+            DataQualityDiscrepancyRepository().record_discrepancy({
+                "market": str(market)[:16],
+                "stock_code": str(stock_code)[:32],
+                "issue_type": str(issue_type)[:32],
+                "primary_source": str(primary_source)[:32],
+                "secondary_source": str(secondary_source)[:32],
+                "primary_price": primary_price,
+                "secondary_price": secondary_price,
+                "price_diff_pct": price_diff_pct,
+                "primary_ts": (str(primary_ts)[:32] if primary_ts is not None else None),
+                "secondary_ts": (str(secondary_ts)[:32] if secondary_ts is not None else None),
+                "detail": detail,
+            })
+        except Exception as exc:  # noqa: BLE001 - must never break the caller
+            logger.warning("数据质量对账落库失败: %s", exc)
+        try:
+            from src.services.system_alert import send_system_alert
+            send_system_alert(
+                f"跨源数据质量异常 [{issue_type}] {market} {stock_code}: "
+                f"{primary_source}({primary_price}) vs {secondary_source}({secondary_price}) {detail}",
+                dedup_key=f"data-quality:{market}:{stock_code}:{issue_type}",
+                enabled=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("数据质量对账告警失败: %s", exc)
+
+    def _reconcile_realtime_cross_source(self, primary, cross, *, market, stock_code):
+        """Reconcile ``primary`` against ``cross`` (realtime quotes). Never raises."""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not getattr(cfg, "data_quality_reconciliation_enabled", True):
+                return
+            if cross is None:
+                return
+            issue = detect_cross_source_issue(
+                primary, cross,
+                price_threshold_pct=getattr(cfg, "data_quality_price_diff_threshold_pct", 1.0),
+                date_tolerance_seconds=getattr(cfg, "data_quality_date_mismatch_tolerance_seconds", 3600),
+            )
+            if issue is None:
+                return
+            self._update_data_quality_alert(
+                market=market, stock_code=stock_code,
+                issue_type=issue["issue_type"],
+                primary_source=getattr(primary, "provider", None) or _source_label(getattr(primary, "source", None)) or "primary",
+                secondary_source=getattr(cross, "provider", None) or _source_label(getattr(cross, "source", None)) or "cross",
+                primary_price=issue["primary_price"], secondary_price=issue["secondary_price"],
+                price_diff_pct=issue["price_diff_pct"],
+                primary_ts=issue["primary_ts"], secondary_ts=issue["secondary_ts"],
+                detail=issue["detail"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("数据质量实时对账异常: %s", exc, exc_info=True)
+
+    def _reconcile_daily_cross_source(self, df, cross_df, *, market, stock_code, primary_source, secondary_source):
+        """Reconcile daily-close ``df`` against ``cross_df``. Never raises."""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not getattr(cfg, "data_quality_reconciliation_enabled", True):
+                return
+            if df is None or cross_df is None or df.empty or cross_df.empty:
+                return
+            primary_close = df.iloc[-1].get("close")
+            primary_date = _safe_trade_date(df)
+            cross_close = cross_df.iloc[-1].get("close")
+            cross_date = _safe_trade_date(cross_df)
+            issue = detect_daily_cross_source_issue(
+                primary_close, primary_date, cross_close, cross_date,
+                price_threshold_pct=getattr(cfg, "data_quality_price_diff_threshold_pct", 1.0),
+                date_tolerance_seconds=getattr(cfg, "data_quality_date_mismatch_tolerance_seconds", 3600),
+            )
+            if issue is None:
+                return
+            self._update_data_quality_alert(
+                market=market, stock_code=stock_code,
+                issue_type=issue["issue_type"],
+                primary_source=primary_source, secondary_source=secondary_source,
+                primary_price=issue["primary_price"], secondary_price=issue["secondary_price"],
+                price_diff_pct=issue["price_diff_pct"],
+                primary_ts=issue["primary_ts"], secondary_ts=issue["secondary_ts"],
+                detail=issue["detail"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("数据质量日K对账异常: %s", exc, exc_info=True)
 
     def _longbridge_preferred(self, capability: str = "realtime_quote") -> bool:
         """Return True when Longbridge keys are configured and available.

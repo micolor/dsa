@@ -17,6 +17,7 @@ daily fetchers (``YfinanceFetcher`` / ``AkshareFetcher`` /
 ``TushareFetcher`` / ``LongbridgeFetcher``), never to CN-only fetchers.
 """
 
+import types
 from unittest.mock import patch
 
 import pandas as pd
@@ -103,11 +104,17 @@ class TestIsHkMarketAcceptsFourDigitBareCodes:
 class TestManagerRoutesFourDigitBareHkAwayFromCnOnlyFetchers:
     """``DataFetcherManager.get_daily_data("0001")`` must skip CN-only fetchers."""
 
+    @patch("src.config.get_config")
     @patch("data_provider.base.record_provider_run_started")
     @patch("data_provider.base.record_provider_run")
     def test_four_digit_bare_hk_does_not_hit_cn_only_fetchers(
-        self, _record_run, _record_started
+        self, _record_run, _record_started, mock_get_config
     ) -> None:
+        # 本测试专测「市场路由不泄漏到 CN-only 源」，与跨源对账无关；关闭对账以免其
+        # 额外的 fallback 取数干扰「恰好一次」取数断言。
+        mock_get_config.return_value = types.SimpleNamespace(
+            data_quality_reconciliation_enabled=False,
+        )
         # CN-only fetchers — they MUST NOT receive the call once the manager
         # routes by market. Use should_fail=True so any leak raises loudly.
         efinance = _FakeFetcher("EfinanceFetcher", should_fail=True)
@@ -138,7 +145,7 @@ class TestManagerRoutesFourDigitBareHkAwayFromCnOnlyFetchers:
         assert tickflow.calls == []
         assert pytdx.calls == []
         assert baostock.calls == []
-        # HK-capable fetcher actually received the call
+        # HK-capable fetcher actually received the call (对账已关，恰好一次)
         hk_capable_calls = akshare.calls + tushare.calls + yfinance.calls
         assert hk_capable_calls == ["0001"]
 
@@ -191,11 +198,17 @@ class TestManagerRoutesFiveDigitBareHkUnchanged:
 class TestManagerStillRoutesSixDigitToCn:
     """6-digit numeric codes must continue routing to the A-share chain."""
 
+    @patch("src.config.get_config")
     @patch("data_provider.base.record_provider_run_started")
     @patch("data_provider.base.record_provider_run")
     def test_six_digit_a_share_goes_to_cn_only_fetchers(
-        self, _record_run, _record_started
+        self, _record_run, _record_started, mock_get_config
     ) -> None:
+        # 本测试专测「6 位 A 股路由到 CN-only 而非 Yfinance」，与跨源对账无关；
+        # 关闭对账以免其额外的 fallback 取数干扰「恰好一次」取数断言。
+        mock_get_config.return_value = types.SimpleNamespace(
+            data_quality_reconciliation_enabled=False,
+        )
         # For a 6-digit A-share code, CN-only fetchers MUST be reached (not
         # Yfinance). We invert the assertion: Yfinance must NOT be called
         # because Efinance/Tencent/Baostock should succeed first.
@@ -214,7 +227,7 @@ class TestManagerStillRoutesSixDigitToCn:
         # 6-digit A-share goes to a CN-only fetcher, never Yfinance
         assert source in {"EfinanceFetcher", "TencentFetcher", "BaostockFetcher"}
         assert yfinance.calls == []
-        # The CN-only fetcher that won the route was actually called
+        # The CN-only fetcher that won the route was actually called (对账已关，恰好一次)
         cn_capable_calls = efinance.calls + tencent.calls + baostock.calls
         assert cn_capable_calls == ["600519"]
 

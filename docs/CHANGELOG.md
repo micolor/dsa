@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [新功能] 通知投递回执：全路径持久化每次渠道投递状态与耗时并可在设置页追溯
 - [新功能] 通知投递列表 API（/api/v1/notifications/deliveries）与设置页投递视图
+- [新功能] 跨源一致性对账：选源成功后用次选源比对价差/交易日/字段缺失，命中记录数据质量异常并可按 system_error 路由告警
+- [新功能] 数据质量异常列表 API（/api/v1/data-quality/discrepancies）与设置页数据质量视图
 - [新功能] 信号后验自动化：每日自动评估决策信号与 skill 意见后验
 - [新功能] Skill 表现聚合 API（/decision-signals/skill-outcomes/*）与 Web 面板
 - [新功能] 管线自愈与失败告警：调度分析失败时主动推送系统告警（复用 system_error 路由，未配置回退报告主渠道，同类型当日去重一次）、设置中心「系统设置」调度卡片补充展示上次失败时间与连续失败次数、数据源连续失败达到阈值进入短期熔断并通知一次（熔断阈值与恢复冷却可配置为 `DATA_SOURCE_QUARANTINE_THRESHOLD` / `DATA_SOURCE_QUARANTINE_RECOVERY_SECONDS`，默认 3 / 300，不改变现状）、跨发行日自动补跑（`RUNTIME_BACKFILL_ENABLED` / `RUNTIME_BACKFILL_MAX_DAYS`，默认开 / 1）

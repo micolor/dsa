@@ -18,6 +18,7 @@ from api.v1.endpoints import (
     analysis,
     auth,
     backtest,
+    data_quality,
     decision_signals,
     health,
     history,
@@ -122,6 +123,12 @@ router.include_router(
     notification_deliveries.router,
     prefix="/notifications",
     tags=["Notifications"]
+)
+
+router.include_router(
+    data_quality.router,
+    prefix="/data-quality",
+    tags=["DataQuality"]
 )
 
 router.include_router(

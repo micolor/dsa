@@ -96,7 +96,11 @@ class TestFetcherLogging(unittest.TestCase):
         self.assertIn("[数据源切换] 601006: [FailureFetcher] -> [SuccessFetcher]", log_text)
         self.assertIn("[数据源完成] 601006 使用 [SuccessFetcher] 获取成功:", log_text)
 
-    def test_manager_skips_builtin_fetchers_that_do_not_support_hk_daily(self):
+    @patch("src.config.get_config")
+    def test_manager_skips_builtin_fetchers_that_do_not_support_hk_daily(self, mock_get_config):
+        mock_get_config.return_value = types.SimpleNamespace(
+            data_quality_reconciliation_enabled=False,
+        )
         efinance = _RecordingFetcher("EfinanceFetcher", 0)
         pytdx = _RecordingFetcher("PytdxFetcher", 1)
         akshare = _RecordingFetcher("AkshareFetcher", 2)
