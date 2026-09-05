@@ -79,8 +79,8 @@ class StockService:
             }
             
         except ImportError:
-            logger.warning("DataFetcherManager 未找到，使用占位数据")
-            return self._get_placeholder_quote(stock_code)
+            logger.warning("DataFetcherManager 不可用，无法获取实时行情")
+            return None
         except Exception as e:
             logger.error(f"获取实时行情失败: {e}", exc_info=True)
             return None
@@ -160,27 +160,3 @@ class StockService:
             logger.error(f"获取历史数据失败: {e}", exc_info=True)
             return {"stock_code": stock_code, "period": period, "data": []}
     
-    def _get_placeholder_quote(self, stock_code: str) -> Dict[str, Any]:
-        """
-        获取占位行情数据（用于测试）
-        
-        Args:
-            stock_code: 股票代码
-            
-        Returns:
-            占位行情数据
-        """
-        return {
-            "stock_code": stock_code,
-            "stock_name": f"股票{stock_code}",
-            "current_price": 0.0,
-            "change": None,
-            "change_percent": None,
-            "open": None,
-            "high": None,
-            "low": None,
-            "prev_close": None,
-            "volume": None,
-            "amount": None,
-            "update_time": datetime.now().isoformat(),
-        }

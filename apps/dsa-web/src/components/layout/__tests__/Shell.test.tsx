@@ -35,41 +35,6 @@ beforeAll(() => {
 });
 
 describe('Shell', () => {
-  it.skip('renders navigation, theme toggle and completion badge', () => {
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <ThemeProvider>
-          <Shell>
-            <div>page content</div>
-          </Shell>
-        </ThemeProvider>
-      </MemoryRouter>
-    );
-
-    expect(screen.getAllByRole('button', { name: '切换主题' }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: '问股' })).toBeInTheDocument();
-    expect(screen.getByTestId('chat-completion-badge')).toBeInTheDocument();
-    const logoutButton = screen.getByRole('button', { name: '退出' });
-    expect(logoutButton).toBeInTheDocument();
-    expect(logoutButton).toHaveClass('cursor-pointer');
-  });
-
-  it.skip('opens the theme menu from the sidebar toggle', async () => {
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <ThemeProvider>
-          <Shell>
-            <div>page content</div>
-          </Shell>
-        </ThemeProvider>
-      </MemoryRouter>
-    );
-
-    fireEvent.click(screen.getAllByRole('button', { name: '切换主题' })[0]);
-
-    expect(await screen.findByRole('menu', { name: '主题模式' })).toBeInTheDocument();
-  });
-
   it('shows a confirmation dialog before logout', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>

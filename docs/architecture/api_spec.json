@@ -1858,6 +1858,57 @@
         }
       }
     },
+    "/api/v1/stocks/watchlist/lists": {
+      "get": {
+        "tags": [
+          "Stocks"
+        ],
+        "summary": "获取命名自选列表明细",
+        "description": "返回所有已配置的 WATCHLIST_<NAME> 命名列表及其股票数量；不含默认 STOCK_LIST。",
+        "operationId": "get_watchlist_lists_api_v1_stocks_watchlist_lists_get",
+        "responses": {
+          "200": {
+            "description": "已配置的命名自选列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lists": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/stocks/watchlist/add": {
       "post": {
         "tags": [

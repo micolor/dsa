@@ -249,17 +249,6 @@ class MarketHotspotService:
         )
         return top_items, bottom_items
 
-    def get_hotspot_detail(self, theme_name: str, market: str = "cn") -> Dict[str, Any]:
-        """Return an explicit placeholder for richer hotspot detail evidence."""
-        normalized_market = str(market or "cn").strip().lower() or "cn"
-        status = "unknown" if normalized_market == "cn" else "not_supported"
-        return {
-            "theme_name": str(theme_name or "").strip(),
-            "market": normalized_market,
-            "status": status,
-            "missing_fields": ["hotspot_route", "hotspot_constituents", "leader_stocks"],
-        }
-
     def get_concept_rankings(
         self,
         limit: int = 5,

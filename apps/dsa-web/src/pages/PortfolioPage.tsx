@@ -312,7 +312,7 @@ const PortfolioPage: React.FC = () => {
   const [accountCreateSuccess, setAccountCreateSuccess] = useState<string | null>(null);
   const [accountForm, setAccountForm] = useState({
     name: '',
-    broker: 'Demo',
+    broker: '',
     market: 'cn' as PortfolioAccountMarket,
     baseCurrency: 'CNY',
   });
@@ -1202,7 +1202,7 @@ const PortfolioPage: React.FC = () => {
       setWriteWarning(null);
       setAccountForm({
         name: '',
-        broker: 'Demo',
+        broker: '',
         market: accountForm.market,
         baseCurrency: accountForm.baseCurrency,
       });
@@ -1499,7 +1499,7 @@ const PortfolioPage: React.FC = () => {
             />
             <input
               className={PORTFOLIO_INPUT_CLASS}
-              placeholder="券商（可选，如 Demo/华泰）"
+              placeholder="券商（可选，如 华泰/中信）"
               value={accountForm.broker}
               onChange={(e) => setAccountForm((prev) => ({ ...prev, broker: e.target.value }))}
             />

@@ -488,7 +488,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       return (
         <Input
           label={text.target}
-          value="default"
+          value={text.watchlistDefaultTarget}
           onChange={() => undefined}
           disabled
         />

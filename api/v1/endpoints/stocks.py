@@ -571,7 +571,7 @@ def get_stock_quote(stock_code: str) -> StockQuote:
 )
 def get_stock_history(
     stock_code: str,
-    period: str = Query("daily", description="K 线周期", pattern="^(daily|weekly|monthly)$"),
+    period: str = Query("daily", description="K 线周期（当前仅支持 daily）", pattern="^(daily)$"),
     days: int = Query(30, ge=1, le=365, description="获取天数")
 ) -> StockHistoryResponse:
     """
@@ -581,7 +581,7 @@ def get_stock_history(
     
     Args:
         stock_code: 股票代码
-        period: K 线周期 (daily/weekly/monthly)
+        period: K 线周期（当前仅支持 daily）
         days: 获取天数
         
     Returns:
