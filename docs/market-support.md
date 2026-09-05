@@ -136,3 +136,14 @@ Portfolio 允许 JP/KR 账户、交易和持仓快照进入现有链路，但会
 - Web UI 可视证据口径：Market Light 告警目标范围切到“大盘市场”时，市场区域下拉只显示 A 股、港股、美股，不显示日股/韩股；设置页 `MARKET_REVIEW_REGION` 渲染为可输入逗号分隔值的文本框。当前仓库不保存一次性截图证据，可替代证据为 `apps/dsa-web/src/components/alerts/__tests__/AlertRuleForm.test.tsx`、`apps/dsa-web/src/components/settings/__tests__/SettingsField.test.tsx` 和 `apps/dsa-web/tests/system_config_i18n.test.ts` 的断言。
 
 回滚方式：移除 Portfolio snapshot 的 `data_quality` / `limitations` 扩展，恢复告警前端/后端对市场枚举的旧边界说明；如需整体回滚，移除 `jp/kr` 市场识别、交易日历注册、YFinance 路由扩展、Web/API 类型放行、`scripts/stock_index_seeds/` 日韩种子索引，并删除本文档中的能力声明。
+
+## 场外基金（净值体检）
+
+场外基金（如公募基金）通过 `fund:` 前缀显式指定，进入**净值健康体检**链路，不做个股 K 线 / 买卖点分析。
+
+- 识别：代码前缀 `fund:`，例如 `fund:003095`；不带前缀的 6 位裸码默认按 A 股股票处理，不做启发式分类，A 股/ETF 路径不受影响。
+- 边界：场外基金**只有单位净值/累计净值**（每日净值序列），没有 OHLCV 与 K 线，因此只支持净值体检；不进入个股 K 线、技术面、筹码、作战计划、买卖点、止损/止盈等股票式链路。
+- 报告：给出单位净值、近 1 月/近 3 月/近 6 月/近 1 年收益、最大回撤、年化波动率、夏普比率与风险等级，始终包含「不构成投资建议」声明；Sharpe 使用配置 `FUND_RISK_FREE_RATE`（默认 `0.02`）计算。
+- 历史与展示：基金记录以 `report_type="fund"` 落库，历史列表/详情与 Web 报告卡片按净值体检语义展示，不渲染股票式骨架。
+
+回滚方式：移除 `fund:` 前缀识别、基金净值数据源（`data_provider/fund_fetcher.py`）、体检报告（`src/services/fund_analysis.py`）、历史/API/Web 的基金分支，并删除本文档中的能力声明。

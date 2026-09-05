@@ -418,9 +418,98 @@ class NotificationService(
     ) -> str:
         """Generate the aggregate report content used by merge/save/push paths."""
         normalized_type = self._normalize_report_type(report_type)
+        if normalized_type == ReportType.FUND or self._all_fund_results(results):
+            return self.generate_fund_aggregate(results, report_date=report_date)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
+
+    @staticmethod
+    def _all_fund_results(results: List[AnalysisResult]) -> bool:
+        """True 仅当结果非空、且每个结果都是 fund 类型（dashboard.report_type == "fund"）。
+
+        纯股票批次（无任何 fund 标记）返回 False，走原有股票渲染，不受影响。
+        """
+        if not results:
+            return False
+        for result in results:
+            dashboard = getattr(result, "dashboard", None)
+            if not isinstance(dashboard, dict) or dashboard.get("report_type") != "fund":
+                return False
+        return True
+
+    def generate_fund_aggregate(
+        self,
+        results: List[AnalysisResult],
+        report_date: Optional[str] = None,
+    ) -> str:
+        """生成场外基金净值体检汇总（fund:<code> 标记的确定性结果，无 LLM/股票信号）。
+
+        Only renders items whose ``dashboard`` carries ``report_type == "fund"``;
+        stock AnalysisResult 项（无 fund 标记）会被跳过/短路，避免混入买入卖出信号。
+        """
+        fund_results = [
+            r
+            for r in (results or [])
+            if isinstance(getattr(r, "dashboard", None), dict)
+            and getattr(r.dashboard, "get", lambda *a, **k: None)("report_type") == "fund"
+        ]
+
+        if report_date is None:
+            report_date = datetime.now().strftime('%Y-%m-%d')
+        report_language = self._get_report_language(results)
+
+        lines = [f"# 📈 基金体检 ({len(fund_results)}支)", ""]
+        for result in fund_results:
+            name = self._get_display_name(result, report_language)
+            code = result.code
+            advice = result.operation_advice or "N/A"
+            trend = result.trend_prediction or "N/A"
+            summary = (result.analysis_summary or "").strip()
+            lines.append(f"## {name}({code}) | {advice} | {trend}")
+            lines.append("")
+            if summary:
+                lines.append(f"> {summary}")
+                lines.append("")
+            # 可选：净值/指标紧凑行（若 dashboard 带 latest_nav/metrics）
+            dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+            latest_nav = dashboard.get("latest_nav")
+            metrics = dashboard.get("metrics")
+            if latest_nav is not None or isinstance(metrics, dict):
+                nav_text = ""
+                if latest_nav is not None:
+                    nav_text = f"最新净值 {latest_nav}"
+                if isinstance(metrics, dict):
+                    metric_parts = []
+                    # 百分比键：收益率/回撤/波动均以小数存储，需 *100 渲染为 %。
+                    _pct_metrics = (("近1月", "return_1m"), ("近3月", "return_3m"), ("近6月", "return_6m"),
+                                    ("近1年", "return_1y"), ("最大回撤", "max_drawdown"),
+                                    ("年化波动", "annual_volatility"))
+                    for label, key in _pct_metrics:
+                        value = metrics.get(key)
+                        if value is not None:
+                            try:
+                                metric_parts.append(f"{label} {value * 100:.1f}%")
+                            except (TypeError, ValueError):
+                                metric_parts.append(f"{label} {value}")
+                    # 夏普为完整比率（约 0.5-3），保留两位小数，不加 %。
+                    sharpe = metrics.get("sharpe")
+                    if sharpe is not None:
+                        try:
+                            metric_parts.append(f"夏普 {float(sharpe):.2f}")
+                        except (TypeError, ValueError):
+                            metric_parts.append(f"夏普 {sharpe}")
+                    if metric_parts:
+                        nav_text = f"{nav_text} | " if nav_text else ""
+                        nav_text += " | ".join(metric_parts)
+                if nav_text:
+                    lines.append(f"*{nav_text}*")
+                    lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        lines.append("*基于净值,非股票式信号,不构成投资建议*")
+        return "\n".join(lines)
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
         if not self._should_show_llm_model():

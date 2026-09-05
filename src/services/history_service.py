@@ -840,6 +840,22 @@ class HistoryService:
                 record_id=record_id
             )
 
+        # 场外基金净值体检：确定性生成（无 LLM、无网络），数据均取自已算好的
+        # dashboard.metrics/latest_nav 与 analysis_summary。基金决不允许落入
+        # _generate_single_stock_markdown（否则会渲染股票式骨架并可能带买卖点/作战计划）。
+        if getattr(record, "report_type", None) == "fund":
+            try:
+                return self._generate_fund_markdown(result, record)
+            except Exception as e:
+                logger.error(
+                    f"get_markdown_report: failed to generate fund markdown for {record_id}: {e}",
+                    exc_info=True,
+                )
+                raise MarkdownReportGenerationError(
+                    f"Failed to generate fund markdown report: {str(e)}",
+                    record_id=record_id,
+                ) from e
+
         # Generate Markdown report
         try:
             return self._generate_single_stock_markdown(result, record)
@@ -916,6 +932,126 @@ class HistoryService:
         except Exception as e:
             logger.error(f"Failed to rebuild AnalysisResult: {e}", exc_info=True)
             return None
+
+    @staticmethod
+    def _fund_risk_grade(mdd: Any, vol: Any) -> str:
+        """按 fund_analysis._risk_grade 同等的确定性阈值给出风险等级（无 LLM）。"""
+        try:
+            mdd_f = float(mdd) if mdd is not None else None
+            vol_f = float(vol) if vol is not None else None
+        except (TypeError, ValueError):
+            return "数据不足"
+        if mdd_f is None or vol_f is None:
+            return "数据不足"
+        if mdd_f < -0.20 or vol_f > 0.30:
+            return "高"
+        if mdd_f < -0.08 or vol_f > 0.15:
+            return "中"
+        return "低"
+
+    @staticmethod
+    def _fund_percent(value: Any) -> str:
+        """把小数形式的收益/回撤/波动格式为百分比，N/A 原样保留。"""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _fund_sharpe(value: Any) -> str:
+        """夏普比率是数值而非百分比，保留两位小数。"""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value):.2f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _fund_nav(value: Any) -> str:
+        """单位净值是净值价格，保留四位小数（如 1.0240）。"""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value):.4f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _generate_fund_markdown(
+        self,
+        result: AnalysisResult,
+        record
+    ) -> str:
+        """
+        生成场外基金净值体检 Markdown（确定性，无 LLM、无网络）。
+
+        数据全部来自已算好的 ``result.dashboard.metrics`` /
+        ``result.dashboard.latest_nav`` 与 ``result.analysis_summary``（已含
+        「不构成投资建议」声明）。本报告只做净值健康体检，绝不输出
+        买卖点/止损/仓位等股票式建议。
+        """
+        dashboard = result.dashboard if hasattr(result, "dashboard") and result.dashboard else {}
+        metrics = dashboard.get("metrics", {}) if dashboard else {}
+        latest_nav = dashboard.get("latest_nav") if dashboard else None
+
+        name = result.name or getattr(record, "name", "") or ""
+        code = result.code or getattr(record, "code", "") or ""
+        name_escaped = self._escape_md(str(name)) or str(code)
+
+        report_date = (
+            record.created_at.strftime("%Y-%m-%d")
+            if getattr(record, "created_at", None) else datetime.now().strftime("%Y-%m-%d")
+        )
+        report_time = (
+            record.created_at.strftime("%H:%M:%S")
+            if getattr(record, "created_at", None) else datetime.now().strftime("%H:%M:%S")
+        )
+
+        risk = self._fund_risk_grade(
+            metrics.get("max_drawdown"),
+            metrics.get("annual_volatility"),
+        )
+        summary = result.analysis_summary or getattr(record, "analysis_summary", "") or ""
+
+        lines = [
+            f"# 📊 {name_escaped} ({code}) 基金净值体检",
+            "",
+            f"> 分析日期: **{report_date}** | 报告生成时间: {report_time}",
+            "",
+            "---",
+            "",
+            "| 指标 | 数值 |",
+            "|------|------|",
+            f"| 单位净值 | **{self._fund_nav(latest_nav)}** |",
+            f"| 风险等级 | **{risk}** |",
+            f"| 近1月收益 | {self._fund_percent(metrics.get('return_1m'))} |",
+            f"| 近3月收益 | {self._fund_percent(metrics.get('return_3m'))} |",
+            f"| 近6月收益 | {self._fund_percent(metrics.get('return_6m'))} |",
+            f"| 近1年收益 | {self._fund_percent(metrics.get('return_1y'))} |",
+            f"| 最大回撤 | {self._fund_percent(metrics.get('max_drawdown'))} |",
+            f"| 年化波动率 | {self._fund_percent(metrics.get('annual_volatility'))} |",
+            f"| 夏普比率 | {self._fund_sharpe(metrics.get('sharpe'))} |",
+            "",
+            "---",
+            "",
+        ]
+        if summary:
+            lines.extend([
+                "### 💬 分析摘要",
+                "",
+                summary,
+                "",
+            ])
+        # 兜底声明：摘要里没有「不构成投资建议」时显式补上，确保报告始终带该声明。
+        if "不构成投资建议" not in summary:
+            lines.extend([
+                "> 本报告仅供基金净值健康体检参考，不构成投资建议。",
+                "",
+            ])
+        lines.append(f"*报告生成时间: {report_time}*")
+        return "\n".join(lines)
 
     def _generate_single_stock_markdown(
         self,

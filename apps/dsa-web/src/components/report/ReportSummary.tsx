@@ -8,6 +8,7 @@ import { ReportDiagnostics } from './ReportDiagnostics';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
 import { StockPriceChart } from './StockPriceChart';
+import { FundMetricsCard } from './FundMetricsCard';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -55,6 +56,52 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
         reportLanguage={reportLanguage}
         onOpenRunFlow={onOpenRunFlow}
       />
+    );
+  }
+
+  // 场外基金净值体检：无 K 线与买卖点，用净值指标卡替代 StockPriceChart + ReportStrategy。
+  if (meta.reportType === 'fund') {
+    return (
+      <div className="space-y-5 pb-8 animate-fade-in">
+        {/* 概览区（首屏） */}
+        <ReportOverview
+          meta={meta}
+          summary={summary}
+          details={details}
+          isHistory={isHistory}
+          watchlist={watchlist}
+        />
+
+        {/* 净值指标卡（无 K 线 / 买卖点） */}
+        <FundMetricsCard dashboard={details?.rawResult?.dashboard} language={reportLanguage} />
+
+        {/* 资讯区 */}
+        <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
+
+        {/* 输入数据块低敏摘要 */}
+        <AnalysisContextSummary
+          overview={details?.analysisContextPackOverview}
+          language={reportLanguage}
+        />
+
+        {/* 运行诊断摘要 */}
+        <ReportDiagnostics
+          recordId={recordId}
+          summary={diagnosticSummary}
+          language={reportLanguage}
+          onOpenRunFlow={onOpenRunFlow}
+        />
+
+        {/* 透明度与追溯区 */}
+        <ReportDetails details={details} recordId={recordId} language={reportLanguage} />
+
+        {/* 分析模型标记（Issue #528）— 报告末尾 */}
+        {shouldShowModel && (
+          <p className="px-1 text-xs text-muted-text">
+            {text.analysisModel}: {modelUsed}
+          </p>
+        )}
+      </div>
     );
   }
 
