@@ -388,6 +388,9 @@ def get_stock_bar(
         # Deduplicate by normalized code, keeping the record with highest id
         seen: dict = {}
         for record in records:
+            # 场外基金净值体检报告不进个股栏（无股票式买卖点，避免被当作个股展示）。
+            if record.report_type == "fund":
+                continue
             display_code = service._display_stock_code(record.code or "")
             norm_code = _normalize_code_for_grouping(display_code)
             if norm_code not in seen or record.id > seen[norm_code].id:

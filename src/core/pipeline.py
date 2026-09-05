@@ -28,6 +28,7 @@ from src.config import FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT, get_config, Co
 from src.storage import get_db
 from data_provider import DataFetcherManager
 from data_provider.base import _is_etf_code, _market_tag, is_bse_code, normalize_stock_code
+from data_provider.fund_fetcher import is_fund_code
 from data_provider.realtime_types import ChipDistribution
 from src.analyzer import (
     GeminiAnalyzer,
@@ -439,6 +440,41 @@ class StockAnalysisPipeline:
             AnalysisResult 或 None（如果分析失败）
         """
         stock_name = code
+        # 场外基金净值体检链路：fund:<code> 前缀标记，走确定性基金体检，不到股票管道。
+        if is_fund_code(code):
+            try:
+                from data_provider.fund_fetcher import (
+                    FundFetcher,
+                    strip_fund_prefix,
+                )
+                from src.services.fund_analysis import (
+                    build_fund_report,
+                    map_fund_report_to_report_result,
+                )
+                profile = FundFetcher().get_profile(strip_fund_prefix(code))
+                report = build_fund_report(profile)
+                fund_result = map_fund_report_to_report_result(
+                    report,
+                    config=self.config,
+                    report_language=normalize_report_language(
+                        getattr(self.config, "report_language", "zh")
+                    ),
+                )
+                try:
+                    self.db.save_analysis_history(
+                        result=fund_result,
+                        query_id=query_id,
+                        report_type="fund",
+                        news_content="",
+                        context_snapshot=None,
+                        save_snapshot=False,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[{code}] 保存基金历史失败: {exc}")
+                return fund_result
+            except Exception as exc:
+                logger.warning(f"[{code}] 基金分析失败: {exc}")
+                return None  # fail-open：不拖垮整批分析
         try:
             portfolio_context = getattr(self, "portfolio_context", None)
             if not isinstance(portfolio_context, dict):
@@ -3372,7 +3408,13 @@ class StockAnalysisPipeline:
 
         with notify_lock:
             try:
-                if report_type == ReportType.FULL:
+                # 单个基金（dashboard.report_type == "fund"）走净值体检渲染，
+                # 不落入股票 dashboard/brief/single 分支（避免 N/A 字段混入买卖信号）。
+                _fund_dashboard = getattr(result, "dashboard", None)
+                if isinstance(_fund_dashboard, dict) and _fund_dashboard.get("report_type") == "fund":
+                    report_content = self.notifier.generate_fund_aggregate([result])
+                    logger.info(f"[{stock_code}] 使用基金净值体检格式")
+                elif report_type == ReportType.FULL:
                     report_content = self.notifier.generate_dashboard_report([result])
                     logger.info(f"[{stock_code}] 使用完整报告格式")
                 elif report_type == ReportType.BRIEF:

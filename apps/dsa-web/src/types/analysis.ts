@@ -6,7 +6,7 @@
 // ============ Request Types ============
 
 export type StockReportType = 'simple' | 'detailed' | 'full' | 'brief';
-export type ReportType = StockReportType | 'market_review';
+export type ReportType = StockReportType | 'market_review' | 'fund';
 export type AnalysisPhase = 'auto' | 'premarket' | 'intraday' | 'postmarket';
 export type MarketReviewRegion = 'cn' | 'hk' | 'us' | 'jp' | 'kr';
 
