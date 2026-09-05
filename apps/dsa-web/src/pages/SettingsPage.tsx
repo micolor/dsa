@@ -882,6 +882,18 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
                   {formatSchedulerTimestamp(status?.lastSuccessAt, language)}
                 </dd>
               </div>
+              <div className="rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+                <dt className="text-muted-text">{t('settings.schedulerLastFailed')}</dt>
+                <dd data-testid="scheduler-last-failed" className="mt-1 font-medium text-foreground">
+                  {formatSchedulerTimestamp(status?.lastFailedAt, language)}
+                </dd>
+              </div>
+              <div className="rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+                <dt className="text-muted-text">{t('settings.schedulerConsecutiveFailures')}</dt>
+                <dd data-testid="scheduler-consecutive-failures" className="mt-1 font-medium text-foreground">
+                  {status?.consecutiveFailures ?? '-'}
+                </dd>
+              </div>
               {status?.lastError ? (
                 <div className="rounded-xl border border-danger/40 bg-danger/10 px-3 py-2">
                   <dt className="text-danger">{t('settings.schedulerLastError')}</dt>

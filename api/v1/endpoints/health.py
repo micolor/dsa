@@ -22,9 +22,9 @@ router = APIRouter()
 async def health_check() -> HealthResponse:
     """
     健康检查接口
-    
+
     用于负载均衡器或监控系统检查服务状态
-    
+
     Returns:
         HealthResponse: 包含服务状态和时间戳
     """

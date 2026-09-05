@@ -629,7 +629,34 @@ class DataFetcherManager:
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
     }
-    _daily_source_health = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
+    _daily_source_health: Optional["CircuitBreaker"] = None
+    _daily_source_health_config_sig: Optional[tuple] = None
+    _daily_source_health_lock = RLock()
+    _source_quarantine_alert_fired: set = set()  # 每进程每数据源「可用→熔断」只告警一次，reset 时清空
+
+    @classmethod
+    def _get_daily_source_health(cls) -> "CircuitBreaker":
+        cfg = None
+        try:
+            from src.config import get_config
+            cfg = get_config()
+        except Exception:  # pragma: no cover - config unavailable fallback
+            cfg = None
+        threshold = getattr(cfg, "data_source_quarantine_threshold", 3)
+        cooldown = getattr(cfg, "data_source_quarantine_recovery_seconds", 300.0)
+        sig = (threshold, cooldown)
+        with cls._daily_source_health_lock:
+            if (
+                cls._daily_source_health is None
+                or cls._daily_source_health_config_sig != sig
+            ):
+                from .realtime_types import CircuitBreaker
+                cls._daily_source_health = CircuitBreaker(
+                    failure_threshold=threshold, cooldown_seconds=cooldown
+                )
+                cls._daily_source_health_config_sig = sig
+            return cls._daily_source_health
+
     _CONCEPT_RANKINGS_CACHE_TTL_SECONDS = 300.0
     _CONCEPT_RANKINGS_EMPTY_CACHE_TTL_SECONDS = 30.0
     _concept_rankings_cache_lock = RLock()
@@ -815,7 +842,7 @@ class DataFetcherManager:
         market: str,
     ) -> bool:
         key = cls._daily_health_key(fetcher, market)
-        if cls._daily_source_health.is_available(key):
+        if cls._get_daily_source_health().is_available(key):
             return True
         logger.info(
             "[数据源健康度] %s 日线跳过短期熔断的数据源: %s",
@@ -830,16 +857,33 @@ class DataFetcherManager:
 
     @classmethod
     def _record_daily_source_success(cls, fetcher: BaseFetcher, market: str) -> None:
-        cls._daily_source_health.record_success(cls._daily_health_key(fetcher, market))
+        cls._get_daily_source_health().record_success(cls._daily_health_key(fetcher, market))
 
     @classmethod
     def _record_daily_source_failure(cls, fetcher: BaseFetcher, market: str, error: str) -> None:
-        cls._daily_source_health.record_failure(cls._daily_health_key(fetcher, market), error=error)
+        key = cls._daily_health_key(fetcher, market)
+        breaker = cls._get_daily_source_health()
+        was_available = breaker.is_available(key)
+        breaker.record_failure(key, error=error)
+        if not breaker.is_available(key) and was_available:
+            # 刚从「可用」转为熔断（隔离）：每数据源只通知一次，避免熔断被 fallback 静默吞掉
+            if key not in cls._source_quarantine_alert_fired:
+                cls._source_quarantine_alert_fired.add(key)
+                try:
+                    from src.services.system_alert import send_system_alert
+                    send_system_alert(
+                        f"⚠️ 数据源 {fetcher.name}（{market}）连续失败，已进入短期熔断隔离。"
+                        f"已自动切换/降级到其他数据源，短时间后将自动尝试恢复。错误：{error}",
+                        dedup_key=f"source-quarantine:{market}:{fetcher.name}",
+                    )
+                except Exception:  # noqa: BLE001 - 绝不打断数据抓取主链路
+                    logger.warning("数据源熔断告警发送失败（已忽略）", exc_info=True)
 
     @classmethod
     def reset_daily_source_health(cls) -> None:
         """Reset daily source health state for tests/admin diagnostics."""
-        cls._daily_source_health.reset()
+        cls._get_daily_source_health().reset()
+        cls._source_quarantine_alert_fired.clear()
 
     def _get_cached_stock_name(self, stock_code: str) -> Optional[str]:
         self._ensure_concurrency_guards()

@@ -1718,7 +1718,9 @@ describe('SettingsPage', () => {
       nextRunAt: null,
       lastRunAt: '2026-06-21T17:00:00+08:00',
       lastSuccessAt: null,
+      lastFailedAt: '2026-06-21T17:30:00+08:00',
       lastError: 'analysis failed',
+      consecutiveFailures: 3,
     });
     useSystemConfigMock.mockReturnValue(buildSystemConfigState({
       activeCategory: 'system',
@@ -1770,6 +1772,8 @@ describe('SettingsPage', () => {
 
     expect(await screen.findByTestId('scheduler-last-success')).toHaveTextContent('-');
     expect(screen.getByTestId('scheduler-last-error')).toHaveTextContent('analysis failed');
+    expect(screen.getByTestId('scheduler-last-failed')).not.toHaveTextContent('-');
+    expect(screen.getByTestId('scheduler-consecutive-failures')).toHaveTextContent('3');
   });
 
   it('shows active runtime scheduler state even when saved schedule flag is false', async () => {

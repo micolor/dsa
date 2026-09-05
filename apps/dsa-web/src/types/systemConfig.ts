@@ -225,7 +225,9 @@ export interface SchedulerStatusResponse {
   nextRunAt?: string | null;
   lastRunAt?: string | null;
   lastSuccessAt?: string | null;
+  lastFailedAt?: string | null;
   lastError?: string | null;
+  consecutiveFailures?: number | null;
   lastSkippedAt?: string | null;
   lastSkipReason?: string | null;
 }

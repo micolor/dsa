@@ -1201,6 +1201,15 @@ class Config:
     market_review_color_scheme: str = "green_up"
     # 交易日检查：默认启用，非交易日跳过执行；设为 false 或 --force-run 可强制执行（Issue #373）
     trading_day_check_enabled: bool = True
+    # === 运行时自愈 / 故障告警配置 ===
+    # 分析任务失败是否启用事件级告警（供失败告警链路使用）
+    runtime_analysis_failure_alert_enabled: bool = True
+    # 数据源短期熔断（隔离）触发阈值与冷却时长
+    data_source_quarantine_threshold: int = 3
+    data_source_quarantine_recovery_seconds: float = 300.0
+    # 失败任务运行回填是否启用及最大回填天数
+    runtime_backfill_enabled: bool = True
+    runtime_backfill_max_days: int = 1
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2172,6 +2181,15 @@ class Config:
                 os.getenv('MARKET_REVIEW_COLOR_SCHEME', 'green_up')
             ),
             trading_day_check_enabled=os.getenv('TRADING_DAY_CHECK_ENABLED', 'true').lower() != 'false',
+            runtime_analysis_failure_alert_enabled=(
+                os.getenv('RUNTIME_ANALYSIS_FAILURE_ALERT_ENABLED', 'true').lower() != 'false'
+            ),
+            data_source_quarantine_threshold=int(os.getenv('DATA_SOURCE_QUARANTINE_THRESHOLD', '3')),
+            data_source_quarantine_recovery_seconds=float(
+                os.getenv('DATA_SOURCE_QUARANTINE_RECOVERY_SECONDS', '300')
+            ),
+            runtime_backfill_enabled=os.getenv('RUNTIME_BACKFILL_ENABLED', 'true').lower() != 'false',
+            runtime_backfill_max_days=int(os.getenv('RUNTIME_BACKFILL_MAX_DAYS', '1')),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=parse_env_int(os.getenv('WEBUI_PORT'), 8000, field_name='WEBUI_PORT', minimum=1, maximum=65535),

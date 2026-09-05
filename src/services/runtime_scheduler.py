@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from src.config import Config, get_config
+from src.core.trading_calendar import get_effective_trading_date
 from src.scheduler import Scheduler, normalize_schedule_times
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,7 @@ class RuntimeSchedulerService:
         run_immediately_in_background: bool = False,
         background_tasks_provider: Optional[Callable[[Config], List[Dict[str, Any]]]] = None,
         schedule_args_overrides: Optional[Dict[str, Any]] = None,
+        alert_sender: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self._config_provider = config_provider
         self._task_runner = task_runner
@@ -229,6 +231,18 @@ class RuntimeSchedulerService:
         self._consecutive_failures: int = 0
         self._last_skipped_at: Optional[str] = None
         self._last_skip_reason: Optional[str] = None
+        self._last_failure_alert_date: Optional[str] = None
+        if alert_sender is None:
+            def _default_alert(content: str) -> bool:
+                from src.services.system_alert import send_system_alert
+
+                return send_system_alert(
+                    content,
+                    dedup_key=f"analysis-failure:{datetime.now().date().isoformat()}",
+                )
+
+            alert_sender = _default_alert
+        self._alert_sender = alert_sender
 
     def _make_schedule_args(self) -> SimpleNamespace:
         defaults = {
@@ -291,12 +305,58 @@ class RuntimeSchedulerService:
             self._last_error = None
             self._last_failed_at = None
             self._consecutive_failures = 0
+            self._last_failure_alert_date = None
+            self._maybe_trigger_backfill(stock_codes)
         except Exception as exc:  # noqa: BLE001 - scheduled runs must not kill API process.
             self._last_error = str(exc)
             self._last_failed_at = datetime.now().isoformat()
             self._consecutive_failures += 1
             logger.exception("Runtime scheduled analysis failed: %s", exc)
+            self._send_failure_alert("analyze")
             self._schedule_retry_if_needed()
+
+    def _maybe_trigger_backfill(self, stock_codes: Optional[List[str]]) -> None:
+        try:
+            config = self._reload_config()
+            if not getattr(config, "runtime_backfill_enabled", True):
+                return
+            if not self._last_success_at:
+                return
+            gap = self._trading_day_gap_since(self._last_success_at)
+            max_days = getattr(config, "runtime_backfill_max_days", 1)
+            if gap is not None and gap > max_days:
+                logger.info("检测到跨发行日缺口（gap=%d），触发一次自动补跑", gap)
+                # 直接在已持有 _run_lock 的成功分支内重跑：必须走 _run_analysis_locked，走 _run_analysis_once 会因 _run_lock 非重入而死路
+                self._run_analysis_locked(stock_codes)
+        except Exception:  # noqa: BLE001 - backfill is best-effort; never break a successful run
+            logger.warning("自动补跑检查异常（已忽略）", exc_info=True)
+
+    def _trading_day_gap_since(self, last_success_iso: str) -> Optional[int]:
+        try:
+            last_date = datetime.fromisoformat(last_success_iso).date()
+        except (ValueError, TypeError):
+            return None
+        try:
+            eff_date = get_effective_trading_date(market=None)  # 模块级导入（mock 目标 src.services.runtime_scheduler.get_effective_trading_date）
+            return (eff_date - last_date).days
+        except Exception:  # noqa: BLE001 - calendar unavailable -> no backfill guess
+            return None
+
+    def _send_failure_alert(self, source: str) -> None:
+        today = datetime.now().date().isoformat()
+        if self._last_failure_alert_date == today:
+            return  # 当日已告警，抑制重复
+        self._last_failure_alert_date = today
+        message = (
+            f"⚠️ 每日股票分析失败（连续 {self._consecutive_failures} 次）\n"
+            f"最近一次失败时间：{self._last_failed_at}\n"
+            f"最近一次成功时间：{self._last_success_at or '无'}\n"
+            f"失败原因：{self._last_error or '未知'}"
+        )
+        try:
+            self._alert_sender(message)
+        except Exception:  # noqa: BLE001 - alert must never break the scheduler
+            logger.warning("分析失败告警发送异常（已忽略）", exc_info=True)
 
     def _schedule_retry_if_needed(self) -> None:
         if self._consecutive_failures >= MAX_SCHEDULED_RETRIES:
@@ -304,6 +364,7 @@ class RuntimeSchedulerService:
                 "Runtime scheduled analysis failed %d consecutive times; no more retries",
                 self._consecutive_failures,
             )
+            self._send_failure_alert("exhausted")
             return
         retry_num = self._consecutive_failures
 
