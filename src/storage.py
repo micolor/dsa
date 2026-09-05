@@ -997,6 +997,32 @@ class AlertNotificationRecord(Base):
     )
 
 
+class NotificationDeliveryRecord(Base):
+    """Generic notification delivery attempt row (non-alert routes).
+
+    Covers report / system_error / legacy route_type=None sends, which today
+    have NO persisted receipt. Alert routes (alert/event) remain in
+    ``alert_notifications`` owned by ``AlertService.repo``.
+    """
+
+    __tablename__ = 'notification_deliveries'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    route_type = Column(String(32), nullable=False, default='default', index=True)
+    channel = Column(String(32), nullable=False, index=True)
+    attempt = Column(Integer, nullable=False, default=1)
+    success = Column(Boolean, nullable=False, default=False, index=True)
+    error_code = Column(String(64))
+    retryable = Column(Boolean, nullable=False, default=False)
+    latency_ms = Column(Integer)
+    diagnostics = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_notification_delivery_route_channel_time', 'route_type', 'channel', 'created_at'),
+    )
+
+
 class AlertCooldownRecord(Base):
     """Persisted alert cooldown state for DB-managed alert rules."""
 

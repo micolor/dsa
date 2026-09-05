@@ -1,6 +1,6 @@
 # 通知能力基线
 
-本文档记录通知能力 P0-P7 终态：渠道、配置 key、GitHub Actions 映射、Web 设置元数据、CLI 诊断口径、Web 一键测试、自定义 Webhook Body 模板语义、通知路由策略、降噪机制、聚合报告失败隔离、ntfy / Gotify 一等渠道、WebPush / Apprise 评估，以及本地 / Docker / GitHub Actions / Desktop 场景化配置说明。P0 只做基线与只读诊断；P1 增加 Web 单渠道真实测试；P2 产品化现有 Body 模板；P3 增加 report / alert / system_error 路由；P4 增加进程内降噪；P5 强化测试诊断和聚合报告逐渠道失败隔离；P6-A 新增 ntfy；P6-C 新增 Gotify；P6-D 只评估 WebPush / Apprise；P7 收口文档与 Actions env 对照表自动化，不新增运行时依赖、配置入口、per-URL 模板、跨进程持久化、真实每日摘要或重试循环。
+本文档记录通知能力 P0-P7 终态：渠道、配置 key、GitHub Actions 映射、Web 设置元数据、CLI 诊断口径、Web 一键测试、自定义 Webhook Body 模板语义、通知路由策略、降噪机制、聚合报告失败隔离、ntfy / Gotify 一等渠道、WebPush / Apprise 评估，以及本地 / Docker / GitHub Actions / Desktop 场景化配置说明。P0 只做基线与只读诊断；P1 增加 Web 单渠道真实测试；P2 产品化现有 Body 模板；P3 增加 report / alert / system_error 路由；P4 增加进程内降噪；P5 强化测试诊断和聚合报告逐渠道失败隔离；P6-A 新增 ntfy；P6-C 新增 Gotify；P6-D 只评估 WebPush / Apprise；P7 收口文档与 Actions env 对照表自动化，不新增运行时依赖、配置入口、per-URL 模板或真实每日摘要。需按实际实现放宽“无持久化 / 无重试”的语义：投递回执已落地（告警回执写 `alert_notifications`，通用投递回执写 `notification_deliveries`），且 Discord / Telegram / Feishu 在 sender 内部有限重试；详见下文“通知投递回执”章节。
 
 ## 渠道基线
 
@@ -234,6 +234,35 @@ P3 新增三类通知路由配置：
 - 路由过滤发生在 Markdown 转图片前，`MARKDOWN_TO_IMAGE_CHANNELS` 只对路由后的渠道子集生效。
 - `MERGE_EMAIL_NOTIFICATION` 不需要额外配置；只要 `email` 仍在 report 路由后的渠道中，现有合并邮件行为保持不变。
 - `--check-notify` 会把未知渠道值报为 error，把合法但未启用的路由目标报为 warning。
+
+## 通知投递回执
+
+通知发送会为每次投递记录回执，用于在 Web / API 侧核对发送结果。回执分为两类，由不同写入方负责，做到单一写入方、避免双重写入：
+
+| 回执 | 表 | 写入方 | 说明 |
+| --- | --- | --- | --- |
+| 告警回执 | `alert_notifications` | `AlertService.repo`（AlertWorker `_record_notification_attempts`） | `alert` / `event` 路由的告警投递结果 |
+| 通用投递回执 | `notification_deliveries` | `NotificationService.send_with_results` → `NotificationDeliveryRepository` | report / system_error / 遗产 `None` 路由的普通投递结果 |
+
+### 通用投递回执（`notification_deliveries`）
+
+`send_with_results()` 发送完成后自动落库，每条渠道一次发送对应一条记录。字段含 `route_type`、`channel`、`attempt`、`success`、`error_code`、`retryable`、`latency_ms`、`diagnostics`。
+
+- 路由范围：`_GENERAL_RECEIPT_ROUTES = frozenset({None, "report", "system_error"})`。`alert` / `event` 路由跳过，确保回执唯一写入方是 AlertWorker → `alert_notifications`。
+- 配置门控：`notification_delivery_receipts_enabled`（默认 `true`，环境变量 `NOTIFICATION_DELIVERY_RECEIPTS_ENABLED`，`.env.example` 中以注释形式给出示例）。关闭仅停止写回执，不影响正常发送。
+- 回执写入失败不改变发送语义：只记录 warning，不阻塞、不重试、不回滚已发送通知。
+- 表：`src/storage.py` 中 `NotificationDeliveryRecord`，`__tablename__ = 'notification_deliveries'`。
+- 仓储：`src/repositories/notification_delivery_repo.py` 的 `NotificationDeliveryRepository`。
+
+### 查询 API
+
+`GET /api/v1/notifications/deliveries`（`api/v1/endpoints/notification_deliveries.py`，挂在 `/api/v1/notifications` 前缀下）。按查询参数返回通用投递回执列表与总数，供 Web 设置页“通知投递”分类使用。
+
+### 重试边界
+
+- 编排层不做重试：`send_with_results()` 对每个渠道只发送一次，失败即记录回执，不启动重试循环，以避免重复发送。
+- 部分 sender 内部有限重试：Discord（按 `retry_after` / `Retry-After`）、Telegram（指数退避 `max_retries`）、Feishu（lark-oapi 重试循环）。这些属于渠道内部行为，不构成编排层通用重试机制。
+- 因此不存在“整体重试循环”；回执记录的是每次 dispatch 的最终结果。
 
 ## 聚合报告失败隔离
 

@@ -2620,14 +2620,16 @@ class NotificationService(
         if not self.should_broadcast_static_channels():
             if context_success:
                 logger.info("已通过上下文会话完成推送，跳过静态通知渠道")
-                return NotificationDispatchResult(
+                result = NotificationDispatchResult(
                     dispatched=True,
                     success=True,
                     status="sent",
                     channel_results=[ChannelAttemptResult(channel="__context__", success=True)],
                 )
+                self._record_general_delivery_receipts(route_type, result)
+                return result
             logger.warning("交互式上下文推送失败，已跳过静态通知渠道")
-            return NotificationDispatchResult(
+            result = NotificationDispatchResult(
                 dispatched=True,
                 success=False,
                 status="all_failed",
@@ -2641,41 +2643,51 @@ class NotificationService(
                 ],
                 message="interactive context delivery failed; static channels skipped",
             )
+            self._record_general_delivery_receipts(route_type, result)
+            return result
 
         if not self._available_channels:
             if context_success:
                 logger.info("已通过消息上下文渠道完成推送（无其他通知渠道）")
-                return NotificationDispatchResult(
+                result = NotificationDispatchResult(
                     dispatched=True,
                     success=True,
                     status="sent",
                     channel_results=[ChannelAttemptResult(channel="__context__", success=True)],
                 )
+                self._record_general_delivery_receipts(route_type, result)
+                return result
             logger.warning("通知服务不可用，跳过推送")
-            return NotificationDispatchResult(
+            result = NotificationDispatchResult(
                 dispatched=False,
                 success=False,
                 status="no_channel",
                 message="notification service unavailable",
             )
+            self._record_general_delivery_receipts(route_type, result)
+            return result
 
         target_channels = self.get_channels_for_route(route_type)
         if not target_channels:
             if context_success:
                 logger.info("已通过消息上下文渠道完成推送（路由后无其他通知渠道）")
-                return NotificationDispatchResult(
+                result = NotificationDispatchResult(
                     dispatched=True,
                     success=True,
                     status="sent",
                     channel_results=[ChannelAttemptResult(channel="__context__", success=True)],
                 )
+                self._record_general_delivery_receipts(route_type, result)
+                return result
             logger.warning("通知路由 %s 未命中任何已配置渠道，跳过静态通知渠道", route_type)
-            return NotificationDispatchResult(
+            result = NotificationDispatchResult(
                 dispatched=False,
                 success=False,
                 status="no_channel",
                 message=f"notification route {route_type} has no configured channel",
             )
+            self._record_general_delivery_receipts(route_type, result)
+            return result
 
         noise_decision = self.evaluate_noise_control(
             content,
@@ -2688,13 +2700,15 @@ class NotificationService(
             logger.info(noise_decision.message)
             status = "sent" if context_success else "noise_suppressed"
             results = [ChannelAttemptResult(channel="__context__", success=True)] if context_success else []
-            return NotificationDispatchResult(
+            result = NotificationDispatchResult(
                 dispatched=bool(context_success),
                 success=bool(context_success),
                 status=status,
                 channel_results=results,
                 message=noise_decision.message,
             )
+            self._record_general_delivery_receipts(route_type, result)
+            return result
 
         # Markdown to image (Issue #289): convert once if any channel needs it.
         # Per-channel decision via _should_use_image_for_channel (see send() docstring for fallback rules).
@@ -2792,11 +2806,99 @@ class NotificationService(
             status = "all_failed"
         if context_success:
             channel_results.insert(0, ChannelAttemptResult(channel="__context__", success=True))
-        return NotificationDispatchResult(
+        result = NotificationDispatchResult(
             dispatched=True,
             success=success,
             status=status,
             channel_results=channel_results,
+        )
+        self._record_general_delivery_receipts(route_type, result)
+        return result
+
+    # Non-alert routes that get a generic delivery receipt. Alert routes
+    # ('alert'/'event') are owned by AlertWorker -> alert_notifications.
+    _GENERAL_RECEIPT_ROUTES = frozenset({None, "report", "system_error"})
+
+    def _record_general_delivery_receipts(
+        self,
+        route_type: Optional[str],
+        dispatch: "NotificationDispatchResult",
+    ) -> None:
+        """Persist a delivery receipt for generic (non-alert) send routes.
+
+        Never raises and never alters dispatch semantics: a receipt-write
+        failure only logs a warning. Alert routes are skipped so the sole
+        writer stays ``AlertWorker`` -> ``alert_notifications``.
+        """
+        if route_type not in self._GENERAL_RECEIPT_ROUTES:
+            return
+        if not getattr(self._config, "notification_delivery_receipts_enabled", True):
+            return
+        try:
+            from src.repositories.notification_delivery_repo import (
+                NotificationDeliveryRepository,
+            )
+            repo = NotificationDeliveryRepository()
+        except Exception as exc:
+            logger.warning(
+                "通知投递回执仓储初始化失败，跳过回执记录：%s",
+                self._sanitize_notification_diagnostics(str(exc) or "notification delivery repo init failed"),
+            )
+            return
+
+        route = str(route_type or "default")[:32]
+        channel_results = list(dispatch.channel_results or [])
+        if not channel_results or not any(
+            str(item.channel or "").startswith("__") is False for item in channel_results
+        ):
+            channel_results = [self._synthetic_delivery_attempt(dispatch)]
+
+        try:
+            for attempt_index, item in enumerate(channel_results, start=1):
+                repo.record_delivery(
+                    {
+                        "route_type": route,
+                        "channel": str(item.channel or "__dispatch__")[:32],
+                        "attempt": attempt_index,
+                        "success": bool(item.success),
+                        "error_code": item.error_code,
+                        "retryable": bool(item.retryable),
+                        "latency_ms": self._optional_int(item.latency_ms),
+                        "diagnostics": self._sanitize_notification_diagnostics(
+                            item.diagnostics or dispatch.message
+                        ),
+                    }
+                )
+        except Exception as exc:
+            logger.warning(
+                "通知投递回执落库失败：%s",
+                self._sanitize_notification_diagnostics(str(exc) or "notification delivery record write failed"),
+            )
+
+    @staticmethod
+    def _optional_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _synthetic_delivery_attempt(dispatch: "NotificationDispatchResult") -> "ChannelAttemptResult":
+        status = str(dispatch.status or "unknown")
+        channel_by_status = {
+            "noise_suppressed": "__noise_suppressed__",
+            "no_channel": "__no_channel__",
+            "exception": "__dispatch__",
+        }
+        success = bool(dispatch.success)
+        return ChannelAttemptResult(
+            channel=channel_by_status.get(status, "__dispatch__"),
+            success=success,
+            error_code=None if success else status,
+            retryable=status not in {"noise_suppressed", "no_channel"},
+            diagnostics=dispatch.message,
         )
 
     def send(

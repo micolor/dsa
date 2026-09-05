@@ -1152,6 +1152,7 @@ class Config:
     # Markdown 转图片（Issue #289）：对不支持 Markdown 的渠道以图片发送
     markdown_to_image_channels: List[str] = field(default_factory=list)  # 逗号分隔：telegram,wechat,custom,email
     markdown_to_image_max_chars: int = 15000  # 超过此长度不转换，避免超大图片
+    notification_delivery_receipts_enabled: bool = True
     md2img_engine: str = "wkhtmltoimage"  # wkhtmltoimage | markdown-to-file | playwright
     share_image_xiaohongshu_url: Optional[str] = None
     share_image_xiaohongshu_handle: Optional[str] = None
@@ -2112,6 +2113,9 @@ class Config:
                 for c in os.getenv('MARKDOWN_TO_IMAGE_CHANNELS', '').split(',')
                 if c.strip()
             ],
+            notification_delivery_receipts_enabled=parse_env_bool(
+                os.getenv('NOTIFICATION_DELIVERY_RECEIPTS_ENABLED', 'true'), default=True
+            ),
             markdown_to_image_max_chars=parse_env_int(
                 os.getenv('MARKDOWN_TO_IMAGE_MAX_CHARS'),
                 15000,
