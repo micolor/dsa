@@ -117,7 +117,9 @@ class StockService:
             from data_provider.base import DataFetcherManager
             
             manager = DataFetcherManager()
-            df, source = manager.get_daily_data(stock_code, days=days)
+            # 交互式历史请求（K 线图）不做跨源一致性对账：
+            # 对账只记录告警、不改变返回数据，同步执行会二次取数阻塞加载，故关闭
+            df, source = manager.get_daily_data(stock_code, days=days, reconcile=False)
             
             if df is None or df.empty:
                 logger.warning(f"获取 {stock_code} 历史数据失败")

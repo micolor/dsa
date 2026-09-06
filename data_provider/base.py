@@ -1473,7 +1473,8 @@ class DataFetcherManager:
         stock_code: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        days: int = 30
+        days: int = 30,
+        reconcile: bool = True
     ) -> Tuple[pd.DataFrame, str]:
         """
         获取日线数据（自动切换数据源）
@@ -1591,7 +1592,8 @@ class DataFetcherManager:
                             )
                             self._record_daily_source_success(fetcher, market)
                             # 跨源一致性对账：用 fallback_to 再取一次日K做交叉验校（受门控），失败静默跳过
-                            if fallback_to:
+                            # 交互式历史请求（reconcile=False）不做交叉对账，避免二次取数阻塞 K 线图加载
+                            if reconcile and fallback_to:
                                 from src.config import get_config as _get_config
                                 if getattr(_get_config(), "data_quality_reconciliation_enabled", True):
                                     try:
@@ -1687,7 +1689,8 @@ class DataFetcherManager:
                     )
                     self._record_daily_source_success(fetcher, market)
                     # 跨源一致性对账：用 fallback_to 再取一次日K做交叉验校（受门控），失败静默跳过
-                    if fallback_to:
+                    # 交互式历史请求（reconcile=False）不做交叉对账，避免二次取数阻塞 K 线图加载
+                    if reconcile and fallback_to:
                         from src.config import get_config as _get_config
                         if getattr(_get_config(), "data_quality_reconciliation_enabled", True):
                             try:

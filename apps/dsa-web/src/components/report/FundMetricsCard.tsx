@@ -169,6 +169,7 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
                   <p className="label-uppercase">{row.label}</p>
                   <p className="mt-1 font-mono font-semibold text-foreground">
                     {row.value}
+                    {row.unit === '%' ? '' : ` ${row.unit}`}
                   </p>
                 </div>
               ))}
@@ -179,27 +180,27 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
           <div className="mt-4" data-testid="fund-holdings">
             <p className="label-uppercase mb-2">{text.topHoldings}</p>
             <div className="overflow-x-auto rounded-lg border border-subtle">
-              <table className="w-full min-w-[560px] text-sm">
+              <table className="w-full table-fixed text-sm whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-subtle bg-muted/30 text-left label-uppercase">
-                    <th className="px-3 py-2">{text.holdingsRank}</th>
-                    <th className="px-3 py-2">{text.holdingsStock}</th>
-                    <th className="px-3 py-2">{text.percentOfNav}</th>
-                    <th className="px-3 py-2">{text.shareCount}</th>
-                    <th className="px-3 py-2">{text.marketValue}</th>
+                  <tr className="border-b border-subtle bg-muted/30">
+                    <th className="w-12 px-3 py-2 text-left text-[11px] font-bold uppercase leading-none tracking-[0.24em] text-muted-text">{text.holdingsRank}</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase leading-none tracking-[0.24em] text-muted-text">{text.holdingsStock}</th>
+                    <th className="w-28 px-3 py-2 text-right text-[11px] font-bold uppercase leading-none tracking-[0.24em] text-muted-text">{text.percentOfNav}</th>
+                    <th className="w-28 px-3 py-2 text-right text-[11px] font-bold uppercase leading-none tracking-[0.24em] text-muted-text">{text.shareCount}</th>
+                    <th className="w-28 px-3 py-2 text-right text-[11px] font-bold uppercase leading-none tracking-[0.24em] text-muted-text">{text.marketValue}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {holdings.map((h, idx) => (
                     <tr key={`${h.stockCode}-${idx}`} className="border-b border-subtle last:border-0">
-                      <td className="px-3 py-2 font-mono">{toFiniteNumber(h.rank) ?? text.noValue}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 font-mono text-right">{toFiniteNumber(h.rank) ?? text.noValue}</td>
+                      <td className="px-3 py-2 text-left">
                         {h.stockName || text.noValue}
                         {h.stockCode ? <span className="ml-1 font-mono text-muted-text">({h.stockCode})</span> : null}
                       </td>
-                      <td className="px-3 py-2 font-mono">{percentRaw(h.pctOfNav)}</td>
-                      <td className="px-3 py-2 font-mono">{num(h.shareCount)}</td>
-                      <td className="px-3 py-2 font-mono">{num(h.marketValue)}</td>
+                      <td className="px-3 py-2 font-mono text-right">{percentRaw(h.pctOfNav)}</td>
+                      <td className="px-3 py-2 font-mono text-right">{num(h.shareCount)}</td>
+                      <td className="px-3 py-2 font-mono text-right">{num(h.marketValue)}</td>
                     </tr>
                   ))}
                 </tbody>
