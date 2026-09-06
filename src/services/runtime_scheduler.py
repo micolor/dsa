@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import _thread
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -426,8 +426,16 @@ class RuntimeSchedulerService:
 
             def paper_valuation_task() -> None:
                 try:
-                    account = PaperService().get_or_create_account()
-                    PaperService().run_daily_valuation(account["account_id"])
+                    service = PaperService()
+                    account = service.get_or_create_account()
+                    account_id = account["account_id"]
+                    # Only value a day once its market has closed (daily bar
+                    # finalized). Skip cheaply when the latest finalized date has
+                    # already been snapshotted, so daytime/night wakeups no-op.
+                    resolved = service.resolve_valuation_date(service.paper_repo.get_account(account_id))
+                    if resolved <= (service.latest_snapshot_date(account_id) or date.min):
+                        return
+                    service.run_daily_valuation(account_id, as_of_date=resolved)
                 except Exception as exc:  # pragma: no cover - defensive branch
                     logger.warning("paper daily valuation failed: %s", exc)
 

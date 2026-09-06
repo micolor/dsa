@@ -364,3 +364,27 @@ def test_buy_without_price_is_data_unavailable_and_retryable(isolated_db, servic
     _seed_daily(isolated_db, "600519", date(2026, 1, 5), 100, 100, 100, 100)
     result2 = PaperService(isolated_db).process_signal(sig.id)
     assert result2["disposition"] == "opened"
+
+
+def test_resolve_valuation_date_no_positions_returns_today(isolated_db, service):
+    # A fresh account with no open positions must fall back to the local date
+    # rather than erroring or returning a stale resolved session.
+    account_id = service.get_or_create_account()["account_id"]
+    account = service.paper_repo.get_account(account_id)
+    assert service.resolve_valuation_date(account) == date.today()
+
+
+def test_latest_snapshot_date_after_valuation(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "600519", d2, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+    service.process_signal(sig.id)
+
+    # The entry-day signal records a snapshot for its trade date (d1).
+    assert service.latest_snapshot_date(account_id) == d1
+
+    service.run_daily_valuation(account_id, as_of_date=d2)
+    assert service.latest_snapshot_date(account_id) == d2

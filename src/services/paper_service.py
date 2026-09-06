@@ -12,6 +12,7 @@ import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.trading_calendar import get_effective_trading_date, get_market_for_stock
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.paper_repo import PaperRepository
 from src.storage import DatabaseManager, DecisionSignalRecord
@@ -169,7 +170,7 @@ class PaperService:
         # Serialize valuation against signal consumption / backfill on the same
         # account so a stop-loss exit and a concurrent signal cannot interleave.
         with _account_lock(account.id):
-            as_of = as_of_date or date.today()
+            as_of = as_of_date or self.resolve_valuation_date(account)
             if not force and self.paper_repo.has_snapshot(account.id, as_of):
                 # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
                 snap = self.get_snapshot(account.id)
@@ -183,6 +184,29 @@ class PaperService:
                 }
 
             return self._valuate(account, as_of)
+
+    def resolve_valuation_date(self, account) -> date:
+        """Resolve the latest completed (finalized) daily-bar date to value at.
+
+        Uses the market of the account's first open position so the date reflects
+        that market's completed session (before close -> previous session, after
+        close -> current session). This avoids recording a premature "today"
+        snapshot priced against a not-yet-final daily bar. Falls back to today
+        when the account has no open position or a calendar is unavailable.
+        """
+        positions = self.paper_repo.list_open_positions(account.id)
+        if not positions:
+            return date.today()
+        market = get_market_for_stock(positions[0].stock_code)
+        try:
+            return get_effective_trading_date(market)
+        except Exception:  # pragma: no cover - calendar failure; fall back to local today
+            logger.warning("paper: resolve_valuation_date fallback to today", exc_info=True)
+            return date.today()
+
+    def latest_snapshot_date(self, account_id: int) -> Optional[date]:
+        """Return the most recent equity-snapshot date, or None if none exists."""
+        return self.paper_repo.latest_snapshot_date(account_id)
 
     def backfill_history(
         self,

@@ -311,6 +311,17 @@ class PaperRepository:
             ).scalar_one()
             return int(exists) > 0
 
+    def latest_snapshot_date(self, account_id: int) -> Optional[date]:
+        """Return the most recent equity-snapshot date, or None if none exists."""
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PaperEquitySnapshotRecord.trade_date)
+                .where(PaperEquitySnapshotRecord.account_id == account_id)
+                .order_by(desc(PaperEquitySnapshotRecord.trade_date))
+                .limit(1)
+            ).scalar_one_or_none()
+            return row
+
     def list_snapshots(
         self,
         account_id: int,
