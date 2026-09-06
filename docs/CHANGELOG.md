@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 报告「操作建议」块补充可执行指引：在短词结论（观望/买入等）之下拼接该报告 dashboard 的「关键点位行（现价/支撑/压力）」与「一句话核心结论（先做什么）」，缺日线/技术数据或多字段缺失时逐级降级，始终保底显示结论；仅读 `details.rawResult.dashboard`，不动数据源、不改 prop 契约，建议有料不再单薄
+- [改进] 首页自选卡片透出「一句话操作建议」：每张自选（及今日）卡片在名称下方展示该股最新分析的一句话建议（`operationAdvice`，单行截断 + 悬停 tooltip，按建议 tone 用 success/danger/warning 上色），让自选当天该怎么做一眼可见；无建议时不占位，完整理由仍走点击详情，不改数据契约与 i18n
 - [新功能] 通知投递回执：全路径持久化每次渠道投递状态与耗时并可在设置页追溯
 - [新功能] 通知投递列表 API（/api/v1/notifications/deliveries）与设置页投递视图
 - [新功能] 跨源一致性对账：选源成功后用次选源比对价差/交易日/字段缺失，命中记录数据质量异常并可按 system_error 路由告警

@@ -19,7 +19,7 @@ import { StockBar } from '../history';
 import { useStockPoolStore } from '../../stores';
 import type { StockBarItem, TaskInfo } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
-import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
+import { buildDecisionActionLabelMap, getDecisionActionLabel, getDecisionActionTone } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
 import { areStockCodesEquivalent, normalizeStockCode } from '../../utils/stockCode';
 import { truncateStockName } from '../../utils/stockName';
@@ -131,6 +131,26 @@ const ScoreBadge: React.FC<{ item?: StockBarItem }> = ({ item }) => {
   return <SentimentBadge color={color} operationLabel={operationLabel} score={score} />;
 };
 
+const ADVICE_TONE_TEXT: Record<'success' | 'warning' | 'danger' | 'default', string> = {
+  success: 'text-success',
+  danger: 'text-danger',
+  warning: 'text-warning',
+  default: 'text-muted-text',
+};
+
+/** 单行截断的一句话操作建议；无建议时不渲染（不占位，不影响卡片排版）。 */
+const AdviceLine: React.FC<{ item?: StockBarItem }> = ({ item }) => {
+  const advice = item?.operationAdvice?.trim();
+  if (!advice) return null;
+  const tone = getDecisionActionTone(item?.action, item?.actionLabel, advice);
+  const color = ADVICE_TONE_TEXT[tone] ?? ADVICE_TONE_TEXT.default;
+  return (
+    <Tooltip content={advice} className="min-w-0 max-w-full">
+      <span className={`block w-full truncate text-[11px] leading-snug ${color}`}>{advice}</span>
+    </Tooltip>
+  );
+};
+
 const WatchlistRowItemInner: React.FC<{
   row: HomeWatchlistRow;
   activeTask?: TaskInfo;
@@ -180,24 +200,27 @@ const WatchlistRowItemInner: React.FC<{
           : t('watchlist.noLatestDetailAria', { code: row.code })}
       onClick={handleOpenDetail}
       title={(
-        <div className="flex min-w-0 items-center gap-2">
-          <Tooltip
-            content={canOpenDetail ? t('common.details') : undefined}
-            className="min-w-0"
-          >
-            <span className="truncate text-sm font-semibold text-foreground">
-              {truncateStockName(stockName)}
-            </span>
-          </Tooltip>
-          {row.isTodayStatusLoading ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-text" aria-label={t('watchlist.todayStatusLoading')} />
-          ) : row.isTodayStatusUnknown ? (
-            <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label={t('watchlist.todayStatusUnavailable')} />
-          ) : row.analyzedToday ? (
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-label={t('watchlist.analyzedToday')} />
-          ) : (
-            <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-text" aria-label={t('watchlist.notAnalyzedToday')} />
-          )}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Tooltip
+              content={canOpenDetail ? t('common.details') : undefined}
+              className="min-w-0"
+            >
+              <span className="truncate text-sm font-semibold text-foreground">
+                {truncateStockName(stockName)}
+              </span>
+            </Tooltip>
+            {row.isTodayStatusLoading ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-text" aria-label={t('watchlist.todayStatusLoading')} />
+            ) : row.isTodayStatusUnknown ? (
+              <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label={t('watchlist.todayStatusUnavailable')} />
+            ) : row.analyzedToday ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-label={t('watchlist.analyzedToday')} />
+            ) : (
+              <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-text" aria-label={t('watchlist.notAnalyzedToday')} />
+            )}
+          </div>
+          <AdviceLine item={item} />
         </div>
       )}
       trailing={<ScoreBadge item={item} />}
@@ -255,9 +278,12 @@ const TodayItemInner: React.FC<{ item: StockBarItem; onClick: (recordId: number)
       onClick={() => onClick(item.id)}
       leading={leading}
       title={(
-        <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
-          {truncateStockName(stockName)}
-        </span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
+            {truncateStockName(stockName)}
+          </span>
+          <AdviceLine item={item} />
+        </div>
       )}
       trailing={<ScoreBadge item={item} />}
       meta={(

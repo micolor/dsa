@@ -111,6 +111,52 @@ const buildBoardSignalMaps = (details?: ReportDetailsType): BoardSignalMaps => (
   concepts: buildRankingSignalMap(details?.conceptRankings),
 });
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function numericText(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return null;
+}
+
+/**
+ * 从报告后台 dashboard 里拼出一句「关键点位 + 怎么操作」的可执行指引。
+ * 只读 `details.rawResult.dashboard`，字段缺失/异常时逐级降级，绝不让建议块崩掉。
+ * 返回 null 时由调用方兜底回退到现有 operationAdvice。
+ */
+function composeActionGuide(details?: ReportDetailsType): string | null {
+  const raw = asRecord(details?.rawResult);
+  const dashboard = asRecord(raw?.dashboard);
+
+  // ① 关键点位行：现价 + 支撑 / 压力（缺日线/技术数据时不出现）
+  const pricePosition = asRecord(dashboard?.price_position);
+  const current = numericText(pricePosition?.current_price);
+  const support = numericText(pricePosition?.support_level);
+  const resistance = numericText(pricePosition?.resistance_level);
+  const parts: string[] = [];
+  if (current) {
+    let line = `现价 ${current}`;
+    if (support) line += `，关键支撑 ${support}`;
+    if (resistance) line += `，压力 ${resistance}`;
+    parts.push(line);
+  }
+
+  // ② 一句话核心结论：直接告诉用户先做什么（≤30 字，口径与操作建议一致）
+  const core = asRecord(dashboard?.core_conclusion);
+  const oneSentence = typeof core?.one_sentence === 'string' ? core.one_sentence.trim() : '';
+  if (oneSentence && oneSentence !== '暂无') {
+    parts.push(oneSentence);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 const resolveBoardSignal = (
   board: { name?: string; type?: string },
   signalMaps: BoardSignalMaps,
@@ -327,7 +373,13 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 <div className="space-y-1.5">
                   <h3 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">{text.actionAdvice}</h3>
                   <p className="home-insight-body text-sm leading-6">
-                    {summary.operationAdvice || text.noAdvice}
+                    <span className="font-semibold">{summary.operationAdvice || text.noAdvice}</span>
+                    {(() => {
+                      const guide = composeActionGuide(details);
+                      return guide ? (
+                        <span className="mt-1 block text-[13px] leading-6 text-secondary-text">{guide}</span>
+                      ) : null;
+                    })()}
                   </p>
                 </div>
               </div>

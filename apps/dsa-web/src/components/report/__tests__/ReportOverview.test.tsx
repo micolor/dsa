@@ -308,4 +308,54 @@ describe('ReportOverview', () => {
     expect(screen.getByText('领跌')).toBeInTheDocument();
     expect(screen.getByText('-2.50%')).toBeInTheDocument();
   });
+
+  it('composes an actionable guide (key levels + one-sentence) under the advice', () => {
+    render(
+      <ReportOverview
+        meta={baseMeta}
+        summary={baseSummary}
+        details={{
+          rawResult: {
+            dashboard: {
+              price_position: { current_price: 18.6, support_level: 18.1, resistance_level: 19.2 },
+              core_conclusion: { one_sentence: '站上19.2前持有观望，跌破18.1再评估' },
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('继续观察买点')).toBeInTheDocument();
+    expect(
+      screen.getByText(/现价 18.6，关键支撑 18.1，压力 19.2 · 站上19.2前持有观望，跌破18.1再评估/),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to the bare advice when the dashboard has no actionable fields', () => {
+    render(<ReportOverview meta={baseMeta} summary={baseSummary} />);
+
+    expect(screen.getByText('继续观察买点')).toBeInTheDocument();
+    expect(screen.queryByText(/现价/)).not.toBeInTheDocument();
+  });
+
+  it('drops the guide line when key levels are missing but keeps its own advice', () => {
+    render(
+      <ReportOverview
+        meta={baseMeta}
+        summary={baseSummary}
+        details={{
+          rawResult: {
+            dashboard: {
+              price_position: {},
+              core_conclusion: { one_sentence: '短线震荡，先观望' },
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('继续观察买点')).toBeInTheDocument();
+    expect(screen.getByText('短线震荡，先观望')).toBeInTheDocument();
+    expect(screen.queryByText(/现价/)).not.toBeInTheDocument();
+  });
 });

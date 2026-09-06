@@ -82,6 +82,45 @@ describe('HomeStockWorkspace', () => {
     expect(row).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('surfaces the one-line operation advice on the watchlist card', () => {
+    renderWorkspace({
+      watchlistRows: [{
+        code: '600519',
+        analyzedToday: true,
+        latestItem: {
+          id: 21,
+          stockCode: '600519',
+          stockName: '贵州茅台',
+          sentimentScore: 88,
+          operationAdvice: '回调至关键均线可分批关注，当前量能偏弱',
+          analysisCount: 1,
+          lastAnalysisTime: '2026-03-19T09:00:00+08:00',
+        },
+      }],
+    });
+
+    expect(screen.getByText('回调至关键均线可分批关注，当前量能偏弱')).toBeInTheDocument();
+  });
+
+  it('does not render an advice line when the row has no operation advice', () => {
+    renderWorkspace({
+      watchlistRows: [{
+        code: '600519',
+        analyzedToday: true,
+        latestItem: {
+          id: 21,
+          stockCode: '600519',
+          stockName: '贵州茅台',
+          sentimentScore: 88,
+          analysisCount: 1,
+          lastAnalysisTime: '2026-03-19T09:00:00+08:00',
+        },
+      }],
+    });
+
+    expect(screen.queryByText('回调至关键均线可分批关注，当前量能偏弱')).not.toBeInTheDocument();
+  });
+
   it('shows an explicit notice when a watchlist row has no detail yet', async () => {
     const { onHistoryItemClick } = renderWorkspace({
       watchlistRows: [{
