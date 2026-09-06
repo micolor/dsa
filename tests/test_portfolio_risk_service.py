@@ -66,6 +66,18 @@ class PortfolioRiskStopLossTest(unittest.TestCase):
         self.assertEqual(result["near_count"], 1)
         self.assertFalse(result["items"][0]["is_triggered"])
 
+    def test_offexchange_fund_position_skips_stop_loss(self) -> None:
+        # 场外基金按净值估值、无止损语义；不应按 (成本-净值)/成本 误判成亏损触发。
+        result = PortfolioRiskService._build_stop_loss(
+            self._snapshot([
+                self._pos("FUND:006229", avg_cost=1.2, last_price=1.0),  # 净值 1.0 < 成本 1.2
+            ]),
+            self._thresholds(),
+        )
+        self.assertEqual(result["triggered_count"], 0)
+        self.assertFalse(result["near_alert"])
+        self.assertEqual(len(result["items"]), 0)
+
     def test_drawdown_backfill_caps_per_call_batch(self) -> None:
         # 首屏 /risk 不应一次性补齐整个 lookback 窗口，最近一批即可。
         repo = MagicMock()

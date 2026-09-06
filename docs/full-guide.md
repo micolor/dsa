@@ -1870,6 +1870,15 @@ worker 会把 `triggered`、`skipped`、`degraded`、`failed` 写入 `alert_trig
 - 当 `PORTFOLIO_FX_UPDATE_ENABLED=false` 时，手动刷新接口会明确返回“在线刷新已禁用”，页面不会误导为“当前没有可刷新的汇率对”。
 - 风险摘要包含集中度、回撤、止损接近度等信息；`sector_concentration` 会优先尝试按板块归类，失败时降级到 `UNCLASSIFIED`，不会阻断风险结果返回。
 
+### 场外基金持仓记账与估值
+
+- 组合持仓支持场外基金：符号使用 `fund:<6位代码>` 前缀（大小写不敏感，存储规范为 `FUND:<代码>`），录入方式与股票一致——交易 `price` 填申/赎净值、`quantity` 填份额，`market` 填 `cn`、`currency` 填 `CNY`。
+- 估值口径：持仓按**份额 × 最新单位净值**估值。快照估值只在基金码上走净值分支（`price_source="fund_nav"`、`price_provider="eastmoney"`），不进入股票实时行情 / `StockDaily` 历史收盘路径；取不到净值时该持仓回退为 `price_available=false`（价格 0），不影响其他股票持仓与整体快照。
+- 净值日期映射到 `price_date`，若早于快照 `as_of` 则标记 `price_stale=true`。场外基金为日频净值（T+1 披露），非实时，持仓 `limitations` 会附带说明「场外基金按最新单位净值估值，非实时」。
+- 风险侧跳出场外基金：基金不参与股票逻辑的止损接近、板块归类和决策信号归一化（避免按 `(成本-净值)/成本` 误判亏损或按股票码去查板块），但按市值计入组合集中度占比。
+- 前端持仓行对基金展示代码 +「场外基金」标识与净值口径标签，并禁用仅股票适用的「分析」「价格历史」入口。
+- CSV 导入与基金专属风控（止损/回撤归因）不在本轮范围，可按需增量。
+
 ### Agent 读取持仓
 
 - Agent 可通过 `get_portfolio_snapshot` 获取面向账户的紧凑持仓摘要，默认包含精简风险块，适合控制 Token 开销。

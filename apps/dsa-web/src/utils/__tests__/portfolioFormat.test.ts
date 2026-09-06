@@ -10,6 +10,8 @@ import {
   getCsvCommitVariant,
   getCsvParseVariant,
   getPositionPriceLabel,
+  formatPositionSymbol,
+  isFundSymbol,
 } from '../portfolioFormat';
 import type { PortfolioPositionItem } from '../../types/portfolio';
 
@@ -47,6 +49,32 @@ describe('portfolioFormat', () => {
     expect(formatPositionPrice(missingPosition)).toBe('--');
     expect(formatPositionMoney(123, missingPosition)).toBe('--');
     expect(getPositionPriceLabel(missingPosition)).toBe('缺价');
+  });
+
+  it('recognizes and labels off-exchange fund symbols', () => {
+    expect(isFundSymbol('fund:006229')).toBe(true);
+    expect(isFundSymbol('FUND:006229')).toBe(true);
+    expect(isFundSymbol('hk00700')).toBe(false);
+    expect(isFundSymbol(undefined)).toBe(false);
+    expect(formatPositionSymbol('fund:006229')).toBe('006229（场外基金）');
+    expect(formatPositionSymbol('FUND:006229')).toBe('006229（场外基金）');
+    expect(formatPositionSymbol('HK00700')).toBe('HK00700');
+    expect(formatPositionSymbol('')).toBe('--');
+  });
+
+  it('labels fund_nav price source with price date', () => {
+    const fundPosition: PortfolioPositionItem = {
+      ...pricedPosition,
+      symbol: 'FUND:006229',
+      market: 'cn',
+      currency: 'CNY',
+      priceSource: 'fund_nav',
+      priceProvider: 'eastmoney',
+      priceDate: '2026-09-04',
+      lastPrice: 1.2345,
+    };
+    expect(getPositionPriceLabel(fundPosition)).toBe('单位净值 · 2026-09-04');
+    expect(formatPositionPrice(fundPosition)).toBe('1.2345');
   });
 
   it('trims noisy trailing zeros in prices, costs and quantities', () => {

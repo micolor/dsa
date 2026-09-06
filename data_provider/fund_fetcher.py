@@ -237,7 +237,35 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
 }
 
+_FUND_NAV_PROVIDER = "eastmoney"
+
+def _parse_nav_date(value: str) -> Optional[date]:
+    """把东财净值日期字符串（YYYY-MM-DD）解析为 date；非法返回 None。"""
+    try:
+        return date.fromisoformat((value or "").strip()[:10])
+    except (TypeError, ValueError):
+        return None
+
 class FundFetcher:
+    def get_latest_nav(self, code: str) -> Optional[tuple]:
+        """按代码取最新单位净值，返回 (nav: float, date: date)；失败返回 None。
+
+        只拉净值页一页，按日期取最大（不依赖接口返回顺序，兼容新旧两种排法），
+        不取持仓/资产配置，供组合持仓按净值估值做轻量调用。
+        """
+        base = strip_fund_prefix(code)
+        try:
+            nav = self._fetch_nav(base, 60)
+        except Exception:
+            return None
+        if not nav:
+            return None
+        latest = max(nav, key=lambda r: r.date)  # YYYY-MM-DD 字符串按时间序可比较
+        if latest.unit_nav is None or latest.unit_nav <= 0:
+            return None
+        nav_date = _parse_nav_date(latest.date)
+        return (float(latest.unit_nav), nav_date) if nav_date else None
+
     def get_profile(self, code: str, history_len: int = 250) -> FundProfile:
         base = strip_fund_prefix(code)
         nav = self._fetch_nav(base, history_len)

@@ -38,10 +38,12 @@ import {
   formatPositionMoney,
   formatPositionPrice,
   formatPriceDecimal,
+  formatPositionSymbol,
   formatSideLabel,
   formatSignedPct,
   getCsvCommitVariant,
   getCsvParseVariant,
+  isFundSymbol,
   getFxRefreshFeedbackVariant,
   getPositionPriceLabel,
   getTodayIso,
@@ -787,7 +789,8 @@ const PortfolioPage: React.FC = () => {
     let active = true;
     let attempts = 0;
     const maxAttempts = 12; // 后台拉取慢（~12-20s），给足 30s 轮询窗口
-    if (!positionDetailRow) {
+    if (!positionDetailRow || isFundSymbol(positionDetailRow.symbol)) {
+      // 场外基金无股票收盘价序列（按净值估值），不拉价格历史
       setPriceHistory([]);
       return () => { active = false; };
     }
@@ -909,6 +912,7 @@ const PortfolioPage: React.FC = () => {
   }, [portfolioSignals, positionRows]);
 
   const handleAnalyzePosition = async (row: FlatPosition) => {
+    if (isFundSymbol(row.symbol)) return;
     const key = `${row.accountId}-${row.symbol}-${row.market}`;
     setPositionAnalysisLoadingKey(key);
     setPositionAnalysisMessage(null);
@@ -1659,7 +1663,7 @@ const PortfolioPage: React.FC = () => {
                             onClick={(e) => { e.stopPropagation(); setPositionDetailRow(row); }}
                             className="font-mono text-foreground whitespace-nowrap transition-colors hover:text-primary focus:outline-none"
                           >
-                            {row.symbol}
+                            {formatPositionSymbol(row.symbol)}
                           </button>
                           {(isConcentrationAlert || stopLoss || row.priceStale) ? (
                             <span className="flex items-center gap-1">
@@ -1670,6 +1674,9 @@ const PortfolioPage: React.FC = () => {
                           ) : null}
                         </div>
                         {stockName ? <div className="text-[11px] text-secondary-text">{stockName}</div> : null}
+                        {isFundSymbol(row.symbol) ? (
+                          <div className="text-[11px] text-secondary-text">场外基金</div>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">{formatPriceDecimal(row.quantity, 2)}</td>
                       <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">{formatPriceDecimal(row.avgCost, 4)}</td>
@@ -1715,10 +1722,10 @@ const PortfolioPage: React.FC = () => {
                             e.stopPropagation();
                             void handleAnalyzePosition(row);
                           }}
-                          disabled={analyzing}
+                          disabled={analyzing || isFundSymbol(row.symbol)}
                         >
                           <Sparkles className={`h-3.5 w-3.5 ${analyzing ? 'animate-pulse' : ''}`} />
-                          {analyzing ? text.submitting : text.analyze}
+                          {isFundSymbol(row.symbol) ? '基金按净值估值' : analyzing ? text.submitting : text.analyze}
                         </Button>
                       </td>
                     </tr>

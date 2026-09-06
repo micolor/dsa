@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import Config, get_config
+from data_provider.fund_fetcher import is_fund_code
 from src.repositories.portfolio_repo import PortfolioRepository
 from src.services.decision_signal_service import DecisionSignalService
 from src.services.decision_signal_summary import summarize_decision_signal
@@ -194,7 +195,8 @@ class PortfolioRiskService:
             for pos in account.get("positions", []) or []:
                 symbol = str(pos.get("symbol") or "").strip().upper()
                 market = str(pos.get("market") or "").strip().lower()
-                if not symbol or market not in {"cn", "hk", "us", "jp", "kr", "tw"}:
+                # 场外基金不做股票决策信号归一化（按净值估值，无股票档位）
+                if not symbol or is_fund_code(symbol) or market not in {"cn", "hk", "us", "jp", "kr", "tw"}:
                     continue
                 signal_stock_code = DecisionSignalService.normalize_stock_code_for_signal(symbol, market=market)
                 positions.append({
@@ -430,7 +432,7 @@ class PortfolioRiskService:
         if cache_key in board_cache:
             return board_cache[cache_key]
 
-        if market != "cn":
+        if market != "cn" or is_fund_code(symbol):
             coverage["unclassified_count"] += 1
             board_cache[cache_key] = "UNCLASSIFIED"
             return board_cache[cache_key]
@@ -569,6 +571,9 @@ class PortfolioRiskService:
         warnings: List[Dict[str, Any]] = []
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
+                # 场外基金按净值，无股票式止损语义，跳过
+                if is_fund_code(str(pos.get("symbol") or "")):
+                    continue
                 avg_cost = float(pos.get("avg_cost", 0.0) or 0.0)
                 last_price = float(pos.get("last_price", 0.0) or 0.0)
                 # 缺价（last_price<=0，price_available=False）时无法判断止损位置，

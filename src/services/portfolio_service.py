@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
+from data_provider.fund_fetcher import is_fund_code, strip_fund_prefix
 from src.config import get_config
 from src.services import portfolio_cache
 from src.repositories.portfolio_repo import (
@@ -39,6 +40,10 @@ VALID_CASH_DIRECTIONS = {"in", "out"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
 PORTFOLIO_REALTIME_QUOTE_MAX_WORKERS = 4
+# 场外基金按最新单位净值估值（东财 lsjz）。估值来源标记，非实时行情。
+FUND_NAV_PRICE_SOURCE = "fund_nav"
+FUND_NAV_PROVIDER = "eastmoney"
+FUND_LIMITATION_NOTE = "场外基金按最新单位净值估值，非实时"
 
 
 def _portfolio_limitations_for_market(market: str) -> List[str]:
@@ -1106,6 +1111,8 @@ class PortfolioService:
             )
             last_price = price_info.price
             limitations = _portfolio_limitations_for_market(market)
+            if is_fund_code(symbol):
+                limitations = _merge_portfolio_limitations(limitations, [FUND_LIMITATION_NOTE])
 
             if price_info.is_available:
                 local_market_value = qty * float(last_price)
@@ -1170,6 +1177,22 @@ class PortfolioService:
     ) -> _ResolvedPositionPrice:
         today = date.today()
 
+        # 场外基金：不走股票实时行情/收盘价，按最新单位净值估值（基金 T+1 非实时）。
+        if is_fund_code(symbol):
+            nav = self._latest_fund_nav(symbol)
+            if nav is not None:
+                nav_price, nav_date = nav
+                if nav_price is not None and nav_price > 0:
+                    return _ResolvedPositionPrice(
+                        price=float(nav_price),
+                        source=FUND_NAV_PRICE_SOURCE,
+                        price_date=nav_date,
+                        is_stale=(nav_date is None or nav_date < as_of_date),
+                        is_available=True,
+                        provider=FUND_NAV_PROVIDER,
+                    )
+            # 取不到净值则落到历史收盘/缺失兜底（基金无 StockDaily 行，通常进 missing）
+
         if include_realtime and as_of_date == today:
             if realtime_prices is None:
                 realtime_price, provider = self._fetch_realtime_position_price(symbol)
@@ -1209,7 +1232,8 @@ class PortfolioService:
         self,
         symbols: Iterable[str],
     ) -> Dict[str, Tuple[Optional[float], Optional[str]]]:
-        unique_symbols = sorted({symbol for symbol in symbols if symbol})
+        # 基金走 NAV 估值，不进实时行情批量预取
+        unique_symbols = sorted({symbol for symbol in symbols if symbol and not is_fund_code(symbol)})
         if not unique_symbols:
             return {}
 
@@ -1248,6 +1272,10 @@ class PortfolioService:
 
     @staticmethod
     def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
+        # 场外基金无盘中实时行情，避免误入股票行情路径（走 _resolve_position_price 的 NAV 分支）
+        if is_fund_code(symbol):
+            return None, None
+
         try:
             from data_provider.base import DataFetcherManager
 
@@ -1274,13 +1302,50 @@ class PortfolioService:
         return numeric_price, provider
 
     @staticmethod
+    def _latest_fund_nav(symbol: str) -> Optional[Tuple[Optional[float], Optional[date]]]:
+        """取场外基金最新单位净值，返回 (nav, date)；失败返回 None。
+
+        复用 FundFetcher.get_latest_nav（只拉净值页一页），供持仓估值轻量调用。
+        """
+        try:
+            from data_provider.fund_fetcher import FundFetcher
+
+            result = FundFetcher().get_latest_nav(symbol)
+        except Exception as exc:
+            logger.warning("Failed to fetch fund NAV for %s: %s", symbol, exc)
+            return None
+        if result is None:
+            return None
+        nav, nav_date = result
+        return (nav, nav_date)
+
+    @staticmethod
+    def _normalize_fund_symbol(symbol: str) -> str:
+        """若为场外基金码（fund: 前缀），返回规范形式 `fund:<数字>`（小写前缀）。
+
+        返回空串表示未经基金识别到该符号；非空字符串表示已规范化。
+        """
+        if not is_fund_code(symbol):
+            return ""
+        digits = strip_fund_prefix(symbol).strip()
+        # 与股票符号一致统一大写，避免 _build_symbol_filter_values 转大写后匹配不上
+        return f"FUND:{digits}" if digits else ""
+
+    @staticmethod
     def _normalize_symbol_for_storage(symbol: str) -> str:
+        fund = PortfolioService._normalize_fund_symbol(symbol)
+        if fund:
+            return fund
         return canonical_stock_code(symbol)
 
     @staticmethod
     def _normalize_symbol_for_position(symbol: str) -> str:
         if not (symbol or "").strip():
             return ""
+
+        fund = PortfolioService._normalize_fund_symbol(symbol)
+        if fund:
+            return fund
 
         raw = canonical_stock_code(symbol)
         if len(raw) >= 8 and raw[:2] in {"SH", "SZ", "BJ"} and raw[2:].isdigit():
@@ -1305,6 +1370,10 @@ class PortfolioService:
         raw = canonical_stock_code(symbol)
         if not raw:
             return ""
+
+        fund = PortfolioService._normalize_fund_symbol(symbol)
+        if fund:
+            return fund
 
         if len(raw) >= 8 and raw[:2] in {"SH", "SZ", "BJ"} and raw[2:].isdigit():
             return raw

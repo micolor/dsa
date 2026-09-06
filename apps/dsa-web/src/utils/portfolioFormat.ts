@@ -43,6 +43,18 @@ export function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
 
+const FUND_PREFIX_RE = /^fund:/i;
+
+export function isFundSymbol(symbol: string | undefined | null): boolean {
+  return Boolean(symbol && FUND_PREFIX_RE.test(String(symbol).trim()));
+}
+
+export function formatPositionSymbol(symbol: string): string {
+  if (!isFundSymbol(symbol)) return symbol || '--';
+  const digits = String(symbol).replace(FUND_PREFIX_RE, '');
+  return `${digits}（场外基金）`;
+}
+
 export function formatPriceDecimal(value: number | undefined | null, maxDecimals = 4): string {
   if (value == null || Number.isNaN(value)) return '--';
   const fixed = value.toFixed(maxDecimals);
@@ -68,6 +80,9 @@ export function getPositionPriceLabel(row: PortfolioPositionItem): string {
   }
   if (row.priceSource === 'history_close') {
     return row.priceStale && row.priceDate ? `收盘价 · ${row.priceDate}` : '收盘价';
+  }
+  if (row.priceSource === 'fund_nav') {
+    return row.priceDate ? `单位净值 · ${row.priceDate}` : '单位净值';
   }
   return row.priceSource || '未知来源';
 }

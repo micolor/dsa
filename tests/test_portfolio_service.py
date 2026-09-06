@@ -614,6 +614,63 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(missing["unrealized_pnl_base"], 0.0, places=6)
         self.assertIsNone(missing["unrealized_pnl_pct"])
 
+    def test_offexchange_fund_position_values_at_latest_nav(self) -> None:
+        from data_provider.fund_fetcher import FundFetcher
+
+        with patch.object(FundFetcher, "get_latest_nav", return_value=(1.5, date(2026, 1, 3))):
+            account = self.service.create_account(name="Fund", broker="Demo", market="cn", base_currency="CNY")
+            aid = account["id"]
+            self.service.record_trade(
+                account_id=aid,
+                symbol="fund:006229",
+                trade_date=date(2026, 1, 2),
+                side="buy",
+                quantity=500.0,
+                price=1.2,
+                market="cn",
+                currency="CNY",
+            )
+
+            snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 1, 3), cost_method="fifo")
+            position = snapshot["accounts"][0]["positions"][0]
+
+            self.assertEqual(position["symbol"], "FUND:006229")
+            self.assertEqual(position["price_source"], "fund_nav")
+            self.assertEqual(position["price_provider"], "eastmoney")
+            self.assertEqual(position["price_date"], "2026-01-03")
+            self.assertFalse(position["price_stale"])
+            self.assertTrue(position["price_available"])
+            self.assertAlmostEqual(position["last_price"], 1.5, places=6)
+            self.assertAlmostEqual(position["quantity"], 500.0, places=6)
+            self.assertAlmostEqual(position["market_value_base"], 1.5 * 500.0, places=6)
+            self.assertAlmostEqual(position["unrealized_pnl_base"], 1.5 * 500.0 - 1.2 * 500.0, places=6)
+            self.assertIn("场外基金按最新单位净值估值，非实时", position["limitations"])
+
+    def test_offexchange_fund_falls_back_to_missing_when_nav_unavailable(self) -> None:
+        from data_provider.fund_fetcher import FundFetcher
+
+        with patch.object(FundFetcher, "get_latest_nav", return_value=None):
+            account = self.service.create_account(name="Fund", broker="Demo", market="cn", base_currency="CNY")
+            aid = account["id"]
+            self.service.record_trade(
+                account_id=aid,
+                symbol="fund:006229",
+                trade_date=date(2026, 1, 2),
+                side="buy",
+                quantity=500.0,
+                price=1.2,
+                market="cn",
+                currency="CNY",
+            )
+
+            snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 1, 3), cost_method="fifo")
+            position = snapshot["accounts"][0]["positions"][0]
+
+            self.assertEqual(position["price_source"], "missing")
+            self.assertFalse(position["price_available"])
+            self.assertAlmostEqual(position["last_price"], 0.0, places=6)
+            self.assertIn("场外基金按最新单位净值估值，非实时", position["limitations"])
+
     def test_build_positions_handles_zero_cost_without_division(self) -> None:
         account = SimpleNamespace(base_currency="CNY")
 
