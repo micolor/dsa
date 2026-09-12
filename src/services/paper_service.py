@@ -20,6 +20,7 @@ from src.core.trading_calendar import (
 )
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.paper_repo import PaperRepository
+from src.services.paper_notify import send_paper_fill_notification
 from src.storage import DatabaseManager, DecisionSignalRecord
 
 logger = logging.getLogger(__name__)
@@ -360,14 +361,15 @@ class PaperService:
                 if self.paper_repo.has_signal_record(account.id, signal.id):
                     continue
                 as_of = self._signal_trade_date(signal)
-                disposition = self._handle_signal(account, signal, as_of)
+                # 回填是重放，一次可能落几百笔成交，全程静音（notify=False）。
+                disposition = self._handle_signal(account, signal, as_of, notify=False)
                 if disposition == _DATA_UNAVAILABLE:
                     # 不记已消费，留给后续回填/运行重试，避免瞬时数据缺失永久丢单。
                     unavailable += 1
                     continue
                 self.paper_repo.add_signal_record(account.id, signal.id, signal.action, disposition)
                 if disposition in _PORTFOLIO_CHANGING_DISPOSITIONS:
-                    self._valuate(account, as_of)
+                    self._valuate(account, as_of, notify=False)
                 processed += 1
 
         return {
@@ -473,18 +475,37 @@ class PaperService:
     # ------------------------------------------------------------------
     # Core signal handling
     # ------------------------------------------------------------------
-    def _handle_signal(self, account, signal: DecisionSignalRecord, as_of: date) -> str:
+    def _notify_fill(self, account, trade, disposition: str, notify: bool) -> None:
+        """Push one live fill to the configured channels.
+
+        `notify=False` is the backfill path: a replay can emit hundreds of fills
+        and pushing each one would flood the channels. The notifier itself never
+        raises, and its own enabled/disabled gate lives in `paper_notify`.
+        """
+        if not notify or trade is None:
+            return
+        send_paper_fill_notification(
+            trade,
+            cash_after=float(getattr(account, "cash", 0.0) or 0.0),
+            disposition=disposition,
+        )
+
+    def _handle_signal(
+        self, account, signal: DecisionSignalRecord, as_of: date, notify: bool = True
+    ) -> str:
         action = signal.action
         if action in _OPEN_ACTIONS:
-            return self._open_or_add(account, signal, as_of)
+            return self._open_or_add(account, signal, as_of, notify=notify)
         if action == "sell":
-            return self._reduce_position(account, signal, as_of, fraction=1.0)
+            return self._reduce_position(account, signal, as_of, fraction=1.0, notify=notify)
         if action == "reduce":
-            return self._reduce_position(account, signal, as_of, fraction=0.5)
+            return self._reduce_position(account, signal, as_of, fraction=0.5, notify=notify)
         # hold / watch / avoid / alert -> no position change
         return "ignored"
 
-    def _open_or_add(self, account, signal: DecisionSignalRecord, as_of: date) -> str:
+    def _open_or_add(
+        self, account, signal: DecisionSignalRecord, as_of: date, notify: bool = True
+    ) -> str:
         code = signal.stock_code
         bar = self._bar_for(code, as_of)
         if bar is None:
@@ -537,7 +558,7 @@ class PaperService:
                 },
             )
             self._apply_cash(account, -(amount + fee))
-            self.paper_repo.add_trade(
+            trade = self.paper_repo.add_trade(
                 account.id,
                 signal_id=signal.id,
                 stock_code=code,
@@ -550,6 +571,7 @@ class PaperService:
                 trade_date=as_of,
                 reason="signal_action",
             )
+            self._notify_fill(account, trade, "opened", notify)
             return "opened"
 
         # Add to an existing position: never push past the target weight, and never
@@ -583,7 +605,7 @@ class PaperService:
             fields["target_price"] = signal.target_price
         self.paper_repo.upsert_position(account.id, code, fields)
         self._apply_cash(account, -(amount + fee))
-        self.paper_repo.add_trade(
+        trade = self.paper_repo.add_trade(
             account.id,
             signal_id=signal.id,
             stock_code=code,
@@ -596,10 +618,16 @@ class PaperService:
             trade_date=as_of,
             reason="signal_action",
         )
+        self._notify_fill(account, trade, "added", notify)
         return "added"
 
     def _reduce_position(
-        self, account, signal: DecisionSignalRecord, as_of: date, fraction: float
+        self,
+        account,
+        signal: DecisionSignalRecord,
+        as_of: date,
+        fraction: float,
+        notify: bool = True,
     ) -> str:
         code = signal.stock_code
         position = self.paper_repo.get_open_position(account.id, code)
@@ -642,7 +670,7 @@ class PaperService:
         amount = sell_price * quantity
         fee = self._fee_for(amount, "sell", market)
         self._apply_cash(account, amount - fee)
-        self.paper_repo.add_trade(
+        trade = self.paper_repo.add_trade(
             account.id,
             signal_id=signal.id,
             stock_code=code,
@@ -655,12 +683,13 @@ class PaperService:
             trade_date=as_of,
             reason="signal_action",
         )
+        self._notify_fill(account, trade, disposition, notify)
         return disposition
 
     # ------------------------------------------------------------------
     # Daily valuation & exits
     # ------------------------------------------------------------------
-    def _valuate(self, account, as_of: date) -> Dict[str, Any]:
+    def _valuate(self, account, as_of: date, notify: bool = True) -> Dict[str, Any]:
         """Mark-to-market open positions, trigger stop-loss/take-profit, snapshot."""
         positions = self.paper_repo.list_open_positions(account.id)
         for position in positions:
@@ -692,7 +721,7 @@ class PaperService:
 
             exit_price, exit_reason = self._daily_exit(position, bar)
             if exit_price is not None:
-                self._close_by_exit(account, position, exit_price, as_of, exit_reason)
+                self._close_by_exit(account, position, exit_price, as_of, exit_reason, notify=notify)
                 continue
 
             self.paper_repo.upsert_position(
@@ -756,7 +785,9 @@ class PaperService:
         open_price = float(open_price)
         return min(float(trigger), open_price) if below else max(float(trigger), open_price)
 
-    def _close_by_exit(self, account, position, exit_price: float, as_of: date, reason: str):
+    def _close_by_exit(
+        self, account, position, exit_price: float, as_of: date, reason: str, notify: bool = True
+    ):
         quantity = float(position.quantity or 0)
         exit_price = self._apply_slippage(exit_price, "sell")
         market = getattr(position, "market", None)
@@ -768,7 +799,7 @@ class PaperService:
             position.stock_code,
             {"current_price": exit_price, "market_value": exit_price * quantity},
         )
-        self.paper_repo.add_trade(
+        trade = self.paper_repo.add_trade(
             account.id,
             signal_id=position.open_signal_id,
             stock_code=position.stock_code,
@@ -781,6 +812,7 @@ class PaperService:
             trade_date=as_of,
             reason=reason,
         )
+        self._notify_fill(account, trade, "closed", notify)
         logger.info(
             "paper: closed %s %s @ %.2f (%s)", position.stock_code, quantity, exit_price, reason
         )

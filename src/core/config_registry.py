@@ -3604,6 +3604,36 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "PAPER_NOTIFY_ENABLED": {
+        "title": "Paper Trading Fill Notifications",
+        "description": "Push a notification for every paper-trading fill produced by live signals and daily stop-loss / take-profit exits. Historical backfill replays stay silent. Requires at least one channel configured under the event notification route.",
+        "category": "system",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 53,
+        "help_key": "settings.system.PAPER_NOTIFY_ENABLED",
+        "examples": [
+            "PAPER_NOTIFY_ENABLED=false",
+            "PAPER_NOTIFY_ENABLED=true",
+        ],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+            {
+                "label": "通知专题文档",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/notifications.md",
+            },
+        ],
+        "warning_codes": [],
+    },
     "DEBUG": {
         "title": "Debug Mode",
         "description": "Enable debug mode with verbose logging.",

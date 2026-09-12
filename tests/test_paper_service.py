@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from unittest import mock
 
 import pandas as pd
 import pytest
 
 from src.config import Config
+from src.services import paper_notify as ps_notify
+from src.services import paper_service as ps
 from src.services.paper_service import PaperService, clear_bar_cache_for_tests
 from src.storage import DatabaseManager, DecisionSignalRecord, utc_naive_now
 
@@ -800,3 +803,74 @@ def test_reset_rejects_invalid_capital_without_touching_the_account(isolated_db,
     current = service.get_or_create_account()
     assert current["account_id"] == account_id
     assert current["status"] == "active"
+
+
+# ----------------------------------------------------------------------
+# 成交通知：只走实时路径，回填静音
+# ----------------------------------------------------------------------
+def test_live_fill_notifies_with_cash_after(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+
+    with mock.patch.object(ps, "send_paper_fill_notification", return_value=True) as notifier:
+        assert service.process_signal(sig.id)["disposition"] == "opened"
+
+    assert notifier.call_count == 1
+    trade = notifier.call_args.args[0]
+    assert (trade.stock_code, trade.side, trade.quantity) == ("600519", "buy", 2000.0)
+    assert notifier.call_args.kwargs["disposition"] == "opened"
+    # 通知里的「成交后现金」必须已经是扣款后的值，而不是成交前的。
+    assert notifier.call_args.kwargs["cash_after"] == pytest.approx(1000000.0 - 200000.0 - 52.0)
+
+
+def test_exit_fill_notifies_as_closed(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "600519", d2, 116, 120, 110, 118)
+    buy_sig = _make_signal(isolated_db, action="buy", entry_high=100.0, target_price=115.0,
+                           created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+    service.process_signal(buy_sig.id)
+
+    with mock.patch.object(ps, "send_paper_fill_notification", return_value=True) as notifier:
+        service.run_daily_valuation(account_id, as_of_date=d2)
+
+    assert notifier.call_count == 1
+    assert notifier.call_args.args[0].reason == "take_profit"
+    assert notifier.call_args.kwargs["disposition"] == "closed"
+
+
+def test_backfill_stays_silent(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+
+    with mock.patch.object(ps, "send_paper_fill_notification", return_value=True) as notifier:
+        result = service.backfill_history(
+            account_id, from_date=date(2026, 1, 1), to_date=date(2026, 1, 31)
+        )
+
+    assert result["signals_replayed"] == 1
+    # 回填确实落了成交，只是全程不推送。
+    assert [t for t in service.get_trades(account_id)["items"] if t["side"] == "buy"]
+    notifier.assert_not_called()
+
+
+def test_notifier_failure_does_not_break_the_fill(isolated_db):
+    # 通知渠道整个不可用时，成交、净值与「已消费」标记都必须照常落库：
+    # 吞异常发生在 paper_notify 内部，这里用真实实现 + 抛异常的 NotificationService 钉住它。
+    svc = _service_with_fee_env(isolated_db, PAPER_NOTIFY_ENABLED="true")
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+
+    with mock.patch.object(ps_notify, "NotificationService", side_effect=RuntimeError("boom")):
+        result = svc.process_signal(sig.id)
+
+    assert result["disposition"] == "opened"
+    account_id = svc.get_or_create_account()["account_id"]
+    assert [t["side"] for t in svc.get_trades(account_id)["items"]] == ["buy"]
+    assert svc.process_signal(sig.id)["status"] == "skipped"

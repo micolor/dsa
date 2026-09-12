@@ -13,6 +13,7 @@
 - ✅ **方向 F（同日触及止损与止盈的判定细化）** 已实施：见第 10 节。
 - ⚠️ **方向 G（前复权覆盖写入对存量持仓的影响）** 已确认影响、**未改代码**：见第 11 节（属新增能力，需独立评审）。
 - ✅ **方向 H（账户初始资金配置与重置）** 已实施：见第 12 节。
+- ✅ **方向 I（模拟盘实时成交通知）** 已实施：见第 13 节。
 
 ## 1. 模块现状
 
@@ -119,6 +120,7 @@
 | E（交易成本建模） | `py_compile` + `tests/test_paper_service.py` + `tests/test_paper_repo.py` + 真实库副本回放同一条信号核对费用与现金对平 | 账户数值口径变更；历史成交流水不会补收费用（存量 `fee` 为 NULL，读回 0） |
 | F（同日触发判定细化） | `py_compile` + `tests/test_paper_service.py` | 仅影响同日同时触及止损与止盈的 bar；`ambiguous_stop_loss` 语义收窄 |
 | H（初始资金与重置） | `py_compile` + `tests/test_paper_service.py` + `tests/test_paper_api.py` + `tsc` / `lint` / `build` | 新增配置项与端点；归档重启不删数据，但新账户为空、需另行回填 |
+| I（实时成交通知） | `py_compile` + `tests/test_paper_notify.py` + `tests/test_paper_service.py` + `tests/test_config_registry.py` + `tsc` / `lint` / `vitest` | 新增配置项（默认关）与通知发送路径；渠道未配置时静默降级为日志，回填不补发 |
 
 ---
 
@@ -309,3 +311,42 @@
 - **归档 ≠ 删除**：老账户的数据都在，但**目前没有任何界面能查看归档账户**（只能通过 `PaperRepo.list_accounts()` 查）。要做账户切换/历史账户入口属另一个话题。
 - 新账户为空是设计行为，不是缺陷；净值曲线与收益率都从零开始。
 - 重置**不影响** `decision_signals`、`stock_daily` 等分析侧数据，只动 `paper_*` 的账户归属。
+
+---
+
+## 13. 方向 I：模拟盘实时成交通知（已实施）
+
+**问题**
+
+模拟盘成交此前只落库 + Web 页面展示，**任何通知渠道都收不到推送**：`src/services/paper_service.py` 不 import 任何通知模块，`pipeline.py` / `runtime_scheduler.py` 消费信号后也没有通知步骤，`PAPER_*` 下没有任何通知开关。用户在模拟盘成交、尤其盘后估值触发的止损/止盈时，只能主动打开页面才发现。
+
+**设计选择**
+
+| 决策 | 取值 | 理由 |
+| --- | --- | --- |
+| 触发范围 | **只发实时**：信号消费产生的开仓/加仓/减仓/清仓 + 盘后估值触发的止损/止盈 | 回填是**重放**，一次可能落几百笔成交，逐笔推送会把渠道刷屏。实时成交才是用户需要及时知道的事件。 |
+| 回填如何静音 | 显式 `notify: bool = True` 参数贯穿 `_handle_signal` / `_open_or_add` / `_reduce_position` / `_valuate` / `_close_by_exit`，`backfill_history` 全程传 `False` | 比隐藏的实例属性 / 上下文管理器 suppress 标记更显式、更好读；flag 必须到达 5 个方法，因为三个入口都经 `_valuate` 触发 `_close_by_exit`。 |
+| 通知路由 | **复用 `event`**（`NOTIFICATION_EVENT_CHANNELS`） | 该路由本就服务「龙虎榜 / 主力资金 / 重要公告」这类事件型通知，模拟成交同属事件。新增 `trade` 路由要同时改路由表、配置 schema、前端渠道勾选与文档，收益不抵成本。 |
+| 开关形态 | env `PAPER_NOTIFY_ENABLED`（默认 false）+ 注册进 `src/core/config_registry.py`，在设置页「系统设置」区渲染成开关 | 默认关闭 = 不配置即维持现状；注册后自动获得标题/说明/示例/文档链接与统一的保存链路，且不会出现「同一个键两个控件」。配置保存走既有热重载，无需重启。 |
+| 进程内去重 | **不做**（仍把 `dedup_key` 传给 `send_with_results`） | 模拟成交天然不会重复：`process_signal` 按信号落已消费记录，`_valuate` 只对仍 `open` 的持仓触发离场。而按 trade id 攒去重集合会在长期运行的进程里单调增长（内存泄漏），收益为零。 |
+| 失败处理 | 只记 `warning` 日志并返回 `False`，绝不抛回交易路径 | 与 `src/services/system_alert.py` 同款约定：一条通知发不出去不能影响模拟盘记账，也不能触发自己的告警形成环路。 |
+
+**改动**
+
+- `src/services/paper_notify.py`（新增）：`build_paper_fill_message(trade, *, cash_after, disposition=None)` 渲染正文——标题 `模拟盘成交 | <code> <name>`，正文含动作、成交价量、金额、手续费、**成交后现金**、日期；止损/同日先触止损用 `warning`，止盈用 `success`，其余 `info`（`NotificationBuilder.build_simple_alert`）。`send_paper_fill_notification(trade, *, cash_after, disposition=None, enabled=None)` 读 `Config.get_instance().paper_notify_enabled` 门控，走 `route_type="event"`，`dedup_key=paper-fill:<account_id>:<trade_id>`，`except Exception` 兜底。
+- `src/services/paper_service.py`：新增 `_notify_fill(account, trade, disposition, notify)`（`notify=False` 直接返回，否则把 `account.cash` 作为成交后现金传下去）；三处 `add_trade` 的返回值（`PaperTradeRecord`）接住并回调，`_close_by_exit` 亦同；`_handle_signal` / `_open_or_add` / `_reduce_position` / `_valuate` / `_close_by_exit` 增加 `notify: bool = True`；`backfill_history` 传入 `notify=False`。
+- `src/config.py`：新增 `paper_notify_enabled`（默认 `False`）+ env `PAPER_NOTIFY_ENABLED`。
+- `src/core/config_registry.py`：注册 `PAPER_NOTIFY_ENABLED`（`system` / boolean / switch / `default_value: "false"` / 带 `help_key`、`examples`、`docs`）。`apps/dsa-web/src/locales/settingsHelp.ts` 补中英帮助文案。`.env.example` 在 `PAPER_FEE_SLIPPAGE_BPS` 之后补注释条目。
+
+**验证**
+
+- `tests/test_paper_notify.py`（新增）：消息渲染按止损/止盈/开仓/加仓/减仓/清仓区分语气与文案（加仓与开仓同为 `side=buy`，靠 `disposition` 区分）；未开启时不构造 `NotificationService`；开启时走 `event` 路由且带 `paper-fill:1:7` 去重键；发送抛异常与返回 `success=False` 都只返回 `False`，不向调用方抛出。
+- `tests/test_paper_service.py`：实时开仓调用了通知且 `cash_after` 是扣款后的值（`1000000 - 200000 - 52`）；盘后止盈平仓按 `closed` 发通知；回填确实落了成交流水但通知一次都没被调用；把 `NotificationService` 替换成抛异常的实现后 `process_signal` 仍返回 `opened`、成交与已消费标记照常落库。
+- `tests/test_config_registry.py` 58 例通过（新增键的 `help_key` / `examples` / `docs` 与 locale 一致性均由既有守卫覆盖）。
+
+**边界与已知限制**
+
+- **回填不发历史通知**：重置账户后执行「历史回填」重建历史时，不会补发任何成交通知。这是刻意的——重放是离线重建，不是当时发生的事件。
+- 通知渠道需自行在 `NOTIFICATION_EVENT_CHANNELS` 配好；路由与已配置渠道的交集为空时下游返回 `no_channel`，本模块只记 `warning` 日志，界面上不会有显式报错。
+- 成交后现金取 `account.cash`（成交记账后的值），不含未成交持仓市值；标题固定中文，未做中英双语（通知渠道面向用户自身，非 Web UI 文案）。
+- 通知在 `_account_lock` 内发出，与既有的行情取数（`_valuate` → `_bar_for` → `_load_bars`）同处临界区，渠道超时会拖慢同账户的并发消费。没有把发送挪到锁外：那需要把「本轮产生的成交」暂存起来在释放锁后再发，改动面远大于收益，而锁内做网络请求已是该模块既有形态。

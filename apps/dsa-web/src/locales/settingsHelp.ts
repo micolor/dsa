@@ -1193,6 +1193,18 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响日志输出量和详细程度。'],
     notes: ['修改后部分运行时组件可能需要重启才能完全生效。'],
   },
+  'settings.system.PAPER_NOTIFY_ENABLED': {
+    title: '模拟盘成交通知',
+    summary: '模拟盘产生实时成交时推送到已配置的通知渠道。',
+    usage: '只推送实时成交：信号消费与盘后估值触发的止损 / 止盈。历史回填是重放，全程不推送。',
+    valueNotes: [
+      '默认关闭。开启前需在「通知」里配置 event 路由的渠道，否则发不出去。',
+      '配置保存后即时生效，无需重启。',
+      '发送失败只记日志，不会影响模拟盘记账。',
+    ],
+    impact: ['影响模拟盘实时成交是否推送到通知渠道。'],
+    notes: ['回填历史信号不会补发历史成交通知。'],
+  },
   'settings.system.DEBUG': {
     title: '调试模式',
     summary: '开启调试模式，输出详细日志信息。',
@@ -2379,6 +2391,18 @@ const settingsHelpEnUS: SettingsHelpMap = {
     ],
     impact: ['Affects log output volume and detail.'],
     notes: ['Some runtime components may need a restart for full effect.'],
+  },
+  'settings.system.PAPER_NOTIFY_ENABLED': {
+    title: 'Paper Trading Fill Notifications',
+    summary: 'Push paper-trading fills to the configured notification channels.',
+    usage: 'Live fills only: signal consumption and daily stop-loss / take-profit exits. Historical backfill is a replay and stays silent.',
+    valueNotes: [
+      'Off by default. Configure channels on the event route under Notifications first, otherwise nothing is delivered.',
+      'Takes effect immediately after saving; no restart needed.',
+      'A failed send is logged only and never affects paper-trading bookkeeping.',
+    ],
+    impact: ['Controls whether live paper-trading fills are pushed to notification channels.'],
+    notes: ['Backfilling historical signals does not resend historical fill notifications.'],
   },
   'settings.system.DEBUG': {
     title: 'Debug Mode',
