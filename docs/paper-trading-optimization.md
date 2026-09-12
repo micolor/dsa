@@ -338,7 +338,7 @@
 - `src/services/paper_notify.py`（新增）：`build_paper_fill_message(trade, *, cash_after, disposition=None)` 渲染正文——标题 `模拟盘成交 | <code> <name>`，正文含动作、成交价量、金额、手续费、**成交后现金**、日期；止损/同日先触止损用 `warning`，止盈用 `success`，其余 `info`（`NotificationBuilder.build_simple_alert`）。`send_paper_fill_notification(trade, *, cash_after, disposition=None, enabled=None)` 读 `Config.get_instance().paper_notify_enabled` 门控，走 `route_type="event"`，`dedup_key=paper-fill:<account_id>:<trade_id>`，`except Exception` 兜底。
 - `src/services/paper_service.py`：新增 `_notify_fill(account, trade, disposition, notify)`（`notify=False` 直接返回，否则把 `account.cash` 作为成交后现金传下去）；三处 `add_trade` 的返回值（`PaperTradeRecord`）接住并回调，`_close_by_exit` 亦同；`_handle_signal` / `_open_or_add` / `_reduce_position` / `_valuate` / `_close_by_exit` 增加 `notify: bool = True`；`backfill_history` 传入 `notify=False`。
 - `src/config.py`：新增 `paper_notify_enabled`（默认 `False`）+ env `PAPER_NOTIFY_ENABLED`。
-- `src/core/config_registry.py`：注册 `PAPER_NOTIFY_ENABLED`（boolean / switch / `default_value: "false"` / 带 `help_key`、`examples`、`docs`；初始归 `system` 区，后改归 `base` 区，见下方「分类归位」）。`apps/dsa-web/src/locales/settingsHelp.ts` 补中英帮助文案。`.env.example` 在 `PAPER_FEE_SLIPPAGE_BPS` 之后补注释条目。
+- `src/core/config_registry.py`：注册 `PAPER_NOTIFY_ENABLED`（boolean / switch / `default_value: "false"` / 带 `help_key`、`examples`、`docs`；初始归 `system` 区，后改归 `base` 区，见下方「分类归位」）。`apps/dsa-web/src/locales/settingsHelp.ts` 补中英帮助文案。`.env.example` 在 `PAPER_FEE_SLIPPAGE_BPS` 之后补注释条目。（`settingsHelp.ts` 只喂「帮助抽屉」，字段行的标题与说明另有来源：`SettingsField` 在 zh 下取 `systemConfigI18n.ts` 的 `fieldTitleMap` / `fieldDescriptionMap`，取不到才回退注册表英文。当时漏了这两张表，导致中文界面整行显示英文，后已补齐并加守卫，见 `docs/CHANGELOG.md`。）
 
 **验证**
 
@@ -349,7 +349,7 @@
 **边界与已知限制**
 
 - **回填不发历史通知**：重置账户后执行「历史回填」重建历史时，不会补发任何成交通知。这是刻意的——重放是离线重建，不是当时发生的事件。
-- 通知渠道需自行在 `NOTIFICATION_EVENT_CHANNELS` 配好；路由与已配置渠道的交集为空时下游返回 `no_channel`，本模块只记 `warning` 日志，界面上不会有显式报错。
+- 通知渠道需自行在 `NOTIFICATION_EVENT_CHANNELS` 配好（设置页「通知渠道 → 通用 / 报告」区有该字段的输入框，但它在 `7eb98998` 引入后一度没被加进前端的渠道分组清单、界面上完全不显示，只能改 `.env`，现已补回）；路由与已配置渠道的交集为空时下游返回 `no_channel`，本模块只记 `warning` 日志，界面上不会有显式报错。
 - 成交后现金取 `account.cash`（成交记账后的值），不含未成交持仓市值；标题固定中文，未做中英双语（通知渠道面向用户自身，非 Web UI 文案）。
 - 通知在 `_account_lock` 内发出，与既有的行情取数（`_valuate` → `_bar_for` → `_load_bars`）同处临界区，渠道超时会拖慢同账户的并发消费。没有把发送挪到锁外：那需要把「本轮产生的成交」暂存起来在释放锁后再发，改动面远大于收益，而锁内做网络请求已是该模块既有形态。
 

@@ -49,8 +49,11 @@ import type { NotificationDeliveryItem } from '../types/notifications';
 import type { UiLanguage, UiTextKey } from '../i18n/uiText';
 
 // 通知分类下各渠道对应的配置字段。字段 key 取自后端 config_registry 的
-// category="notification" 字段；「全部」之外未命中任何渠道分组的字段会兜底到
-// general（通用/报告），避免字段在按渠道筛选时丢失。
+// category="notification" 字段，按渠道筛选时只渲染命中分组的字段；不属于任何
+// 具体渠道的路由 / 报告 / 去重类字段放进 general（通用/报告）分区。
+// 注意这里是**手工清单**，没有「未命中就自动兜底到 general」的机制：新注册的
+// notification 字段若忘了加进来，在设置页会完全不显示（而不是掉进 general）。
+// `tests/test_config_registry.py::TestNotificationFieldsReachableInWebSettings` 钉住这一点。
 const NOTIFICATION_CHANNEL_FIELDS: Record<string, Set<string>> = {
   feishu: new Set([
     'FEISHU_WEBHOOK_URL',
@@ -107,6 +110,7 @@ const NOTIFICATION_CHANNEL_FIELDS: Record<string, Set<string>> = {
     'NOTIFICATION_REPORT_CHANNELS',
     'NOTIFICATION_ALERT_CHANNELS',
     'NOTIFICATION_SYSTEM_ERROR_CHANNELS',
+    'NOTIFICATION_EVENT_CHANNELS',
     'NOTIFICATION_DEDUP_TTL_SECONDS',
     'NOTIFICATION_COOLDOWN_SECONDS',
     'NOTIFICATION_QUIET_HOURS',

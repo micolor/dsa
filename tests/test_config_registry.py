@@ -619,6 +619,100 @@ class TestSettingsHelpContract(unittest.TestCase):
         self.assertEqual(external_keys, [], f"Unexpected locale-only help keys: {external_keys}")
 
 
+class TestWebSettingsChineseLabels(unittest.TestCase):
+    """Every registered field must carry a Chinese title and description.
+
+    ``SettingsField`` renders ``fieldTitleMap[key] || <registry English title>``
+    (and the same fallback for the description) under the ``zh`` locale, so a
+    registered field that is missing from these two frontend maps silently
+    renders in English on an otherwise Chinese settings page. That is how
+    ``PAPER_NOTIFY_ENABLED`` and 16 older fields drifted.
+
+    The maps live in the frontend because they are display copy, so this guard
+    parses them the same way ``TestSettingsHelpContract`` parses
+    ``settingsHelp.ts``.
+    """
+
+    _LOCALE_FILE = Path(__file__).resolve().parents[1] / "apps/dsa-web/src/utils/systemConfigI18n.ts"
+    _MAP_KEY_RE = re.compile(r"^\s{2}([A-Z][A-Z0-9_]*):", re.MULTILINE)
+    # Keys the settings page deliberately does not render as field rows
+    # (``BASE_HIDDEN_KEYS`` in ``SettingsPage.tsx``). Listed explicitly rather
+    # than derived: the frontend hiding rules are conditional TSX, and porting
+    # them here would be a parallel implementation of the same logic.
+    _NOT_RENDERED_KEYS = {"SCREENING_ENABLED"}
+
+    @classmethod
+    def _map_keys(cls, marker: str) -> set[str]:
+        content = cls._LOCALE_FILE.read_text(encoding="utf-8")
+        start = content.index(marker)
+        end = content.index("\n};", start)
+        return set(cls._MAP_KEY_RE.findall(content[start:end]))
+
+    def test_registered_fields_have_chinese_title_and_description(self) -> None:
+        titles = self._map_keys("const fieldTitleMap")
+        descriptions = self._map_keys("const fieldDescriptionMap")
+        checked = [key for key in get_registered_field_keys() if key not in self._NOT_RENDERED_KEYS]
+
+        missing_titles = sorted(key for key in checked if key not in titles)
+        missing_descriptions = sorted(key for key in checked if key not in descriptions)
+
+        self.assertEqual(
+            (missing_titles, missing_descriptions),
+            ([], []),
+            "Registered fields render in English under the zh locale unless they "
+            "appear in both systemConfigI18n.ts maps",
+        )
+
+
+class TestNotificationFieldsReachableInWebSettings(unittest.TestCase):
+    """Every notification field must land in a settings-page channel group.
+
+    The notification category renders ``NOTIFICATION_CHANNEL_FIELDS[channel]``
+    (plus ``general``) and drops everything else, and that map is a hand-written
+    list -- there is no automatic fallback for unmapped keys. A registered
+    notification field that is in no group is therefore unreachable from the
+    Web UI, which is how ``NOTIFICATION_EVENT_CHANNELS`` shipped with no control
+    at all. Parses the frontend map rather than duplicating it.
+    """
+
+    _PAGE_FILE = Path(__file__).resolve().parents[1] / "apps/dsa-web/src/pages/SettingsPage.tsx"
+    _MAP_START = "const NOTIFICATION_CHANNEL_FIELDS"
+    _MAP_END = "\n};"
+    _CHANNEL_ENTRY_RE = re.compile(r"^\s{2}(\w+): new Set\(\[(.*?)\]\)", re.DOTALL | re.MULTILINE)
+    _KEY_RE = re.compile(r"'([A-Z][A-Z0-9_]*)'")
+
+    @classmethod
+    def _grouped_keys(cls) -> dict[str, set[str]]:
+        content = cls._PAGE_FILE.read_text(encoding="utf-8")
+        start = content.index(cls._MAP_START)
+        block = content[start:content.index(cls._MAP_END, start)]
+        return {
+            group: set(cls._KEY_RE.findall(body))
+            for group, body in cls._CHANNEL_ENTRY_RE.findall(block)
+        }
+
+    def test_notification_fields_belong_to_a_channel_group(self) -> None:
+        groups = self._grouped_keys()
+        self.assertIn("general", groups, "general notification group missing")
+        grouped = set().union(*groups.values())
+
+        schema = build_schema_response()
+        notification_cat = next(
+            (c for c in schema["categories"] if c["category"] == "notification"),
+            None,
+        )
+        self.assertIsNotNone(notification_cat, "notification category missing")
+
+        unreachable = sorted(field["key"] for field in notification_cat["fields"] if field["key"] not in grouped)
+
+        self.assertEqual(
+            unreachable,
+            [],
+            "Notification fields in no channel group never render in the settings "
+            "page; add them to a channel set or to general in SettingsPage.tsx",
+        )
+
+
 class TestSensitiveFieldsUsePasswordControl(unittest.TestCase):
     """Every is_sensitive field must use ui_control='password' to avoid
     leaking secrets in the Web settings page."""
