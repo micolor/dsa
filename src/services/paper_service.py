@@ -8,6 +8,7 @@ performed, producing positions, a daily equity curve and trade records.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,7 +27,11 @@ logger = logging.getLogger(__name__)
 # Default target weight of total assets allocated per opened position. Overridable
 # per service instance (e.g. from the `PAPER_POSITION_WEIGHT` config).
 POSITION_WEIGHT = 0.20
-# Default lookback used when loading price bars for live valuation.
+# Starting cash for a newly created paper account, unless `PAPER_INITIAL_CAPITAL`
+# or an explicit argument overrides it. Only consulted at creation time: an
+# existing account keeps the capital it was opened with.
+INITIAL_CAPITAL = 1000000.0
+# Lookback used when loading price bars for live valuation.
 DEFAULT_LOOKBACK_DAYS = 365
 # Commission rate applied to every market unless `PAPER_FEE_COMMISSION_RATE`
 # overrides it. The broker-negotiable part of the cost, hence configurable.
@@ -160,6 +165,23 @@ class PaperService:
             return POSITION_WEIGHT
 
     @staticmethod
+    def _default_initial_capital() -> float:
+        """Resolve the starting cash for a new account from config.
+
+        Only new accounts consult this; an account that already exists keeps the
+        capital it was opened with, so editing the config never rewrites live
+        account data behind the user's back.
+        """
+        try:
+            from src.config import Config
+
+            cfg = Config.get_instance()
+            capital = float(getattr(cfg, "paper_initial_capital", INITIAL_CAPITAL) or INITIAL_CAPITAL)
+            return capital if capital > 0 else INITIAL_CAPITAL
+        except Exception:  # pragma: no cover - defensive fallback
+            return INITIAL_CAPITAL
+
+    @staticmethod
     def _fee_settings() -> Tuple[bool, float, float]:
         """Resolve (fee_enabled, commission_rate, slippage_bps) from config."""
         try:
@@ -177,8 +199,51 @@ class PaperService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def get_or_create_account(self, initial_capital: float = 1000000.0) -> Dict[str, Any]:
+    def get_or_create_account(self, initial_capital: Optional[float] = None) -> Dict[str, Any]:
+        """Return the active account, creating it on first use.
+
+        ``initial_capital`` only matters at creation time — an account that
+        already exists is returned unchanged. Defaults to the configured
+        ``PAPER_INITIAL_CAPITAL``.
+        """
+        if initial_capital is None:
+            initial_capital = self._default_initial_capital()
         account = self.paper_repo.ensure_account(initial_capital=initial_capital)
+        return self._account_payload(account)
+
+    def reset_account(self, initial_capital: Optional[float] = None) -> Dict[str, Any]:
+        """Archive every active account and open a fresh one, returning the new one.
+
+        The old accounts are only marked `archived`: their positions, trades and
+        equity snapshots stay in the database keyed by their own account id, so a
+        reset never destroys history — it just moves it out of the way.
+        ``ensure_account`` picks the lowest-id *active* account, so the successor
+        becomes the one every other entry point reads.
+
+        Nothing replays automatically: the new account is empty until signals are
+        consumed live or ``backfill_history`` re-runs them over a chosen range.
+        """
+        if initial_capital is None:
+            initial_capital = self._default_initial_capital()
+        capital = float(initial_capital)
+        if not math.isfinite(capital) or capital <= 0:
+            raise ValueError("初始资金必须是大于 0 的有限数值")
+
+        current = self.paper_repo.ensure_account()
+        # Serialize on the account being replaced so two concurrent resets cannot
+        # both archive the same row and each open a successor.
+        with _account_lock(current.id):
+            for stale in self.paper_repo.list_accounts():
+                if stale.status == "active":
+                    self.paper_repo.update_account(stale.id, {"status": "archived"})
+            account = self.paper_repo.ensure_account(initial_capital=capital)
+
+        logger.info(
+            "paper account reset: archived active account(s) up to %s, opened %s with initial capital %s",
+            current.id,
+            account.id,
+            capital,
+        )
         return self._account_payload(account)
 
     def process_signal(self, signal_id: int) -> Dict[str, Any]:

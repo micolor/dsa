@@ -18,6 +18,7 @@ from api.v1.schemas.paper import (
     EquityPoint,
     PaperAccountResponse,
     PaperPositionItem,
+    PaperResetRequest,
     PaperSignalListResponse,
     PaperSnapshotResponse,
     PaperTradeListResponse,
@@ -213,3 +214,29 @@ def backfill(
     except Exception as exc:
         logger.error("模拟盘历史回填失败: %s", exc, exc_info=True)
         raise api_error(500, "internal_error", "模拟盘历史回填失败")
+
+
+@router.post(
+    "/reset",
+    response_model=PaperAccountResponse,
+    responses={
+        400: {"description": "请求参数错误", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="重置模拟盘账户",
+)
+def reset_account(
+    request: Optional[PaperResetRequest] = None,
+    db_manager: DatabaseManager = Depends(get_database_manager),
+) -> PaperAccountResponse:
+    # 归档当前账户并按新的初始资金开一个新账户；旧账户的成交/快照仍按原 account_id
+    # 保留在库里，不做删除。新账户为空，历史需要另行回填。
+    try:
+        service = _service(db_manager)
+        capital = request.initial_capital if request is not None else None
+        return PaperAccountResponse(**service.reset_account(initial_capital=capital))
+    except ValueError as exc:
+        raise api_error(400, "invalid_params", str(exc))
+    except Exception as exc:
+        logger.error("模拟盘账户重置失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "模拟盘账户重置失败")

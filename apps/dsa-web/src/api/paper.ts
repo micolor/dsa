@@ -56,4 +56,12 @@ export const paperApi = {
     const response = await apiClient.post('/api/v1/paper/backfill', requestData);
     return toCamelCase<BackfillResult>(response.data);
   },
+
+  /** 归档当前账户并开一个空账户；省略 initialCapital 则用服务端配置值。 */
+  reset: async (initialCapital?: number): Promise<PaperAccount> => {
+    const requestData: Record<string, unknown> = {};
+    if (initialCapital != null) requestData.initial_capital = initialCapital;
+    const response = await apiClient.post('/api/v1/paper/reset', requestData);
+    return toCamelCase<PaperAccount>(response.data);
+  },
 };

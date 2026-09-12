@@ -10,5 +10,6 @@ export * from './SettingsPanelErrorBoundary';
 export * from './SettingsSectionCard';
 export * from './SettingsCategoryNav';
 export * from './AuthSettingsCard';
+export * from './PaperAccountCard';
 export * from './GenerationBackendStatusPanel';
 export * from './AgentBackendStatusPanel';

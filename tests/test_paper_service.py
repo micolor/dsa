@@ -723,3 +723,80 @@ def test_zero_commission_rate_keeps_cn_statutory_fees_only(isolated_db):
     cn_trade = cn.get_trades(cn.get_or_create_account()["account_id"])["items"][0]
     # 最低佣金 5 元 + 过户费 200000*0.00001 = 2。
     assert cn_trade["fee"] == pytest.approx(5.0 + 200000.0 * 0.00001)
+
+
+def test_reset_archives_history_and_opens_account_with_new_capital(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    service.process_signal(sig.id)
+
+    old_id = service.get_or_create_account()["account_id"]
+    old_positions = service.get_positions(old_id)
+    old_trades = service.get_trades(old_id)["items"]
+    assert old_positions and old_trades
+
+    new_account = service.reset_account(initial_capital=500000.0)
+
+    assert new_account["account_id"] != old_id
+    assert new_account["initial_capital"] == 500000.0
+    assert new_account["cash"] == 500000.0
+    assert new_account["snapshot"]["net_value"] == 500000.0
+    assert new_account["snapshot"]["return_pct"] == 0.0
+
+    # 老账户只是被归档：持仓/成交原样留在库里，仍按旧 account_id 可查。
+    assert service.paper_repo.get_account(old_id).status == "archived"
+    assert service.get_positions(old_id) == old_positions
+    assert service.get_trades(old_id)["items"] == old_trades
+
+    # 新账户是空账户，并且从此成为所有入口默认读到的那个。
+    assert service.get_positions(new_account["account_id"]) == []
+    assert service.get_trades(new_account["account_id"])["items"] == []
+    assert service.get_or_create_account()["account_id"] == new_account["account_id"]
+
+
+def test_reset_consumes_new_signals_into_the_new_account(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "600519", d2, 100, 100, 100, 100)
+    first = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    service.process_signal(first.id)
+    old_id = service.get_or_create_account()["account_id"]
+    old_positions = service.get_positions(old_id)
+
+    clear_bar_cache_for_tests()
+    new_account = service.reset_account(initial_capital=500000.0)
+    new_id = new_account["account_id"]
+
+    # 同一支股票的相同信号在新账户上必须能重新开仓：信号消费记录是按账户隔离的，
+    # 重置后旧账户的「已消费」标记不会挡住新账户。
+    again = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 6))
+    result = service.process_signal(again.id)
+
+    assert result["disposition"] == "opened"
+    assert [p["stock_code"] for p in service.get_positions(new_id) if p["status"] == "open"] == ["600519"]
+    # 新账户开仓不该回头改动旧账户的持仓。
+    assert service.get_positions(old_id) == old_positions
+
+
+def test_reset_without_capital_uses_configured_default(isolated_db):
+    svc = _service_with_fee_env(isolated_db, PAPER_INITIAL_CAPITAL="250000")
+    account = svc.reset_account()
+
+    assert account["initial_capital"] == 250000.0
+    assert account["cash"] == 250000.0
+    assert account["snapshot"]["net_value"] == 250000.0
+
+
+def test_reset_rejects_invalid_capital_without_touching_the_account(isolated_db, service):
+    account_id = service.get_or_create_account()["account_id"]
+
+    for bad in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            service.reset_account(initial_capital=bad)
+
+    # 校验在归档之前：非法金额不会把账户归档掉、也不会留下半成品账户。
+    current = service.get_or_create_account()
+    assert current["account_id"] == account_id
+    assert current["status"] == "active"

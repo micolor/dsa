@@ -1037,6 +1037,7 @@ class Config:
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     paper_trading_enabled: bool = True  # Enable the paper-trading daily valuation background task
     paper_position_weight: float = 0.20  # Target weight of total assets allocated per opened position
+    paper_initial_capital: float = 1000000.0  # Starting cash for a newly created paper account
     paper_fee_enabled: bool = True  # Charge commission/stamp duty on paper-trading fills
     paper_commission_rate: float = 0.00025  # Commission rate applied to every market (broker-negotiable)
     paper_slippage_bps: float = 0.0  # Adverse slippage per fill in basis points (0 = assume no slippage)
@@ -2016,6 +2017,12 @@ class Config:
                 field_name='PAPER_POSITION_WEIGHT',
                 minimum=0.01,
                 maximum=1.0,
+            ),
+            paper_initial_capital=parse_env_float(
+                os.getenv('PAPER_INITIAL_CAPITAL'),
+                1000000.0,
+                field_name='PAPER_INITIAL_CAPITAL',
+                minimum=1.0,
             ),
             paper_fee_enabled=parse_env_bool(os.getenv('PAPER_FEE_ENABLED'), default=True),
             paper_commission_rate=parse_env_float(

@@ -12,12 +12,13 @@
 - ✅ **方向 E（交易成本建模）** 已实施：见第 9 节。
 - ✅ **方向 F（同日触及止损与止盈的判定细化）** 已实施：见第 10 节。
 - ⚠️ **方向 G（前复权覆盖写入对存量持仓的影响）** 已确认影响、**未改代码**：见第 11 节（属新增能力，需独立评审）。
+- ✅ **方向 H（账户初始资金配置与重置）** 已实施：见第 12 节。
 
 ## 1. 模块现状
 
 模拟盘模块**完整且可运行**，非半成品：路由 `/api/v1/paper`、侧边栏/路由/页面、API、service、repo、两套表、前后端测试均齐全。
 
-- 后端：`api/v1/endpoints/paper.py`（8 个端点）+ `src/services/paper_service.py`（702 行）+ `src/repositories/paper_repo.py`（330 行）+ `src/storage.py`（表结构）+ `api/v1/schemas/paper.py`。
+- 后端：`api/v1/endpoints/paper.py`（9 个端点）+ `src/services/paper_service.py`（702 行）+ `src/repositories/paper_repo.py`（330 行）+ `src/storage.py`（表结构）+ `api/v1/schemas/paper.py`。
 - 前端：`apps/dsa-web/src/pages/PaperTradingPage.tsx` + `components/paper/*` + `api/paper.ts` + `types/paper.ts`。
 - 集成点：信号消费在 `src/core/pipeline.py:2674` 的 `_try_consume_paper_signal`（每持久化一条 deci Signal 后调 `PaperService.process_signal`）；每日估值由 `src/services/runtime_scheduler.py:352` 每 30 分钟触发（`config.paper_trading_enabled` 控制，默认开）。
 
@@ -117,6 +118,7 @@
 | D（成交价与会话语义） | `py_compile` + `tests/test_paper_service.py` + 用真实库副本回放同一条信号核对成交/净值 | 行为契约变更，历史净值会与新语义不一致 |
 | E（交易成本建模） | `py_compile` + `tests/test_paper_service.py` + `tests/test_paper_repo.py` + 真实库副本回放同一条信号核对费用与现金对平 | 账户数值口径变更；历史成交流水不会补收费用（存量 `fee` 为 NULL，读回 0） |
 | F（同日触发判定细化） | `py_compile` + `tests/test_paper_service.py` | 仅影响同日同时触及止损与止盈的 bar；`ambiguous_stop_loss` 语义收窄 |
+| H（初始资金与重置） | `py_compile` + `tests/test_paper_service.py` + `tests/test_paper_api.py` + `tsc` / `lint` / `build` | 新增配置项与端点；归档重启不删数据，但新账户为空、需另行回填 |
 
 ---
 
@@ -259,3 +261,51 @@
 
 - 只要持仓期内发生除权除息，账户的浮亏/收益率就会失真（虚亏），历史成交与成本价不会自动修正。
 - 短期持仓、无分红送转的股票不受影响；这也是本次真实库回放（001324）没有踩到的原因。
+
+---
+
+## 12. 方向 H：账户初始资金配置与重置（已实施）
+
+**问题**
+
+- **初始资金不可配置**：`PaperRepository.ensure_account` 的默认参数硬编码 `1000000.0`（`src/repositories/paper_repo.py:37`），只在账户**首次创建**时写入；账户一旦存在就按 `status == 'active'` 复用，传入的 `initial_capital` 被静默忽略（`tests/test_paper_repo.py` 已把"忽略"钉为既有契约）。生产代码里所有调用者都用默认值，没有配置项。
+- **没有重置入口**：`/api/v1/paper` 原先只有 6 个 GET 与 `refresh` / `backfill` 两个 POST，无法换资金、也无法重新开始；前端把初始资金只读地展示出来（`PaperTradingPage.tsx`），改不了。
+
+**设计选择**
+
+| 决策 | 取值 | 理由 |
+| --- | --- | --- |
+| 重置语义 | **归档重启**（把 active 账户置为 `archived`，按新资金开新账户） | 非破坏性：旧的持仓/成交/快照按原 `account_id` 留在库里，可查、可复核。复用现成的 `status` 字段与 `ensure_account` 的"取 id 最小的 active"逻辑，查询侧零改动。 |
+| 初始资金来源 | env `PAPER_INITIAL_CAPITAL`（默认 1000000）作为新建账户的默认值；`POST /paper/reset` 的 body 可覆盖**本次**重置的金额 | 不配置即维持现状（"不配置也可运行"）；金额不需要改 `.env` + 重启就能换，前端才有得填。 |
+| 重置后是否自动回放历史 | **不自动**，新账户为空，由用户另行发起「历史回填」 | 起始日期该由用户选；自动回放要逐条信号拉日线，多账户 × 全历史会拖长请求且不可控。 |
+| 重置入口位置 | 设置页「系统设置」区的「模拟盘」卡片，模拟盘页**不再**放入口 | 重置是低频破坏性操作，和刷新 / 回填挤在同一排工具栏容易误点；设置页是与「配置备份」等同级的一次性操作区。左侧导航的分类来自 `src/core/config_registry.py` 的固定白名单，单为一个动作新开分类不划算，故并入既有 `system` 区。 |
+
+**改动**
+
+- `src/config.py`：新增 `paper_initial_capital`（默认 1000000.0）+ env `PAPER_INITIAL_CAPITAL`（`parse_env_float`，minimum 1.0）。`.env.example` 同步。
+- `src/services/paper_service.py`：`INITIAL_CAPITAL = 1000000.0` 常量；`_default_initial_capital()`（照 `_default_position_weight()` 的"读配置 / 异常兜底"写法）；`get_or_create_account(initial_capital=None)` 为 `None` 时取配置值；新增 `reset_account(initial_capital=None)`。
+- `src/repositories/paper_repo.py`：**未改动**——归档用现成的 `update_account(id, {"status": "archived"})`，建账户用现成的 `ensure_account(initial_capital=...)`。
+- `api/v1/schemas/paper.py`：新增 `PaperResetRequest`（`initial_capital: Optional[float]`，`gt=0`）。
+- `api/v1/endpoints/paper.py`：新增 `POST /api/v1/paper/reset`，返回 `PaperAccountResponse`。
+- 前端：`api/paper.ts` 加 `reset(initialCapital?)`；新增 `components/settings/PaperAccountCard.tsx`（账户摘要 + 「重置账户」按钮 + `ConfirmDialog`，可填初始资金、留空走配置），挂在**设置页「系统设置」区**；`ConfirmDialog` 新增可选 `children` 插槽（纯追加，不影响既有调用方）；`locales/featureText.ts` 补中英文案。`PaperTradingPage.tsx` 只保留刷新 / 回填这类高频操作，不再有重置入口。
+
+**`reset_account` 的执行顺序**
+
+1. 解析金额（省略则取配置值），校验必须是有限且 > 0 的数值——**校验在任何写入之前**，非法金额不会留下半成品账户；
+2. 取当前 active 账户，以其 id 拿 `_account_lock`（并发重置不会各自归档同一个账户再各建一个）；
+3. 把所有 active 账户置为 `archived`（正常情况下只有一个，多 active 的脏状态也一并收敛）；
+4. 按新金额 `ensure_account` 建新账户并返回其 payload。
+
+`ensure_account` 取"id 最小的 active"，所以归档后 `process_signal`、`runtime_scheduler` 等所有入口自动认到新账户，无需改动调用方。
+
+**验证**
+
+- `tests/test_paper_service.py`：归档后旧账户的持仓/成交按旧 `account_id` 原样可查、旧账户状态为 `archived`、新账户为空且金额生效、新账户成为 `get_or_create_account` 的返回值、重置后新信号能重新开仓（信号消费记录按账户隔离，旧账户的"已消费"标记不挡新账户）、省略金额时取 `PAPER_INITIAL_CAPITAL`、非法金额（0 / 负数 / NaN / inf）抛错且不改动账户。
+- `tests/test_paper_api.py`（新增）：`POST /paper/reset` 传金额、省略 body 走配置、金额 ≤ 0 返回 422 且无副作用。
+- 前端：`components/settings/__tests__/PaperAccountCard.test.tsx`（新增）覆盖账户摘要渲染、二次确认后按填入金额调用 reset 并刷新摘要、非法金额在本地拦截、加载失败给出错误提示；`PaperTradingPage.test.tsx` 相应移除重置用例。`tsc --noEmit` 干净、`npm run lint` 0 error、`npm run build` 通过。
+
+**边界与已知限制**
+
+- **归档 ≠ 删除**：老账户的数据都在，但**目前没有任何界面能查看归档账户**（只能通过 `PaperRepo.list_accounts()` 查）。要做账户切换/历史账户入口属另一个话题。
+- 新账户为空是设计行为，不是缺陷；净值曲线与收益率都从零开始。
+- 重置**不影响** `decision_signals`、`stock_daily` 等分析侧数据，只动 `paper_*` 的账户归属。

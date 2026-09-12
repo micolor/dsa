@@ -88,6 +88,14 @@ class PaperValuationResponse(BaseModel):
     return_pct: float = 0.0
 
 
+class PaperResetRequest(BaseModel):
+    initial_capital: Optional[float] = Field(
+        None,
+        gt=0,
+        description="新账户初始资金，省略则用 PAPER_INITIAL_CAPITAL 配置值",
+    )
+
+
 class BackfillRequest(BaseModel):
     from_date: date = Field(..., description="回填起始日期（含）")
     to_date: Optional[date] = Field(None, description="回填结束日期（含），默认今天")

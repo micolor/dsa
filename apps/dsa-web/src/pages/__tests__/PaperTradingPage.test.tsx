@@ -57,6 +57,8 @@ const mockAccount = {
 
 describe('PaperTradingPage', () => {
   beforeEach(() => {
+    // 清掉上一个用例的调用历史，否则「不应被调用」这类断言会被前一个用例的调用污染。
+    vi.clearAllMocks();
     mockGetSnapshot.mockResolvedValue(emptySnapshot);
     mockGetPositions.mockResolvedValue([]);
     mockGetEquityCurve.mockResolvedValue([]);

@@ -20,6 +20,7 @@ import {
   IntelligentImport,
   LLMChannelEditor,
   NotificationTestPanel,
+  PaperAccountCard,
   SettingsCategoryNav,
   SettingsAlert,
   SettingsField,
@@ -2198,6 +2199,7 @@ const SettingsPage: React.FC = () => {
                 />
               </SettingsPanelErrorBoundary>
             ) : null}
+            {activeCategory === 'system' ? <PaperAccountCard /> : null}
             {activeCategory === 'system' ? (
               <SettingsSectionCard
                 title={t('settings.versionInfo')}

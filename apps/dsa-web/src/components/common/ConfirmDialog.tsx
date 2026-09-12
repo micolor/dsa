@@ -13,6 +13,8 @@ interface ConfirmDialogProps {
   isDanger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Optional extra controls (e.g. an input) rendered between message and buttons. */
+  children?: React.ReactNode;
 }
 
 /**
@@ -30,6 +32,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isDanger = false,
   onConfirm,
   onCancel,
+  children,
 }) => {
   const { t } = useUiLanguage();
 
@@ -56,6 +59,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <p className="text-sm text-secondary-text mb-6 leading-relaxed">
           {message}
         </p>
+        {children ? <div className="mb-6">{children}</div> : null}
         <div className="flex justify-end gap-3">
           <button
             type="button"
