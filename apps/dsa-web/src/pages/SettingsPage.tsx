@@ -2199,7 +2199,6 @@ const SettingsPage: React.FC = () => {
                 />
               </SettingsPanelErrorBoundary>
             ) : null}
-            {activeCategory === 'system' ? <PaperAccountCard /> : null}
             {activeCategory === 'system' ? (
               <SettingsSectionCard
                 title={t('settings.versionInfo')}
@@ -2355,6 +2354,9 @@ const SettingsPage: React.FC = () => {
                 </div>
               </SettingsSectionCard>
             ) : null}
+            {/* 模拟盘属于「自选股 → 信号 → 模拟盘」这条产品主线，和筛选 / 智能导入同属
+                「基础设置」；它是对账户本身的配置，不是「系统设置」那种运行时 / 调度开关。 */}
+            {activeCategory === 'base' ? <PaperAccountCard /> : null}
             {activeCategory === 'base' ? (
               <SettingsSectionCard
                 title={t('settings.intelligentImport')}

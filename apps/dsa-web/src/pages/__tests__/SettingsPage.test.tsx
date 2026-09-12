@@ -117,7 +117,7 @@ vi.mock('../../utils/constants', async () => {
 vi.mock('../../components/settings', () => ({
   AuthSettingsCard: () => <div>认证与登录保护</div>,
   ChangePasswordCard: () => <div>修改密码</div>,
-  // 模拟盘账户卡片自带数据请求，这里只关心它挂载在系统设置区；卡片自身的行为
+  // 模拟盘账户卡片自带数据请求，这里只关心它挂载在基础设置区；卡片自身的行为
   // 由 components/settings/__tests__/PaperAccountCard.test.tsx 覆盖。
   PaperAccountCard: () => <div>模拟盘账户</div>,
   IntelligentImport: ({ onMerged }: { onMerged: (value: string) => void }) => (

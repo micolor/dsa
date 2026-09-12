@@ -790,7 +790,7 @@ class TestMarketReviewFieldsRegistered(unittest.TestCase):
 
     def test_market_review_color_scheme_field_definition_exists(self):
         field = get_field_definition("MARKET_REVIEW_COLOR_SCHEME")
-        self.assertEqual(field["category"], "system")
+        self.assertEqual(field["category"], "base")
         self.assertEqual(field["data_type"], "string")
         self.assertEqual(field["ui_control"], "select")
         self.assertEqual(field["default_value"], "green_up")
@@ -799,7 +799,7 @@ class TestMarketReviewFieldsRegistered(unittest.TestCase):
 
     def test_market_review_region_field_definition_exists(self):
         field = get_field_definition("MARKET_REVIEW_REGION")
-        self.assertEqual(field["category"], "system")
+        self.assertEqual(field["category"], "base")
         self.assertEqual(field["data_type"], "string")
         self.assertEqual(field["ui_control"], "text")
         self.assertEqual(field["default_value"], "cn")
@@ -815,7 +815,7 @@ class TestMarketReviewFieldsRegistered(unittest.TestCase):
 
     def test_daily_market_context_field_definition_exists(self):
         field = get_field_definition("DAILY_MARKET_CONTEXT_ENABLED")
-        self.assertEqual(field["category"], "system")
+        self.assertEqual(field["category"], "base")
         self.assertEqual(field["data_type"], "boolean")
         self.assertEqual(field["ui_control"], "switch")
         self.assertEqual(field["default_value"], "true")
@@ -823,9 +823,9 @@ class TestMarketReviewFieldsRegistered(unittest.TestCase):
 
     def test_schema_response_includes_market_review_color_scheme(self):
         schema = build_schema_response()
-        system_cat = next((c for c in schema["categories"] if c["category"] == "system"), None)
-        self.assertIsNotNone(system_cat, "system category missing")
-        field_keys = {f["key"] for f in system_cat["fields"]}
+        base_cat = next((c for c in schema["categories"] if c["category"] == "base"), None)
+        self.assertIsNotNone(base_cat, "base category missing")
+        field_keys = {f["key"] for f in base_cat["fields"]}
         self.assertIn("MARKET_REVIEW_COLOR_SCHEME", field_keys)
         self.assertIn("DAILY_MARKET_CONTEXT_ENABLED", field_keys)
         self.assertIn("MARKET_REVIEW_REGION", field_keys)

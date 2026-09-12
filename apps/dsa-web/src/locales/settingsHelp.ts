@@ -696,7 +696,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
       'CLI 参数和运行模式也会影响最终行为；修改后需重启非 schedule 进程后生效。',
     ],
   },
-  'settings.system.TRADING_DAY_CHECK_ENABLED': {
+  'settings.base.TRADING_DAY_CHECK_ENABLED': {
     title: '交易日检查',
     summary: '控制非交易日是否跳过分析。',
     usage: '默认 true；需要强制运行可设为 false 或使用 --force-run。',
@@ -1193,7 +1193,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响日志输出量和详细程度。'],
     notes: ['修改后部分运行时组件可能需要重启才能完全生效。'],
   },
-  'settings.system.PAPER_NOTIFY_ENABLED': {
+  'settings.base.PAPER_NOTIFY_ENABLED': {
     title: '模拟盘成交通知',
     summary: '模拟盘产生实时成交时推送到已配置的通知渠道。',
     usage: '只推送实时成交：信号消费与盘后估值触发的止损 / 止盈。历史回填是重放，全程不推送。',
@@ -1244,7 +1244,7 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响历史透明度、回测/诊断可用的上下文快照信息和 Web 报告页的数据来源摘要。'],
     notes: ['若需要完全关闭 P3-P5 pack 接入，需要回滚相关代码；当前没有运行时 pack 总开关。'],
   },
-  'settings.system.market_review': {
+  'settings.base.market_review': {
     title: '大盘分析',
     summary: '控制大盘分析功能的开关、支持的市场子集和配色方案。',
     usage: 'MARKET_REVIEW_ENABLED 开启大盘分析；DAILY_MARKET_CONTEXT_ENABLED 默认开启，会把当日大盘摘要用于个股分析 Prompt 与保守护栏；MARKET_REVIEW_REGION 支持输入逗号分隔的市场子集（如 cn,us,jp 或 cn,us,jp,kr），不传可回退为 cn；MARKET_REVIEW_COLOR_SCHEME 选择配色。',
@@ -1895,7 +1895,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
       'CLI arguments and run mode can also affect final behavior. Restart a non-schedule process for changes to take effect.',
     ],
   },
-  'settings.system.TRADING_DAY_CHECK_ENABLED': {
+  'settings.base.TRADING_DAY_CHECK_ENABLED': {
     title: 'Trading Day Check',
     summary: 'Controls whether analysis is skipped on non-trading days.',
     usage: 'Default true. Set false or use --force-run to override.',
@@ -2392,7 +2392,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects log output volume and detail.'],
     notes: ['Some runtime components may need a restart for full effect.'],
   },
-  'settings.system.PAPER_NOTIFY_ENABLED': {
+  'settings.base.PAPER_NOTIFY_ENABLED': {
     title: 'Paper Trading Fill Notifications',
     summary: 'Push paper-trading fills to the configured notification channels.',
     usage: 'Live fills only: signal consumption and daily stop-loss / take-profit exits. Historical backfill is a replay and stays silent.',
@@ -2443,7 +2443,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects historical transparency, diagnostics that rely on context snapshots, and Web report data-source summaries.'],
     notes: ['To disable the P3-P5 pack integration itself, roll back the related code; there is no runtime pack master switch.'],
   },
-  'settings.system.market_review': {
+  'settings.base.market_review': {
     title: 'Market Review',
     summary: 'Controls the market review feature: on/off, market subset input, and color scheme.',
     usage: 'MARKET_REVIEW_ENABLED toggles market review; DAILY_MARKET_CONTEXT_ENABLED is on by default and controls whether the daily market summary is injected into stock-analysis prompts and conservative guardrails; MARKET_REVIEW_REGION accepts a comma-separated region subset (for example cn,us,jp or cn,us,jp,kr), and `both` keeps all supported markets; invalid or empty values fall back to `cn`; MARKET_REVIEW_COLOR_SCHEME selects colors.',

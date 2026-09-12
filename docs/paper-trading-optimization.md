@@ -14,6 +14,7 @@
 - ⚠️ **方向 G（前复权覆盖写入对存量持仓的影响）** 已确认影响、**未改代码**：见第 11 节（属新增能力，需独立评审）。
 - ✅ **方向 H（账户初始资金配置与重置）** 已实施：见第 12 节。
 - ✅ **方向 I（模拟盘实时成交通知）** 已实施：见第 13 节。
+- ✅ **分类归位（H / I 的设置项归入「基础设置」）** 已实施：见第 14 节。
 
 ## 1. 模块现状
 
@@ -121,6 +122,7 @@
 | F（同日触发判定细化） | `py_compile` + `tests/test_paper_service.py` | 仅影响同日同时触及止损与止盈的 bar；`ambiguous_stop_loss` 语义收窄 |
 | H（初始资金与重置） | `py_compile` + `tests/test_paper_service.py` + `tests/test_paper_api.py` + `tsc` / `lint` / `build` | 新增配置项与端点；归档重启不删数据，但新账户为空、需另行回填 |
 | I（实时成交通知） | `py_compile` + `tests/test_paper_notify.py` + `tests/test_paper_service.py` + `tests/test_config_registry.py` + `tsc` / `lint` / `vitest` | 新增配置项（默认关）与通知发送路径；渠道未配置时静默降级为日志，回填不补发 |
+| 分类归位（设置项换区） | `tests/test_config_registry.py` + `tests/test_config_env_compat.py` + `tests/test_system_config_service.py` + `tsc` / `lint` / `build` / `vitest` | 只改注册表 `category` 与 `help_key` 前缀、文案与前端挂载位置；字段名/默认值/校验/API 契约不变 |
 
 ---
 
@@ -280,7 +282,7 @@
 | 重置语义 | **归档重启**（把 active 账户置为 `archived`，按新资金开新账户） | 非破坏性：旧的持仓/成交/快照按原 `account_id` 留在库里，可查、可复核。复用现成的 `status` 字段与 `ensure_account` 的"取 id 最小的 active"逻辑，查询侧零改动。 |
 | 初始资金来源 | env `PAPER_INITIAL_CAPITAL`（默认 1000000）作为新建账户的默认值；`POST /paper/reset` 的 body 可覆盖**本次**重置的金额 | 不配置即维持现状（"不配置也可运行"）；金额不需要改 `.env` + 重启就能换，前端才有得填。 |
 | 重置后是否自动回放历史 | **不自动**，新账户为空，由用户另行发起「历史回填」 | 起始日期该由用户选；自动回放要逐条信号拉日线，多账户 × 全历史会拖长请求且不可控。 |
-| 重置入口位置 | 设置页「系统设置」区的「模拟盘」卡片，模拟盘页**不再**放入口 | 重置是低频破坏性操作，和刷新 / 回填挤在同一排工具栏容易误点；设置页是与「配置备份」等同级的一次性操作区。左侧导航的分类来自 `src/core/config_registry.py` 的固定白名单，单为一个动作新开分类不划算，故并入既有 `system` 区。 |
+| 重置入口位置 | 设置页「基础设置」区的「模拟盘」卡片，模拟盘页**不再**放入口 | 重置是低频破坏性操作，和刷新 / 回填挤在同一排工具栏容易误点；设置页是与「配置备份」等同级的一次性操作区。左侧导航的分类来自 `src/core/config_registry.py` 的固定白名单，单为一个动作新开分类不划算，故并入既有分类（初始实现放在 `system` 区，后按「模拟盘属于自选股 → 信号 → 模拟盘这条产品主线」重新归到 `base` 区，见下方「分类归位」）。 |
 
 **改动**
 
@@ -289,7 +291,7 @@
 - `src/repositories/paper_repo.py`：**未改动**——归档用现成的 `update_account(id, {"status": "archived"})`，建账户用现成的 `ensure_account(initial_capital=...)`。
 - `api/v1/schemas/paper.py`：新增 `PaperResetRequest`（`initial_capital: Optional[float]`，`gt=0`）。
 - `api/v1/endpoints/paper.py`：新增 `POST /api/v1/paper/reset`，返回 `PaperAccountResponse`。
-- 前端：`api/paper.ts` 加 `reset(initialCapital?)`；新增 `components/settings/PaperAccountCard.tsx`（账户摘要 + 「重置账户」按钮 + `ConfirmDialog`，可填初始资金、留空走配置），挂在**设置页「系统设置」区**；`ConfirmDialog` 新增可选 `children` 插槽（纯追加，不影响既有调用方）；`locales/featureText.ts` 补中英文案。`PaperTradingPage.tsx` 只保留刷新 / 回填这类高频操作，不再有重置入口。
+- 前端：`api/paper.ts` 加 `reset(initialCapital?)`；新增 `components/settings/PaperAccountCard.tsx`（账户摘要 + 「重置账户」按钮 + `ConfirmDialog`，可填初始资金、留空走配置），挂在**设置页「基础设置」区**（见下方「分类归位」）；`ConfirmDialog` 新增可选 `children` 插槽（纯追加，不影响既有调用方）；`locales/featureText.ts` 补中英文案。`PaperTradingPage.tsx` 只保留刷新 / 回填这类高频操作，不再有重置入口。
 
 **`reset_account` 的执行顺序**
 
@@ -327,7 +329,7 @@
 | 触发范围 | **只发实时**：信号消费产生的开仓/加仓/减仓/清仓 + 盘后估值触发的止损/止盈 | 回填是**重放**，一次可能落几百笔成交，逐笔推送会把渠道刷屏。实时成交才是用户需要及时知道的事件。 |
 | 回填如何静音 | 显式 `notify: bool = True` 参数贯穿 `_handle_signal` / `_open_or_add` / `_reduce_position` / `_valuate` / `_close_by_exit`，`backfill_history` 全程传 `False` | 比隐藏的实例属性 / 上下文管理器 suppress 标记更显式、更好读；flag 必须到达 5 个方法，因为三个入口都经 `_valuate` 触发 `_close_by_exit`。 |
 | 通知路由 | **复用 `event`**（`NOTIFICATION_EVENT_CHANNELS`） | 该路由本就服务「龙虎榜 / 主力资金 / 重要公告」这类事件型通知，模拟成交同属事件。新增 `trade` 路由要同时改路由表、配置 schema、前端渠道勾选与文档，收益不抵成本。 |
-| 开关形态 | env `PAPER_NOTIFY_ENABLED`（默认 false）+ 注册进 `src/core/config_registry.py`，在设置页「系统设置」区渲染成开关 | 默认关闭 = 不配置即维持现状；注册后自动获得标题/说明/示例/文档链接与统一的保存链路，且不会出现「同一个键两个控件」。配置保存走既有热重载，无需重启。 |
+| 开关形态 | env `PAPER_NOTIFY_ENABLED`（默认 false）+ 注册进 `src/core/config_registry.py`，在设置页「基础设置」区渲染成开关 | 默认关闭 = 不配置即维持现状；注册后自动获得标题/说明/示例/文档链接与统一的保存链路，且不会出现「同一个键两个控件」。配置保存走既有热重载，无需重启。 |
 | 进程内去重 | **不做**（仍把 `dedup_key` 传给 `send_with_results`） | 模拟成交天然不会重复：`process_signal` 按信号落已消费记录，`_valuate` 只对仍 `open` 的持仓触发离场。而按 trade id 攒去重集合会在长期运行的进程里单调增长（内存泄漏），收益为零。 |
 | 失败处理 | 只记 `warning` 日志并返回 `False`，绝不抛回交易路径 | 与 `src/services/system_alert.py` 同款约定：一条通知发不出去不能影响模拟盘记账，也不能触发自己的告警形成环路。 |
 
@@ -336,7 +338,7 @@
 - `src/services/paper_notify.py`（新增）：`build_paper_fill_message(trade, *, cash_after, disposition=None)` 渲染正文——标题 `模拟盘成交 | <code> <name>`，正文含动作、成交价量、金额、手续费、**成交后现金**、日期；止损/同日先触止损用 `warning`，止盈用 `success`，其余 `info`（`NotificationBuilder.build_simple_alert`）。`send_paper_fill_notification(trade, *, cash_after, disposition=None, enabled=None)` 读 `Config.get_instance().paper_notify_enabled` 门控，走 `route_type="event"`，`dedup_key=paper-fill:<account_id>:<trade_id>`，`except Exception` 兜底。
 - `src/services/paper_service.py`：新增 `_notify_fill(account, trade, disposition, notify)`（`notify=False` 直接返回，否则把 `account.cash` 作为成交后现金传下去）；三处 `add_trade` 的返回值（`PaperTradeRecord`）接住并回调，`_close_by_exit` 亦同；`_handle_signal` / `_open_or_add` / `_reduce_position` / `_valuate` / `_close_by_exit` 增加 `notify: bool = True`；`backfill_history` 传入 `notify=False`。
 - `src/config.py`：新增 `paper_notify_enabled`（默认 `False`）+ env `PAPER_NOTIFY_ENABLED`。
-- `src/core/config_registry.py`：注册 `PAPER_NOTIFY_ENABLED`（`system` / boolean / switch / `default_value: "false"` / 带 `help_key`、`examples`、`docs`）。`apps/dsa-web/src/locales/settingsHelp.ts` 补中英帮助文案。`.env.example` 在 `PAPER_FEE_SLIPPAGE_BPS` 之后补注释条目。
+- `src/core/config_registry.py`：注册 `PAPER_NOTIFY_ENABLED`（boolean / switch / `default_value: "false"` / 带 `help_key`、`examples`、`docs`；初始归 `system` 区，后改归 `base` 区，见下方「分类归位」）。`apps/dsa-web/src/locales/settingsHelp.ts` 补中英帮助文案。`.env.example` 在 `PAPER_FEE_SLIPPAGE_BPS` 之后补注释条目。
 
 **验证**
 
@@ -350,3 +352,38 @@
 - 通知渠道需自行在 `NOTIFICATION_EVENT_CHANNELS` 配好；路由与已配置渠道的交集为空时下游返回 `no_channel`，本模块只记 `warning` 日志，界面上不会有显式报错。
 - 成交后现金取 `account.cash`（成交记账后的值），不含未成交持仓市值；标题固定中文，未做中英双语（通知渠道面向用户自身，非 Web UI 文案）。
 - 通知在 `_account_lock` 内发出，与既有的行情取数（`_valuate` → `_bar_for` → `_load_bars`）同处临界区，渠道超时会拖慢同账户的并发消费。没有把发送挪到锁外：那需要把「本轮产生的成交」暂存起来在释放锁后再发，改动面远大于收益，而锁内做网络请求已是该模块既有形态。
+
+---
+
+## 14. 分类归位：模拟盘与市场域开关归入「基础设置」（已实施）
+
+方向 H / I 把「模拟盘」账户卡片与成交通知开关放进了设置页「系统设置」区，与 `SCHEDULE_*`、`LOG_*`、`WEBUI_*` 混在一起。设置中心的分类是**按配置机制**切的（`src/core/config_registry.py` 的 `get_category_definitions()`：base 是「自选股与基础应用设置」，system 是「运行时与调度控制」），而模拟盘属于「自选股 → 信号 → 模拟盘」这条产品主线，是对账户本身的配置，不是运行时开关。本次把它归到 `base`，并顺带收拢同属市场域、同样落在 `system` 的交易日历与大盘复盘开关。
+
+**设计选择**
+
+| 决策 | 取值 | 理由 |
+| --- | --- | --- |
+| 搬哪些 | 模拟盘 2 项（卡片 + `PAPER_NOTIFY_ENABLED`）+ 市场域 5 项（`TRADING_DAY_CHECK_ENABLED`、`MARKET_REVIEW_ENABLED`、`DAILY_MARKET_CONTEXT_ENABLED`、`MARKET_REVIEW_REGION`、`MARKET_REVIEW_COLOR_SCHEME`） | 这 5 项同时共享 `settings.system.market_review` 一个 help_key 前缀，本就在 `system` 里自成一组，一起搬成本最低。 |
+| 不搬什么 | notification / ai_model / data_source / agent / backtest 下的全部字段（64 + 40 + 25 + 24 + 5 = 158 项） | 它们同样「和股票相关」，但那是按**资产类别**而非机制切分。真要按字面搬，左侧导航会塌成一个桶，`base` 从 2 项涨到 160+ 项（注册表共 184 项），反而更难找。 |
+| `help_key` 前缀 | 前缀改为目标分类（`settings.system.*` → `settings.base.*`） | 185 个字段里 175 个满足 `help_key` 前缀 == 所在分类，`settings.base.STOCK_LIST` / `settings.base.SCREENING_ENABLED` 已是先例；不新造 `settings.paper.*` 这类主题命名法。 |
+| 前端怎么搬 | 只改注册表 `category`；`PaperAccountCard` 的挂载条件从 `system` 改为 `base` | `SettingsPage.tsx` 按注册表分类渲染，市场域 5 项无专属卡片、自动跟随；`base` 的隐藏名单只有 `SCREENING_ENABLED`，不拦这些键。 |
+| 是否保留兼容 | **不保留**旧分类别名 | 字段名、env 键、默认值、校验、`/api/v1/config` 契约全部不变，Web 端分类由服务端 schema 驱动、前端无硬编码分类映射（`useSystemConfig.ts` 的 `activeCategory` 只选初始 Tab），不存在需要兼容的旧客户端。 |
+
+**改动**
+
+- `src/core/config_registry.py`：6 个字段的 `category` 由 `system` 改为 `base`；`TRADING_DAY_CHECK_ENABLED`、`MARKET_REVIEW_*`（4 项共用）、`PAPER_NOTIFY_ENABLED` 的 `help_key` 前缀随之改到 `settings.base.*`。
+- `apps/dsa-web/src/locales/settingsHelp.ts`：3 个 help_key × 中英各一份，键名同步改名（文案内容不变）。
+- `apps/dsa-web/src/pages/SettingsPage.tsx`：`PaperAccountCard` 由 `system` 视图移到 `base` 视图（挂在「智能导入」卡之前）。
+- `tests/test_config_registry.py`：`TestMarketReviewFieldsRegistered` 的分类断言与 schema 查找目标由 `system` 改为 `base`。
+- `apps/dsa-web/src/pages/__tests__/SettingsPage.test.tsx`：仅更新 mock 工厂里「挂在哪个区」的注释。
+
+**验证**
+
+- `tests/test_config_registry.py` 58 例、`tests/test_config_env_compat.py` + `test_alerts_docs.py` + `test_paper_service.py` + `test_system_config_service.py` + `test_bot_market_command.py` + `test_paper_notify.py` 合计 341 例通过；后者覆盖 `help_key` 存在于 locale、`.env.example` 活跃键已注册、schema 分类归属等既有守卫。
+- 前端 `tsc --noEmit` / `npm run lint`（0 error）/ `npm run build` / `npx vitest run`（114 文件 1205 例）通过。
+- 全量 `uv run python -m pytest -m "not network"`：5992 passed / 2 failed，与迁移前基线一致（2 例为 `test_daily_analysis_workflow_notification_env.py` 的既有失败，与本次无关）。
+
+**边界与已知限制**
+
+- 分类是**展示层**信息，不影响配置读写：`.env`、注册表校验、`/api/v1/config` 响应结构与热重载行为均未变，老配置文件不需要迁移。
+- 「基础设置」是设置页的默认落地 Tab（`useSystemConfig.ts:81` 的初始 `activeCategory`），`PaperAccountCard` 挂上去后打开设置页即渲染；而 `GET /api/v1/paper/account` 走 `get_or_create_account()` 会**写库**（无账户时建账户）。这不是本次引入的新副作用——`runtime_scheduler.py` 的模拟盘日估值后台任务本就在服务启动时调 `get_or_create_account()`，任何在跑的服务都已存在账户；但若把「设置页首屏会创建账户」当成问题，需另立改动（例如卡片先只读探测、或账户获取与创建拆成两个端点）。

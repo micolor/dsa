@@ -3390,7 +3390,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "TRADING_DAY_CHECK_ENABLED": {
         "title": "Trading Day Check",
         "description": "Skip analysis on non-trading days. Set to false or use --force-run to override.",
-        "category": "system",
+        "category": "base",
         "data_type": "boolean",
         "ui_control": "switch",
         "is_sensitive": False,
@@ -3400,7 +3400,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 12,
-        "help_key": "settings.system.TRADING_DAY_CHECK_ENABLED",
+        "help_key": "settings.base.TRADING_DAY_CHECK_ENABLED",
         "examples": [
             "TRADING_DAY_CHECK_ENABLED=true",
             "TRADING_DAY_CHECK_ENABLED=false",
@@ -3416,7 +3416,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "MARKET_REVIEW_ENABLED": {
         "title": "Market Review Enabled",
         "description": "Enable market overview/review in analysis reports.",
-        "category": "system",
+        "category": "base",
         "data_type": "boolean",
         "ui_control": "switch",
         "is_sensitive": False,
@@ -3426,7 +3426,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 46,
-        "help_key": "settings.system.market_review",
+        "help_key": "settings.base.market_review",
         "examples": [
             "MARKET_REVIEW_ENABLED=true",
             "MARKET_REVIEW_REGION=cn",
@@ -3442,7 +3442,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "DAILY_MARKET_CONTEXT_ENABLED": {
         "title": "Daily Market Context Enabled",
         "description": "Inject daily market context into stock-analysis prompts and apply conservative decision guardrails.",
-        "category": "system",
+        "category": "base",
         "data_type": "boolean",
         "ui_control": "switch",
         "is_sensitive": False,
@@ -3452,7 +3452,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 47,
-        "help_key": "settings.system.market_review",
+        "help_key": "settings.base.market_review",
         "examples": [
             "DAILY_MARKET_CONTEXT_ENABLED=true",
             "DAILY_MARKET_CONTEXT_ENABLED=false",
@@ -3468,7 +3468,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "MARKET_REVIEW_REGION": {
         "title": "Market Review Region",
         "description": "Market region for review: cn (A-shares), hk (Hong Kong), us (US stocks), jp (Japan), kr (Korea), or both (all markets).",
-        "category": "system",
+        "category": "base",
         "data_type": "string",
         "ui_control": "text",
         "is_sensitive": False,
@@ -3478,7 +3478,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": ["cn", "hk", "us", "jp", "kr", "both"],
         "validation": {"allowed_values": ["cn", "hk", "us", "jp", "kr", "both"], "delimiter": ","},
         "display_order": 48,
-        "help_key": "settings.system.market_review",
+        "help_key": "settings.base.market_review",
         "examples": [
             "MARKET_REVIEW_REGION=cn",
             "MARKET_REVIEW_REGION=jp",
@@ -3495,7 +3495,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "MARKET_REVIEW_COLOR_SCHEME": {
         "title": "Market Review Color Scheme",
         "description": "Index change color style in market-review tables: green_up (green for gains, red for losses) or red_up (red for gains, green for losses).",
-        "category": "system",
+        "category": "base",
         "data_type": "string",
         "ui_control": "select",
         "is_sensitive": False,
@@ -3508,7 +3508,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "validation": {"enum": ["green_up", "red_up"]},
         "display_order": 49,
-        "help_key": "settings.system.market_review",
+        "help_key": "settings.base.market_review",
         "examples": [
             "MARKET_REVIEW_COLOR_SCHEME=green_up",
             "MARKET_REVIEW_COLOR_SCHEME=red_up",
@@ -3607,7 +3607,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "PAPER_NOTIFY_ENABLED": {
         "title": "Paper Trading Fill Notifications",
         "description": "Push a notification for every paper-trading fill produced by live signals and daily stop-loss / take-profit exits. Historical backfill replays stay silent. Requires at least one channel configured under the event notification route.",
-        "category": "system",
+        "category": "base",
         "data_type": "boolean",
         "ui_control": "switch",
         "is_sensitive": False,
@@ -3617,7 +3617,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 53,
-        "help_key": "settings.system.PAPER_NOTIFY_ENABLED",
+        "help_key": "settings.base.PAPER_NOTIFY_ENABLED",
         "examples": [
             "PAPER_NOTIFY_ENABLED=false",
             "PAPER_NOTIFY_ENABLED=true",
