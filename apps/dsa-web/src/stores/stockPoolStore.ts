@@ -5,7 +5,8 @@ import { getParsedApiError } from '../api/error';
 import { historyApi } from '../api/history';
 import type { AnalysisReport, HistoryItem, HistoryListResponse, ReportLanguage, StockBarItem, StockHistoryFilters, StockHistoryRange, TaskInfo } from '../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../utils/format';
-import { normalizeStockCode } from '../utils/stockCode';
+import { stockCodeKey } from '../utils/stockCode';
+import { isMarketReviewTask } from '../utils/taskKind';
 import { isObviouslyInvalidStockQuery, looksLikeStockCode, validateStockCode } from '../utils/validation';
 
 const PAGE_SIZE = 20;
@@ -14,6 +15,9 @@ const MARKET_REVIEW_HISTORY_PAGE_SIZE = 10;
 const MARKET_REVIEW_HISTORY_CODE = 'MARKET';
 
 type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image';
+
+/** `error` 的来源路径；null 表示不可自动回收（分析 / 任务失败等一次性事件）。 */
+type ErrorScope = 'history' | 'marketReviewHistory';
 
 type FetchHistoryOptions = {
   autoSelectFirst?: boolean;
@@ -58,6 +62,15 @@ export interface StockPoolState {
   inputError?: string;
   duplicateError: string | null;
   error: ParsedApiError | null;
+  /**
+   * `error` 的来源路径；无来源为 null。
+   *
+   * `error` 是共享槽位（历史列表 / 复盘历史 / 分析失败 / 任务失败都往里写），而首页顶部
+   * 那条红条是事件通知，只在手动关闭时消失。给来源打标后，同一条路径重新取数成功就能
+   * 把自己的失败提示收回去——「无法连接到本地服务」这类**状态性**描述在后端恢复后
+   * 不该继续挂着；没有标记的来源（分析 / 任务失败）不会被别的请求顺手抹掉。
+   */
+  errorScope: ErrorScope | null;
   isAnalyzing: boolean;
   historyItems: HistoryItem[];
   selectedHistoryIds: number[];
@@ -103,7 +116,8 @@ export interface StockPoolState {
   refreshHistoryForCompletedTask: (task: TaskInfo) => Promise<void>;
   loadMoreHistory: () => Promise<void>;
   loadMarketReviewHistory: () => Promise<void>;
-  refreshMarketReviewHistory: (silent?: boolean) => Promise<void>;
+  // 返回最新一页结果，便于调用方（如大盘复盘任务完成时）直接取到刚落库的记录 ID。
+  refreshMarketReviewHistory: (silent?: boolean) => Promise<HistoryListResponse | null>;
   loadMoreMarketReviewHistory: () => Promise<void>;
   selectHistoryItem: (recordId: number, isUserInitiated?: boolean) => Promise<void>;
   toggleHistorySelection: (recordId: number) => void;
@@ -121,7 +135,8 @@ export interface StockPoolState {
   removeTask: (taskId: string) => void;
   resetDashboardState: () => void;
   loadStockBar: () => Promise<void>;
-  refreshStockBar: () => Promise<void>;
+  /** silent=true 用于后台刷新：不置 isLoadingStockBar，避免界面进入交互假态。 */
+  refreshStockBar: (silent?: boolean) => Promise<void>;
 }
 
 const initialState = {
@@ -131,6 +146,7 @@ const initialState = {
   inputError: undefined,
   duplicateError: null,
   error: null,
+  errorScope: null,
   isAnalyzing: false,
   historyItems: [] as HistoryItem[],
   selectedHistoryIds: [] as number[],
@@ -252,16 +268,11 @@ function normalizeSelectedReport(report: AnalysisReport): AnalysisReport {
   };
 }
 
-function normalizeStockCodeKey(stockCode: string | undefined): string {
-  const trimmed = (stockCode ?? '').trim();
-  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
-}
-
 function queueCompletedTaskSelection(
   stockCode: string | undefined,
   selectedReport: AnalysisReport | null,
 ): void {
-  const key = normalizeStockCodeKey(stockCode);
+  const key = stockCodeKey(stockCode);
   if (key) {
     pendingCompletedTaskSelectionKeys.set(key, {
       manualSelectionSeq: manualSelectionRequestSeq,
@@ -285,7 +296,7 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
   }
 
   if (selectedReport) {
-    const selectedStockCode = normalizeStockCodeKey(selectedReport.meta.stockCode);
+    const selectedStockCode = stockCodeKey(selectedReport.meta.stockCode);
     const pendingSelectionIntent = selectedStockCode
       ? pendingCompletedTaskSelectionKeys.get(selectedStockCode)
       : undefined;
@@ -311,7 +322,7 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
     const latestItem = items.find(
       (item) =>
         item.reportType !== 'market_review' &&
-        normalizeStockCodeKey(item.stockCode) === selectedStockCode,
+        stockCodeKey(item.stockCode) === selectedStockCode,
     );
     if (latestItem) {
       pendingCompletedTaskSelectionKeys.delete(selectedStockCode);
@@ -323,7 +334,7 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
     if (item.reportType === 'market_review') {
       return false;
     }
-    const stockCode = normalizeStockCodeKey(item.stockCode);
+    const stockCode = stockCodeKey(item.stockCode);
     const pendingSelectionIntent = pendingCompletedTaskSelectionKeys.get(stockCode);
     return stockCode.length > 0 && pendingSelectionIntent?.manualSelectionSeq === manualSelectionRequestSeq;
   });
@@ -475,6 +486,13 @@ async function fetchHistory(
       return null;
     }
 
+    // 本路径重新取数成功，就把自己上次失败留下的红条收回去（包括 30 秒静默刷新的成功：
+    // 「无法连接到本地服务」是对当前状态的描述，后端恢复后不该继续挂着）。
+    // 只看 errorScope：别的路径（分析 / 任务失败）写的提示不会被这次刷新顺手抹掉。
+    if (get().errorScope === 'history') {
+      set({ error: null, errorScope: null });
+    }
+
     if (silent && reset) {
       const existingIds = new Set(get().historyItems.map((item) => item.id));
       const newItems = response.items.filter((item) => !existingIds.has(item.id));
@@ -518,7 +536,11 @@ async function fetchHistory(
     if (requestId !== historyRequestSeq) {
       return null;
     }
-    set({ error: getParsedApiError(error) });
+    // 后台静默刷新（30s 定时 / 回到前台）失败不写全局 error：
+    // 用户没有做任何操作，却会在首页顶部看到一条粘性红条，而数据其实还在。
+    if (!silent) {
+      set({ error: getParsedApiError(error), errorScope: 'history' });
+    }
     return null;
   } finally {
     if (requestId === historyRequestSeq) {
@@ -554,6 +576,11 @@ async function fetchMarketReviewHistory(
       return null;
     }
 
+    // 同 fetchHistory：本路径重新取数成功就收回自己的失败提示，静默成功同样生效。
+    if (get().errorScope === 'marketReviewHistory') {
+      set({ error: null, errorScope: null });
+    }
+
     if (silent && reset) {
       const existingIds = new Set(get().marketReviewHistoryItems.map((item) => item.id));
       const newItems = response.items.filter((item) => !existingIds.has(item.id));
@@ -585,7 +612,10 @@ async function fetchMarketReviewHistory(
     if (requestId !== marketReviewHistoryRequestSeq) {
       return null;
     }
-    set({ error: getParsedApiError(error) });
+    // 同上：后台静默刷新失败不弹全局红条。
+    if (!silent) {
+      set({ error: getParsedApiError(error), errorScope: 'marketReviewHistory' });
+    }
     return null;
   } finally {
     if (requestId === marketReviewHistoryRequestSeq) {
@@ -609,7 +639,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     });
   },
 
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, errorScope: null }),
 
   clearInlineMessages: () => set({ inputError: undefined, duplicateError: null }),
 
@@ -667,7 +697,11 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     await fetchHistory(get, set, {
       reset: true,
       silent: true,
-      selectLatestForStockCode: task.reportType === 'market_review' ? undefined : task.stockCode,
+      // 大盘复盘任务没有可自动选中的个股记录（它落库的 stock_code 是 MARKET，
+      // 不走 historyItems 这条列表），传 undefined 表示不做补选。此前用
+      // reportType === 'market_review' 判断，而这类任务的 reportType 实际是 'detailed'，
+      // 于是把 'market_review' 当股票代码塞进了待补选队列。
+      selectLatestForStockCode: isMarketReviewTask(task) ? undefined : task.stockCode,
     });
   },
 
@@ -684,7 +718,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   },
 
   refreshMarketReviewHistory: async (silent = false) => {
-    await fetchMarketReviewHistory(get, set, { reset: true, silent });
+    return fetchMarketReviewHistory(get, set, { reset: true, silent });
   },
 
   loadMoreMarketReviewHistory: async () => {
@@ -716,6 +750,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       set({
         selectedReport: report,
         error: null,
+        errorScope: null,
         isLoadingReport: false,
       });
 
@@ -735,7 +770,10 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       }
 
       set({
+        // 报告详情失败没有「重新取数」的自动路径，红条只能手动关；不打来源标记，
+        // 免得被后续历史列表刷新顺手抹掉。
         error: getParsedApiError(error),
+        errorScope: null,
         isLoadingReport: false,
       });
     } finally {
@@ -802,7 +840,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         }
       }
     } catch (error) {
-      set({ error: getParsedApiError(error) });
+      set({ error: getParsedApiError(error), errorScope: null });
     } finally {
       set({ isDeletingHistory: false });
     }
@@ -861,7 +899,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         }
       }
     } catch (error) {
-      set({ error: getParsedApiError(error) });
+      set({ error: getParsedApiError(error), errorScope: null });
     } finally {
       set({ isDeletingMarketReviewHistory: false });
     }
@@ -902,6 +940,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       inputError: undefined,
       duplicateError: null,
       error: null,
+      errorScope: null,
       isAnalyzing: true,
     });
 
@@ -939,7 +978,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         return;
       }
 
-      set({ error: getParsedApiError(error) });
+      set({ error: getParsedApiError(error), errorScope: null });
     } finally {
       if (requestId === analyzeRequestSeq) {
         set({ isAnalyzing: false });
@@ -973,7 +1012,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
 
   syncTaskFailed: (task) => {
     get().syncTaskUpdated(task);
-    set({ error: getParsedApiError(task.error || '分析失败') });
+    set({ error: getParsedApiError(task.error || '分析失败'), errorScope: null });
   },
 
   refreshActiveTasks: async () => {
@@ -1075,9 +1114,15 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     }
   },
 
-  refreshStockBar: async () => {
+  refreshStockBar: async (silent = false) => {
     const requestSeq = ++stockBarRequestSeq;
-    set({ isLoadingStockBar: true });
+    // 后台刷新（30s 定时 / 回到前台 / 任务完成）不置 isLoadingStockBar。
+    // HomePage 把该标志当作「单行今日状态未知」使用，每 30s 置一次会让所有自选行的
+    // 今日覆盖瞬间归零、行内出现 spinner、点行只弹「最新详情加载中」而不打开报告——
+    // 即常驻性的「点了没反应」。silent 失败仍会置 stockBarRefreshFailed（轻提示）。
+    if (!silent) {
+      set({ isLoadingStockBar: true });
+    }
     try {
       const response = await historyApi.getStockBarList({
         startDate: getRecentStartDate(90),
@@ -1093,6 +1138,9 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       }
       set({ stockBarRefreshFailed: true });
     } finally {
+      // 仍然无条件清（而不是只在 !silent 时清）：如果本次 silent 刷新顶掉了上一次
+      // 可见加载，那次加载的 finally 会因 seq 失配而跳过，只有这里能把它置回 false，
+      // 否则 isLoadingStockBar 会永久卡在 true。silent 自己没置过 true，清一次是空操作。
       if (requestSeq === stockBarRequestSeq) {
         set({ isLoadingStockBar: false });
       }

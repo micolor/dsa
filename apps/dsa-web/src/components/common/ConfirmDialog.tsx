@@ -38,6 +38,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const dialog = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-colors"
+      role="presentation"
       onClick={() => {
         if (!cancelDisabled) {
           onCancel();
@@ -45,6 +46,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="mx-4 w-full max-w-sm rounded-xl overflow-hidden glass-surface-strong p-6 shadow-2xl animate-in fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}
       >

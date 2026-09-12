@@ -4,6 +4,7 @@ import { historyApi } from '../../api/history';
 import type { ReportLanguage } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import { Tooltip } from '../common/Tooltip';
 import { ReportMarkdownBody } from './ReportMarkdownBody';
 import { ShareImageButton } from './ShareImageButton';
@@ -25,6 +26,8 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
 }) => {
   const text = getReportText(normalizeReportLanguage(reportLanguage));
   const loadReportFailedText = text.loadReportFailed;
+  // 名称与代码指向同一标的时不再拼「代码-代码」：这个标题会进下载文件名与分享图。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, stockCode);
   const [content, setContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +106,9 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
         <div className="flex items-center gap-2">
           <ShareImageButton
             recordId={recordId}
-            reportTitle={`${stockName || stockCode}-${stockCode}`}
+            reportTitle={hasDistinctName
+              ? `${stockName || stockCode}-${stockCode}`
+              : stockCode}
             reportLanguage={reportLanguage}
           />
           <Tooltip content={text.copyMarkdownSource}>

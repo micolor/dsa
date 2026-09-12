@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Star,
 } from 'lucide-react';
-import { Badge, Button, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip } from '../common';
+import { Badge, Button, Dialog, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBar } from '../history';
 import { useStockPoolStore } from '../../stores';
@@ -21,18 +21,12 @@ import type { StockBarItem, TaskInfo } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel, getDecisionActionTone } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
-import { areStockCodesEquivalent, normalizeStockCode } from '../../utils/stockCode';
-import { truncateStockName } from '../../utils/stockName';
+import { areStockCodesEquivalent, stockCodeKey } from '../../utils/stockCode';
+import { isStockCodeRedundantWithName, truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiTextKey, UiTextParams } from '../../i18n/uiText';
 import type { WatchlistOption } from '../../hooks/useWatchlist';
 import { DEFAULT_WATCHLIST_ID } from '../../hooks/useWatchlist';
-
-/** 归一化股票代码键，与 HomePage 的自选/任务 key 保持一致。 */
-function getStockCodeKey(code?: string | null): string {
-  const trimmed = (code ?? '').trim();
-  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
-}
 
 /** 由活动任务推导「代码 → 运行中任务」映射（排除大盘复盘与已结束状态）。 */
 function buildActiveTaskByCode(tasks: TaskInfo[]): Map<string, TaskInfo> {
@@ -44,7 +38,7 @@ function buildActiveTaskByCode(tasks: TaskInfo[]): Map<string, TaskInfo> {
     if (task.reportType === 'market_review') {
       continue;
     }
-    const key = getStockCodeKey(task.stockCode);
+    const key = stockCodeKey(task.stockCode);
     if (key) {
       tasksByCode.set(key, task);
     }
@@ -100,7 +94,7 @@ interface HomeStockWorkspaceProps {
   /** 当前激活列表标识（默认列表为 DEFAULT_WATCHLIST_ID）。 */
   activeListId?: string;
   onSwitchList?: (listId: string) => Promise<void>;
-  onCreateList?: (name: string) => Promise<void>;
+  onCreateList?: (name: string) => Promise<boolean>;
 }
 
 function getTaskStatusLabel(task: TaskInfo | undefined, t: (key: UiTextKey, params?: UiTextParams) => string) {
@@ -167,6 +161,10 @@ const WatchlistRowItemInner: React.FC<{
   // out and jitter); loading only blocks opening it, preventing stale-detail clicks.
   const item = row.latestItem;
   const stockName = item?.stockName || row.code;
+  // 名称与代码指向同一标的时（场外基金只回代码做名称），标题里已经是这串代码，
+  // meta 里再展示一次就是同一行重复两遍。item 缺失时 stockName 也回退成 row.code，
+  // 同属这种情况。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, row.code);
   const canOpenDetail = !isLatestDetailLoading && !isLatestDetailUnavailable && typeof item?.id === 'number';
 
   const handleOpenDetail = () => {
@@ -229,12 +227,14 @@ const WatchlistRowItemInner: React.FC<{
       deleteDisabled={disabled}
       meta={(
         <>
-          <span className="font-mono text-[11px] text-secondary-text">{row.code}</span>
+          {hasDistinctName ? (
+            <span className="font-mono text-[11px] text-secondary-text">{row.code}</span>
+          ) : null}
+          {hasDistinctName && item?.lastAnalysisTime ? (
+            <span className="h-1 w-1 rounded-full bg-subtle-hover" />
+          ) : null}
           {item?.lastAnalysisTime ? (
-            <>
-              <span className="h-1 w-1 rounded-full bg-subtle-hover" />
-              <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
-            </>
+            <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
           ) : null}
         </>
       )}
@@ -258,6 +258,9 @@ const WatchlistRowItem = memo(WatchlistRowItemInner);
 const TodayItemInner: React.FC<{ item: StockBarItem; onClick: (recordId: number) => void; selected: boolean }> = ({ item, onClick, selected }) => {
   const { t } = useUiLanguage();
   const stockName = item.stockName || item.stockCode;
+  // 名称与代码指向同一标的时，标题已经是这串代码，meta 里不再重复，
+  // aria-label 也避免被读屏念两遍。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, item.stockCode);
   const score = typeof item.sentimentScore === 'number' ? item.sentimentScore : null;
   const color = score !== null ? getSentimentColor(score) : null;
 
@@ -274,7 +277,9 @@ const TodayItemInner: React.FC<{ item: StockBarItem; onClick: (recordId: number)
     <ListItemRow
       wrapperClassName="home-history-item w-full min-w-0 flex-1"
       buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${selected ? 'home-history-item-selected' : ''}`}
-      ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
+      ariaLabel={hasDistinctName
+        ? t('history.itemAria', { name: stockName, code: item.stockCode })
+        : t('history.itemAriaSameName', { code: item.stockCode })}
       onClick={() => onClick(item.id)}
       leading={leading}
       title={(
@@ -288,12 +293,14 @@ const TodayItemInner: React.FC<{ item: StockBarItem; onClick: (recordId: number)
       trailing={<ScoreBadge item={item} />}
       meta={(
         <>
-          <span className="text-[11px] text-secondary-text font-mono">{item.stockCode}</span>
+          {hasDistinctName ? (
+            <span className="text-[11px] text-secondary-text font-mono">{item.stockCode}</span>
+          ) : null}
+          {hasDistinctName && item.lastAnalysisTime ? (
+            <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+          ) : null}
           {item.lastAnalysisTime ? (
-            <>
-              <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-              <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
-            </>
+            <span className="text-[11px] text-muted-text">{formatDateTime(item.lastAnalysisTime)}</span>
           ) : null}
         </>
       )}
@@ -336,9 +343,14 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
 }) => {
   const { t } = useUiLanguage();
   const activeTasks = useStockPoolStore(useShallow((state) => state.activeTasks));
+  const stockBarRefreshFailed = useStockPoolStore((state) => state.stockBarRefreshFailed);
   const activeTaskByCode = useMemo(() => buildActiveTaskByCode(activeTasks), [activeTasks]);
   const [draftCode, setDraftCode] = useState('');
   const [workspaceNoticeCode, setWorkspaceNoticeCode] = useState<string | null>(null);
+  const [createListOpen, setCreateListOpen] = useState(false);
+  const [createListDraft, setCreateListDraft] = useState('');
+  const [createListError, setCreateListError] = useState<string | null>(null);
+  const [createListSubmitting, setCreateListSubmitting] = useState(false);
   const pendingWatchlistCount = watchlistRows
     .filter((row) => !row.analyzedToday && !row.isTodayStatusLoading && !row.isTodayStatusUnknown)
     .length;
@@ -406,13 +418,39 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     await onSwitchList?.(listId);
   }, [onSwitchList]);
 
-  const handleCreateList = useCallback(async () => {
+  // 新建列表改用站内 Dialog：window.prompt 在 Electron 渲染进程里不实现，
+  // 桌面端表现为「点了没反应、也没有任何提示」；同时它也无法做重名校验与失败反馈。
+  const handleCreateList = useCallback(() => {
     setWorkspaceNoticeCode(null);
-    const name = window.prompt(t('watchlist.createListPlaceholder'));
-    const trimmed = name?.trim();
-    if (!trimmed) return;
-    await onCreateList?.(trimmed);
-  }, [onCreateList, t]);
+    setCreateListDraft('');
+    setCreateListError(null);
+    setCreateListOpen(true);
+  }, []);
+
+  const handleCreateListSubmit = useCallback(async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = createListDraft.trim();
+    if (!trimmed) {
+      setCreateListError(t('watchlist.createListNameRequired'));
+      return;
+    }
+    if (watchlistOptions?.some((option) => option.name === trimmed)) {
+      setCreateListError(t('watchlist.createListDuplicate'));
+      return;
+    }
+    setCreateListError(null);
+    setCreateListSubmitting(true);
+    try {
+      const ok = await onCreateList?.(trimmed);
+      if (ok === false) {
+        setCreateListError(t('watchlist.actionFailed'));
+        return;
+      }
+      setCreateListOpen(false);
+    } finally {
+      setCreateListSubmitting(false);
+    }
+  }, [createListDraft, onCreateList, t, watchlistOptions]);
 
   const renderTabs = (
     <div className="grid grid-cols-3 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
@@ -445,6 +483,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
         <StockBar
           items={historyItems}
           isLoading={isLoadingHistory}
+          hasError={stockBarRefreshFailed}
           selectedStockCode={selectedStockCode}
           selectedRecordId={selectedRecordId}
           onItemClick={onHistoryItemClick}
@@ -507,7 +546,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                     size="sm"
                     variant="secondary"
                     className="h-8 w-8 px-0"
-                    onClick={() => void handleCreateList()}
+                    onClick={handleCreateList}
                     aria-label={t('watchlist.createList')}
                   >
                     <Plus className="h-4 w-4" aria-hidden="true" />
@@ -574,12 +613,23 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
               </Button>
             </form>
             {batchStatus ? (
-              <div className={`rounded-xl border px-3 py-2 text-xs ${statusClassName}`}>
+              // 批量提交结果是异步反馈，裸 div 不会播报；role="status" 让读屏用户能拿到
+              // 「成功 / 部分失败 / 重复」的结论。用 polite 而非 alert：它是对用户操作的回应，
+              // 不该打断当前朗读。
+              <div
+                role="status"
+                aria-live="polite"
+                className={`rounded-xl border px-3 py-2 text-xs ${statusClassName}`}
+              >
                 {batchStatus.message}
               </div>
             ) : null}
             {watchlistMessage ? (
-              <div className="rounded-xl border border-subtle bg-base/35 px-3 py-2 text-xs text-secondary-text">
+              <div
+                role="status"
+                aria-live="polite"
+                className="rounded-xl border border-subtle bg-base/35 px-3 py-2 text-xs text-secondary-text"
+              >
                 {watchlistMessage}
               </div>
             ) : null}
@@ -651,7 +701,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 <WatchlistRowItem
                   key={row.code}
                   row={row}
-                  activeTask={activeTaskByCode.get(getStockCodeKey(row.code))}
+                  activeTask={activeTaskByCode.get(stockCodeKey(row.code))}
                   onRemove={handleRemoveFromWatchlist}
                   onOpenDetail={handleWatchlistRowOpen}
                   disabled={watchlistActioning}
@@ -708,6 +758,43 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
           </ScrollArea>
         </aside>
       )}
+
+      <Dialog
+        isOpen={createListOpen}
+        onClose={() => setCreateListOpen(false)}
+        title={t('watchlist.createList')}
+        ariaLabel={t('watchlist.createList')}
+        widthClassName="sm:max-w-md"
+      >
+        <form className="space-y-3" onSubmit={handleCreateListSubmit}>
+          <Input
+            value={createListDraft}
+            onChange={(event) => {
+              setCreateListDraft(event.target.value);
+              setCreateListError(null);
+            }}
+            placeholder={t('watchlist.createListPlaceholder')}
+            aria-label={t('watchlist.createList')}
+            error={createListError ?? undefined}
+            disabled={createListSubmitting}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setCreateListOpen(false)}
+              disabled={createListSubmitting}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" size="sm" isLoading={createListSubmitting}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 };

@@ -7,9 +7,11 @@ type UseDashboardLifecycleOptions = {
   refreshHistory: (silent?: boolean) => Promise<void>;
   refreshHistoryForCompletedTask?: (task: TaskInfo) => Promise<void>;
   loadStockBar: () => Promise<void>;
-  refreshStockBar: () => Promise<void>;
+  /** silent=true 用于后台刷新，不进入加载假态。 */
+  refreshStockBar: (silent?: boolean) => Promise<void>;
   loadMarketReviewHistory?: () => Promise<void>;
-  refreshMarketReviewHistory?: (silent?: boolean) => Promise<void>;
+  // 返回值由调用方按需使用（如取刚落库的大盘复盘记录 ID），生命周期本身不消费它。
+  refreshMarketReviewHistory?: (silent?: boolean) => Promise<unknown>;
   syncTaskCreated: (task: TaskInfo) => void;
   syncTaskUpdated: (task: TaskInfo) => void;
   syncTaskFailed: (task: TaskInfo) => void;
@@ -56,7 +58,7 @@ export function useDashboardLifecycle({
 
     const intervalId = window.setInterval(() => {
       void refreshHistory(true);
-      void refreshStockBar();
+      void refreshStockBar(true);
       void refreshMarketReviewHistory?.(true);
       onDashboardDataRefresh?.();
     }, 30_000);
@@ -72,7 +74,7 @@ export function useDashboardLifecycle({
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         void refreshHistory(true);
-        void refreshStockBar();
+        void refreshStockBar(true);
         void refreshMarketReviewHistory?.(true);
         onDashboardDataRefresh?.();
       }
@@ -108,7 +110,7 @@ export function useDashboardLifecycle({
       const historyRefresh = refreshHistoryForCompletedTask
         ? refreshHistoryForCompletedTask(task)
         : refreshHistory(true);
-      const stockBarRefresh = refreshStockBar();
+      const stockBarRefresh = refreshStockBar(true);
       void Promise.allSettled([historyRefresh, stockBarRefresh]).then(() => {
         onCompletedTaskDataRefreshed?.(task);
       });

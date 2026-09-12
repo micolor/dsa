@@ -4,7 +4,6 @@ import { BarChart3 } from 'lucide-react';
 import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../common';
 import { DashboardStateBlock } from '../dashboard';
 import { StockHistoryTrendDrawer } from '../history';
-import { MarketReviewReportView } from './MarketReviewReportView';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { ParsedApiError } from '../../api/error';
 import { normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -24,6 +23,14 @@ const ReportSummary = lazy(() =>
   import('./ReportSummary').then((m) => ({ default: m.ReportSummary })),
 );
 
+// 大盘复盘正文同样承载重子树：MarketReviewReportView -> ReportMarkdownBody ->
+// react-markdown + remark-gfm（vendor-markdown 约 148K）。静态 import 会让空态首页
+// 也同步下载并解析整个 markdown 栈，而复盘卡片只在真的有复盘报告时才渲染，
+// 所以与 ReportSummary 一样走按需加载。
+const MarketReviewReportView = lazy(() =>
+  import('./MarketReviewReportView').then((m) => ({ default: m.MarketReviewReportView })),
+);
+
 export type MarketReviewNotice = {
   variant: 'success' | 'warning' | 'danger';
   title: string;
@@ -36,6 +43,8 @@ export interface HomeReportRegionProps {
   onDismissMarketReviewError: () => void;
   marketReviewReport: string | null;
   marketReviewPayload: MarketReviewPayload | null;
+  /** 实时大盘复盘卡片对应的落库记录 ID；缺失时分享/运行流入口不可用 */
+  marketReviewRecordId?: number;
   error: ParsedApiError | null;
   onDismissError: () => void;
   isLoadingReport: boolean;
@@ -80,6 +89,7 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
   onDismissMarketReviewError,
   marketReviewReport,
   marketReviewPayload,
+  marketReviewRecordId,
   error,
   onDismissError,
   isLoadingReport,
@@ -165,12 +175,22 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
       ) : null}
 
       {marketReviewReport ? (
-        <MarketReviewReportView
-          content={marketReviewReport}
-          payload={marketReviewPayload}
-          reportLanguage={liveMarketReviewLanguage}
-          className="mb-3"
-        />
+        <Suspense
+          fallback={(
+            <div className="mb-3 flex min-h-[16rem] items-center justify-center">
+              <DashboardStateBlock title={t('home.loadingReport')} loading />
+            </div>
+          )}
+        >
+          <MarketReviewReportView
+            content={marketReviewReport}
+            payload={marketReviewPayload}
+            recordId={marketReviewRecordId}
+            reportLanguage={liveMarketReviewLanguage}
+            onOpenRunFlow={onOpenRunFlow}
+            className="mb-3"
+          />
+        </Suspense>
       ) : null}
 
       {error ? (

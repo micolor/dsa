@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_BASE_URL } from '../utils/constants';
-import { attachParsedApiError } from './error';
+import { attachParsedApiError, normalizeBlobErrorBody } from './error';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -13,7 +13,7 @@ const apiClient = axios.create({
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
       const path = window.location.pathname + window.location.search;
       if (!path.startsWith('/login')) {
@@ -21,6 +21,9 @@ apiClient.interceptors.response.use(
         window.location.assign(`/login?redirect=${redirect}`);
       }
     }
+    // 必须早于 attachParsedApiError：blob 请求的错误体是 Blob，等到更外层再还原时
+    // 错误对象上已经缓存了基于 Blob 解析出来的错误归因，真实原因会被永久覆盖。
+    await normalizeBlobErrorBody(error);
     attachParsedApiError(error);
     return Promise.reject(error);
   }

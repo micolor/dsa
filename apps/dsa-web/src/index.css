@@ -1739,13 +1739,17 @@ select option:checked {
 }
 
 .home-report-hero {
-  --terminal-card-border: var(--home-hero-border);
   --terminal-card-gradient-start: var(--home-hero-gradient-start);
   --terminal-card-gradient-mid: var(--home-hero-gradient-mid);
   --terminal-card-gradient-end: var(--home-hero-gradient-end);
   --terminal-card-shadow: var(--home-hero-shadow);
   background: hsl(var(--card));
-  border-color: var(--home-hero-border);
+  border-color: var(--home-panel-border);
+  transition: border-color 0.24s ease;
+}
+
+.home-report-hero:hover {
+  border-color: var(--home-panel-border-hover);
 }
 
 .home-rail-card {
@@ -1840,13 +1844,16 @@ select option:checked {
 }
 
 .dark .home-report-hero {
-  --terminal-card-border: var(--home-panel-border-selected);
   --terminal-card-gradient-start: hsl(var(--primary) / 0.22);
   --terminal-card-gradient-mid: hsl(247 84% 72% / 0.18);
   --terminal-card-gradient-end: hsl(var(--foreground) / 0.08);
   --terminal-card-shadow: var(--shadow-soft-card);
   background: hsl(var(--card));
-  border-color: var(--home-panel-border-selected);
+  border-color: var(--home-panel-border);
+}
+
+.dark .home-report-hero:hover {
+  border-color: var(--home-panel-border-hover);
 }
 
 .dark .home-rail-card {

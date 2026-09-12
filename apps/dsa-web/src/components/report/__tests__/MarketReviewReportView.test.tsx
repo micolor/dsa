@@ -117,12 +117,14 @@ describe('MarketReviewReportView', () => {
 
     expect(screen.getByText('Review Summary')).toBeInTheDocument();
     expect(screen.getByText('No review summary yet')).toBeInTheDocument();
-    expect(screen.getByText('Market Sentiment')).toBeInTheDocument();
-    expect(screen.getByText('No score yet')).toBeInTheDocument();
-    expect(screen.getByText('Rotation & Funds')).toBeInTheDocument();
-    expect(screen.getByText('No rotation view yet')).toBeInTheDocument();
-    expect(screen.getByText('Risks & Watchlist')).toBeInTheDocument();
-    expect(screen.getByText('No key observations yet')).toBeInTheDocument();
+    // 摘要区只保留「复盘摘要」一张卡片。此前额外渲染的情绪 / 轮动 / 风险三张卡片没有任何
+    // 数据来源，永远停在占位空态，只是多出三行噪声，已删除；这里锁住「不再渲染」。
+    expect(screen.queryByText('Market Sentiment')).not.toBeInTheDocument();
+    expect(screen.queryByText('No score yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rotation & Funds')).not.toBeInTheDocument();
+    expect(screen.queryByText('No rotation view yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Risks & Watchlist')).not.toBeInTheDocument();
+    expect(screen.queryByText('No key observations yet')).not.toBeInTheDocument();
     expect(screen.queryByText('复盘摘要')).not.toBeInTheDocument();
     expect(screen.queryByText('暂无摘要')).not.toBeInTheDocument();
   });

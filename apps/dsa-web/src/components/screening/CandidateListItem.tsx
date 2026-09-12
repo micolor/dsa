@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { ScreeningCandidate } from '../../api/screening';
 import { Badge, ListItemRow } from '../common';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import {
   FACTOR_LABELS,
   formatAmount,
@@ -209,6 +210,8 @@ const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
   onAnalyze,
 }) => {
   const stockName = item.name || item.code || '-';
+  // 名称与代码指向同一标的时不再重复展示代码，也不让读屏念两遍。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, item.code);
   const scoreColor = getScoreColor(item.score);
   const rankingBasis = factorRanking ? '因子排序' : formatScore(item.llmScore);
   const changeValue = Number(item.changePct);
@@ -246,8 +249,12 @@ const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
 
   const meta = (
     <>
-      <span className="font-mono text-[11px] text-secondary-text">{item.code}</span>
-      <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+      {hasDistinctName ? (
+        <>
+          <span className="font-mono text-[11px] text-secondary-text">{item.code}</span>
+          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+        </>
+      ) : null}
       {item.industry ? (
         <>
           <span className="text-[11px] text-secondary-text">{item.industry}</span>
@@ -273,7 +280,9 @@ const CandidateListItemInner: React.FC<CandidateListItemProps> = ({
       <ListItemRow
         wrapperClassName="w-full min-w-0 flex-1"
         buttonClassName="w-full min-w-0 flex-1 text-left p-3"
-        ariaLabel={`${stockName} ${item.code}，展开查看详情`}
+        ariaLabel={hasDistinctName
+          ? `${stockName} ${item.code}，展开查看详情`
+          : `${stockName}，展开查看详情`}
         onClick={() => onToggle(item.code)}
         leading={leading}
         title={(

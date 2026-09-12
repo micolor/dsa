@@ -49,6 +49,16 @@ export const getRecentStartDate = (days: number): string => {
 export const getTodayInShanghai = (): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 
+/**
+ * 图表价格轴刻度格式化。
+ *
+ * 价格轴 domain 由 `[minLow - pad, maxHigh + pad]` 计算，pad 为浮点数，直接渲染会出现
+ * `21.840999999999998` 这类二进制浮点噪声，统一收敛到 2 位小数。
+ */
+export const formatPriceTick = (value: number): string => (
+  Number.isFinite(value) ? value.toFixed(2) : ''
+);
+
 export const formatReportType = (value?: string): string => {
   if (!value) return '—';
   if (value === 'simple') return '普通';

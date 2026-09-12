@@ -201,6 +201,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 调度跨进程互斥：API 运行时调度器与 CLI `--schedule` 定时路径共用基于 `fcntl` 文件锁的跨进程互斥（锁文件锚定在共享 SQLite 数据库旁），避免 API 与 CLI 或多个 uvicorn worker 并发跑同一天分析产生重复报告/通知；另一进程已持锁时本进程跳过并记录 `analysis_running_elsewhere`
 - [改进] 定时分析失败可观测与限次重试：运行时调度器记录 `last_failed_at` 与连续失败次数并暴露到 `/scheduler/status`，整轮失败不再被静默吞掉；失败后最多重试 3 次（间隔 5 分钟，成功即清零计数），防止单次故障静默丢当日报告
 - [改进] Web 前端整体改造为液态玻璃（Liquid Glass）风格：半透明玻璃承载层、背景光斑、顶部镜面高光；暗/亮双主题同步；内容层保持可读
+- [修复] 首页实时大盘复盘卡片恢复「分享图片 / 运行流」入口：`HomeReportRegion` 渲染 `MarketReviewReportView` 时未传 `recordId` 与 `onOpenRunFlow`，而分享按钮在 `recordId` 缺失时直接返回 null，导致这两个按钮静默消失；现补传落库记录 ID（复盘任务完成后从最新历史取回）与运行流回调，并把「正文 + 结构化载荷 + 记录 ID」收敛为同一套清理逻辑，避免只清一半再次丢按钮
+- [修复] 分享图片失败原因不再被通用文案覆盖：根因是分享接口用 `responseType: 'blob'`，axios 会把**失败响应**也解析成 `Blob`，响应拦截器在 `attachParsedApiError` 时按 Blob 解析、把错误归因缓存成「代理、DNS 或出网配置」并永久固化，服务端真实原因（如未安装 `wkhtmltoimage`）被吞掉；现拦截器在归因前先把 Blob 错误体还原成 JSON / 纯文本，按钮文案保持动作语义（「重试」）、服务端原因追加到悬停提示上；同时修正 502/503 归因——仅当响应体是网关 HTML / 空体时才归因为出网配置，服务端返回结构化错误体时原样透出真实原因
+- [修复] K 线走势卡价格轴刻度出现二进制浮点噪声：`domain` 由 `[最低价 - pad, 最高价 + pad]` 计算，pad 为浮点数，未格式化时会渲染成 `21.840999999999998` 这类刻度；现统一收敛到 2 位小数
+- [修复] 移动端顶部下拉菜单无法用 Escape 或点击外部关闭：此前仅靠 `mouseleave` 关闭，触屏没有悬停事件、键盘进入菜单项后也退不出；现菜单打开期间支持 Escape（关闭并把焦点交回汉堡按钮）与外部 `pointerdown` 关闭
+- [改进] 首页删除单只股票分析记录前增加确认：此前点击删除即刻清空该代码的全部分析历史且不可恢复，现弹确认框说明将删除的范围，取消不发请求；`ConfirmDialog` 补 `role="dialog"` / `aria-modal` 提升可访问性
+- [修复] 首页策略菜单与移动端菜单关闭后键盘焦点丢失：菜单项被 Enter/Space 激活后菜单卸载、焦点掉到 body，现把焦点交回触发按钮
+- [改进] 「AI 建议」页两个「刷新」按钮可访问名区分：信号列表刷新与 Skill 表现刷新可见文案同为「刷新」，屏幕阅读器与语音控制无法分辨；现给 Skill 表现刷新补 `aria-label`（保留可见文案「刷新」以符合 WCAG 2.5.3 标签一致）
+- [改进] 「AI 建议」页 Skill 表现卡改用独立空态文案：此前与复盘统计卡共用「暂无已复盘样本 / 当前已有 AI 建议时…」，两卡相邻时同一句话重复出现、也分不清是哪份样本缺失；现改为「暂无 Skill 表现样本 / Skill 意见已产生时，也可能还没有形成可统计的后验评估结果。」，新键 `decisionSignals.skillStatsEmptyTitle` / `skillStatsEmptyDescription` 中英双语
+- [测试] 对齐 dsa-web 前端测试与现有功能：`DecisionSignalsPage` 9 个、`SettingsPage` 2 个用例在干净 HEAD 即失败，均属测试漂移而非功能缺陷；修复三处根因——mock 工厂漏挂 `getSkillOutcomeStats` / `runSkillOutcomes` 导致挂载即渲染常驻错误态、`clearAllMocks` 不清理残留的 `mockResolvedValueOnce` 队列让用例间相互污染、通知投递卡片新增诊断提示后「诊断提示数量」断言未同步；上述 11 个失败已全部转绿（另新增 1 个 Skill 表现空态用例）
+- [修复] 首页大盘复盘「复盘摘要」卡显示的是报告标题：`_summarize_market_review` 取正文第一行作摘要，而首行就是 Markdown 标题（如「## 2026-09-12 大盘复盘」），于是摘要与记录名一字不差、零信息量；现摘要跳过所有 Markdown 标题行只取第一段正文，回退文案不变
+- [修复] 首页大盘复盘「摘要」区不再渲染三张永远空态的卡片：市场情绪 / 轮动与资金 / 风险与观察对大盘复盘没有数据来源（`sentiment_score` 是常量 50、其余是「查看复盘」「大盘复盘」占位串），移动端四张全宽卡约占 700px 却零信息量；现只保留有真实数据的「复盘摘要」一张卡，删掉 `MarketReviewReportView` 中对应文案键与渲染分支
+- [修复] 大盘复盘正文首段标题不再是硬编码英文 `Overview` / `Review`：这两个占位名生成在语言无关的 `_split_report_sections` 里，中文报告的第一个折叠段会显示英文标题；现按报告语言本地化（zh/en/ko），段落 `key`（`overview` / `full_review`）作为 API 契约保持不变
+- [修复] 30 秒后台刷新不再把首页打进加载假态：`refreshStockBar()` 无条件置 `isLoadingStockBar`，而生命周期每 30 秒与每次切回前台都会调用它，导致所有自选行的「今日覆盖」瞬间归零、行内出现 spinner、点行只弹「最新详情加载中」而不打开报告（常驻性「点了没反应」）；现后台刷新走 `silent` 分支不置该标志（与同 interval 的 `refreshHistory(true)` 对齐），失败仍置 `stockBarRefreshFailed` 轻提示
+- [修复] 自选列表的增删改不再静默吞错：`refreshCodes` 失败无任何反馈（表现为刷新按钮点了没反应）、`onSwitchList` 先改激活项再拉数据失败后停在「新列表名 + 上一个列表的内容」、`onCreateList` 乐观写入后失败仍提示「已创建」；现三条路径都返回成功与否，失败时回滚激活列表与乐观写入的列表项并提示，新建列表改用站内 Dialog 呈现字段级错误（重名、空名）
+- [修复] 「新建自选列表」不再用 `window.prompt`：Electron 渲染进程不实现该 API，桌面端点「新建」无反应也无提示，Web 端也脱离设计系统、无重名校验；现改为站内 `Dialog` + `Input`，提交期间禁用、失败在表单内提示
+- [修复] 首页错误反馈不再自相矛盾：此前失败反馈有两处反向问题——后台静默刷新（30 秒定时 / 回到前台）失败也会写全局 `error`，用户没做任何操作却在首页顶部看到粘性红条；而成功路径不清 `error`，红条会一直挂到手动关闭。现 `fetchHistory` / `fetchMarketReviewHistory` 仅在非静默失败时写 `error`，并给这两条路径的失败打上来源标记（`errorScope`），同一路径重新取数成功就收回自己留下的红条——包括 30 秒静默刷新的成功，因为「无法连接到本地服务」是对当前状态的描述，后端恢复后不该继续挂着。分析失败 / 任务失败 / 报告详情失败等一次性事件不打标记，不会被别的请求顺手抹掉
+- [修复] 个股记录列表请求失败不再伪装成「暂无记录」：历史 tab 此前只消费 `stockBarRefreshFailed` 的部分反馈，无缓存时请求失败会落到空态，用户会以为历史被清空；现缓存为空且上次刷新失败时展示独立错误态（`stockBar.errorTitle` / `stockBar.errorDescription`，中英双语）
+- [修复] 报告资讯列表的竞态覆盖：`ReportNews` 只用 `recordId` 闭包、无请求序号守卫，快速从报告 A 切到 B 时 A 的迟到响应会把 B 的资讯覆盖掉（标题已是 B、列表还是 A）；现加记录级请求令牌，响应返回时校验令牌、切换即作废在途请求
+- [改进] 首页空态不再同步下载整个 Markdown 渲染栈：`HomeReportRegion` 静态 import `MarketReviewReportView`，一路带出 `ReportMarkdownBody` → react-markdown + remark-gfm（约 148K / gzip 44K），而复盘正文只在真有复盘报告时渲染；现与 `ReportSummary` 一样改 `React.lazy` + `Suspense`，构建产物中已独立成 `MarketReviewReportView` chunk
+- [改进] 首页大盘复盘进度与结果卡可跨页面恢复：复盘状态（notice / 正文 / 载荷 / 记录 ID）与轮询此前只存在于触发它的那次交互里，切走页面或刷新浏览器后任务仍在跑、首页却什么都不显示且不再恢复；现 store 保存在途大盘复盘任务 ID（派生字符串，不订阅整个 `activeTasks`），首页挂载时接回轮询
+- [改进] 修复「大盘复盘任务」判定用错字段：`refreshHistoryForCompletedTask` 与首页任务完成回调都用 `task.reportType === 'market_review'` 判断，而 `trigger_market_review` 提交任务时未传 `report_type`、实际取值是 `detailed`，判定永远不成立，还会把 `market_review` 当股票代码塞进待补选队列；现统一走 `isMarketReviewTask`（看任务 `stock_code`，并兼容未来显式传 `report_type`）
+- [改进] 「名称与代码指向同一标的」时不再重复展示代码：场外基金只回代码做名称（如 001052）、大盘复盘伪标的为 MARKET，卡片标题、meta、分享标题与 `aria-label` 会把同一串念/显示两遍；现统一走 `isStockCodeRedundantWithName` 判定，覆盖个股栏、历史列表、自选/今日卡片、报告概览与 Markdown 面板、任务面板、模拟盘记录、基金指标卡、筛选候选、决策信号、回测导出与问股追问等展示路径，仅当名称确有区分信息时才并列代码
+- [改进] 补全展开态与异步反馈的可访问性：`Collapsible` 与 `ReportDetails` 两处折叠按钮只靠箭头旋转表达展开态，现补 `aria-expanded`（与仓库其他折叠组件一致）；批量分析提交结果由裸 `div` 改为 `role="status"`，读屏用户能拿到提交结果
+- [改进] 区域选择器可访问名回归可见文案（WCAG 2.5.3 Label in Name）：`MarketReviewRegionSelector` 触发按钮的 `aria-label`（「选择大盘复盘市场」）覆盖了可见文案（「A 股 + 港股」/「服务器默认」），语音控制用户按可见文字无法激活该控件；现移除该 `aria-label`（菜单 `role="dialog"` 的 `aria-label` 保留），与同页策略按钮一致
+- [改进] 股票代码归一化收敛为单一实现：`HomePage`、`HomeStockWorkspace`、`stockPoolStore` 各有一份逐字相同的私有 `stockCodeKey`（注释还写着「与 HomePage 保持一致」），任一份改了规则都会让任务匹配与待补齐历史 key 静默错配；现统一到 `utils/stockCode.ts` 的 `stockCodeKey`，选中判定也收敛到 `areStockCodesEquivalent`（此前 `StockBar` 用裸 `===`，带交易所前后缀的代码会漏判高亮）
+- [改进] 首页取数去重与可取消：自选历史补齐的 effect 依赖 `canLookupWatchlistHistory`，每次后台刷新该值会抖动一次并 abort 后对全部代码重发一轮请求；现按「刷新版本 + 待补齐签名」去重，只记录**已完成**的那一轮（在途请求被取消时不留标记，下一轮正常重来），并在待补齐集合清空时重置标记；「今日分析」分页查询带 `AbortSignal`（切走标签页即中断在途翻页，此前只拦住 `setState`、请求仍会翻到当日全量），同一日期 60 秒内复用上次结果
+- [测试] 同步 dsa-web 前端测试到新契约：`MarketReviewRegionSelector` 4 个用例改按可见文案查询触发按钮（顺带锁住 Label in Name 契约）、`MarketReviewReportView` 改为断言三张已删除的空态卡片不再渲染、`HomePage` 今日榜用例的 `historyApi.getList` 断言补上 `AbortSignal` 参数，并为 `isStockCodeRedundantWithName` 补 4 个用例（场外基金/大盘复盘伪标的、带交易所前后缀、空名称保底）、为「按来源回收红条（静默成功同样生效）/ 别处来源的红条不被顺手抹掉」补 3 个 store 用例；本批次全量 `npx vitest run` 112 文件 / 1198 用例通过（`tsc --noEmit`、`eslint`、`vite build` 均通过）
 
 ## [3.29.0] - 2026-08-02
 

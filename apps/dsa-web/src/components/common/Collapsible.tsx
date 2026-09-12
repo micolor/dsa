@@ -32,6 +32,9 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
+        // 展开态此前只由箭头 icon 的旋转表达，读屏用户拿不到状态；
+        // 仓库其他折叠组件（RunFlowNodeDetails / RunFlowGraph / TaskPanel）都带该属性。
+        aria-expanded={isOpen}
         className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-hover"
       >
         <div className="flex items-center gap-3">

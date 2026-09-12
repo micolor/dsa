@@ -118,6 +118,8 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowRaw(!showRaw)}
+              // 展开态只由箭头旋转表达，读屏用户无法得知面板是否展开。
+              aria-expanded={showRaw}
               className="home-surface-button home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.rawResult}</span>
@@ -144,6 +146,8 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowSnapshot(!showSnapshot)}
+              // 展开态只由箭头旋转表达，读屏用户无法得知面板是否展开。
+              aria-expanded={showSnapshot}
               className="home-surface-button home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.analysisSnapshot}</span>

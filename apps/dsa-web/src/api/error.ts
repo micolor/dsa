@@ -171,6 +171,65 @@ function extractErrorCode(data: unknown): string | null {
   return pickString(data.error, data.code);
 }
 
+/**
+ * 服务端是否返回了结构化的错误体（FastAPI 的 `{error, message}` / `{detail: ...}`）。
+ *
+ * 502/503 有两种来源：网关/代理自己失败（响应体是 HTML 或空），以及本地服务主动返回
+ * 的具体失败原因（如 `share_image_unavailable`）。只有前者才适合归因为“代理/DNS
+ * 出网配置”；后者已经带了准确原因，不能被通用文案覆盖。
+ */
+function hasStructuredErrorBody(data: unknown): boolean {
+  if (!isRecord(data)) {
+    return false;
+  }
+
+  const detail = data.detail;
+  const candidate = isRecord(detail)
+    ? pickString(detail.message, detail.error, detail.msg)
+    : pickString(
+      detail,
+      data.message,
+      data.error,
+      data.msg,
+      data.reason,
+      data.description,
+      data.title,
+    );
+
+  return candidate !== null;
+}
+
+/**
+ * 把 `responseType: 'blob'` 请求的**错误响应体**还原成可解析的形态。
+ *
+ * axios 会让 blob 请求的失败响应也走 blob 解析，于是 `error.response.data` 是一个
+ * `Blob` 而不是对象：下游 `getParsedApiError` 看不到服务端返回的结构化错误体
+ * （如 503 + `{error: 'share_image_unavailable', message: '...wkhtmltoimage...'}`），
+ * 只能退化成通用的「代理 / DNS / 出网配置」归因，真实原因被覆盖。
+ *
+ * 这里读回 Blob 文本并就地写回 `response.data`：是 JSON 就解析成对象，否则保留纯文本
+ * （网关 HTML 仍按网关失败归因）。非 Blob 或读取失败时保持原样，不伪造兜底数据。
+ */
+export async function normalizeBlobErrorBody(error: unknown): Promise<void> {
+  const response = (error as ErrorCarrier | null | undefined)?.response;
+  if (!response || typeof Blob === 'undefined' || !(response.data instanceof Blob)) {
+    return;
+  }
+
+  let text: string;
+  try {
+    text = await response.data.text();
+  } catch {
+    return;
+  }
+
+  try {
+    response.data = JSON.parse(text);
+  } catch {
+    response.data = text;
+  }
+}
+
 export function extractErrorPayloadText(data: unknown): string | null {
   if (typeof data === 'string') {
     return data.trim() || null;
@@ -445,20 +504,22 @@ export function parseApiError(error: unknown): ParsedApiError {
     });
   }
 
-  if (
-    status === 502
+  const hasNetworkFailureHint = includesAny(matchText, [
+    'dns',
+    'enotfound',
+    'name or service not known',
+    'temporary failure in name resolution',
+    'proxy',
+    'tunnel',
+  ]);
+  const mentionsGatewayStatus = status === 502
     || status === 503
-    || includesAny(matchText, [
-      'dns',
-      'enotfound',
-      'name or service not known',
-      'temporary failure in name resolution',
-      'proxy',
-      'tunnel',
-      '502',
-      '503',
-    ])
-  ) {
+    || includesAny(matchText, ['502', '503']);
+  // 网关状态码 + 没有结构化错误体 = 网关/代理自身失败，此时才归因为出网配置。
+  // 若服务端给了具体原因，交给下面的 http_error 分支原样透出。
+  const isUnexplainedGatewayFailure = mentionsGatewayStatus && !hasStructuredErrorBody(response?.data);
+
+  if (hasNetworkFailureHint || isUnexplainedGatewayFailure) {
     return createParsedApiError({
       title: '服务端无法访问外部依赖',
       message: '页面已连接到本地服务，但本地服务访问外部模型或数据接口失败，请检查代理、DNS 或出网配置。',

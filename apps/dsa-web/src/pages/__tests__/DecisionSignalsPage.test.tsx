@@ -15,6 +15,7 @@ import type {
   DecisionSignalOutcomeListResponse,
   DecisionSignalOutcomeStatsResponse,
   DecisionSignalReassessResponse,
+  SkillOpinionPerformanceStatsResponse,
 } from '../../types/decisionSignals';
 import type { StockIndexItem } from '../../types/stockIndex';
 import DecisionSignalsPage from '../DecisionSignalsPage';
@@ -34,6 +35,10 @@ vi.mock('../../api/decisionSignals', () => ({
     getLatest: vi.fn(),
     getOutcomeStats: vi.fn(),
     getSignalOutcomes: vi.fn(),
+    // 页面挂载时会拉 Skill 表现统计；工厂漏掉这两个方法会让 api 调用同步抛 TypeError，
+    // 渲染出一个常驻的「加载 Skill 表现失败」alert，抢在测试真正断言的 alert 前面。
+    getSkillOutcomeStats: vi.fn(),
+    runSkillOutcomes: vi.fn(),
     getFeedback: vi.fn(),
     putFeedback: vi.fn(),
     updateStatus: vi.fn(),
@@ -183,6 +188,33 @@ function listResponse(items: DecisionSignalItem[] = [signal], total = items.leng
     pageSize: 20,
   };
 }
+
+const skillStatsResponse: SkillOpinionPerformanceStatsResponse = {
+  engineVersion: 'decision-signal-v1',
+  minimumEvaluatedSampleSize: 30,
+  // 默认给一条有数据的 bucket，让 Skill 表现表格的渲染路径被常规用例覆盖；
+  // 空态由单独用例用 mockResolvedValueOnce 构造。
+  buckets: [
+    {
+      skillId: 'technical-trend',
+      horizon: '3d',
+      engineVersion: 'decision-signal-v1',
+      total: 12,
+      pending: 2,
+      evaluated: 10,
+      observational: 1,
+      unable: 0,
+      hit: 6,
+      miss: 4,
+      sampleSufficient: false,
+      sampleStatus: '样本不足',
+      hitRatePct: 60,
+      missRatePct: 40,
+      avgDirectionalReturnPct: 1.8,
+      unableRatePct: 0,
+    },
+  ],
+};
 
 const outcomeStats: DecisionSignalOutcomeStatsResponse = {
   engineVersion: 'decision-signal-v1',
@@ -401,7 +433,9 @@ beforeEach(() => {
   window.history.pushState({}, '', '/');
   window.localStorage.clear();
   window.localStorage.setItem('dsa.uiLanguage', 'zh');
-  vi.clearAllMocks();
+  // 必须用 resetAllMocks：clearAllMocks 只清调用记录，残留的 mockResolvedValueOnce 队列会
+  // 泄漏到下一个用例，让后续渲染拿到上一个用例的返回值。
+  vi.resetAllMocks();
   stockIndexState = {
     index: stockIndexItems,
     loading: false,
@@ -414,6 +448,7 @@ beforeEach(() => {
   vi.mocked(decisionSignalsApi.getLatest).mockResolvedValue(listResponse([signal]));
   vi.mocked(decisionSignalsApi.getOutcomeStats).mockResolvedValue(outcomeStats);
   vi.mocked(decisionSignalsApi.getSignalOutcomes).mockResolvedValue(outcomeList);
+  vi.mocked(decisionSignalsApi.getSkillOutcomeStats).mockResolvedValue(skillStatsResponse);
   vi.mocked(decisionSignalsApi.getFeedback).mockResolvedValue(emptyFeedback);
   vi.mocked(decisionSignalsApi.putFeedback).mockResolvedValue({
     ...emptyFeedback,
@@ -494,9 +529,26 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
 
+    // 复盘统计卡与 Skill 表现卡各有独立空态文案，这里同时断言只出现前者，
+    // 避免「两张卡共用同一句话」再次把断言变成多元素命中。
     expect(await screen.findByText('暂无已复盘样本')).toBeInTheDocument();
+    expect(screen.queryByText('暂无 Skill 表现样本')).not.toBeInTheDocument();
     expect(screen.getByText('当前统计为全局已复盘 outcome 口径，不等于当前可见信号数量，也不随当前股票过滤。')).toBeInTheDocument();
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
+  });
+
+  it('shows a skill-specific empty state when no skill performance sample is available', async () => {
+    vi.mocked(decisionSignalsApi.getSkillOutcomeStats).mockResolvedValueOnce({
+      ...skillStatsResponse,
+      buckets: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('暂无 Skill 表现样本')).toBeInTheDocument();
+    expect(screen.getByText('Skill 意见已产生时，也可能还没有形成可统计的后验评估结果。')).toBeInTheDocument();
+    // 复盘统计卡此刻有数据，不应连带渲染它自己的空态。
+    expect(screen.queryByText('暂无已复盘样本')).not.toBeInTheDocument();
   });
 
   it('uses a source report id query parameter as an exact analysis lookup on load', async () => {

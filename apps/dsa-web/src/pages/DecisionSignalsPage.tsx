@@ -50,6 +50,7 @@ import type { Market, StockIndexItem } from '../types/stockIndex';
 import { cn } from '../utils/cn';
 import { SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { buildDecisionActionLabelMap } from '../utils/decisionAction';
+import { isStockCodeRedundantWithName } from '../utils/stockName';
 import {
   getDecisionSignalHorizonLabel,
   getDecisionSignalMarketLabel,
@@ -1292,7 +1293,10 @@ const DecisionSignalsPage: React.FC = () => {
   const activeStockLabel = activeStockContext
     ? [
       activeStockContext.displayCode ?? activeStockContext.code,
-      activeStockContext.name,
+      // 名称与代码指向同一标的时不再重复（否则会拼出「MARKET / MARKET / 大盘」）。
+      isStockCodeRedundantWithName(activeStockContext.name, activeStockContext.code)
+        ? null
+        : activeStockContext.name,
       activeStockContext.market,
     ].filter(Boolean).join(' / ')
     : null;
@@ -1591,6 +1595,7 @@ const DecisionSignalsPage: React.FC = () => {
                 className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
                 onClick={() => void loadSkillOutcomeStats()}
                 disabled={skillStatsLoading}
+                aria-label={t('decisionSignals.skillStatsRefreshAria')}
               >
                 <RefreshCw className={cn('h-4 w-4', skillStatsLoading ? 'animate-spin' : '')} />
                 {t('decisionSignals.skillStatsRefresh')}
@@ -1639,29 +1644,29 @@ const DecisionSignalsPage: React.FC = () => {
                     {bucket.skillId}
                     <span className="ml-2 text-secondary-text">{bucket.horizon}</span>
                   </span>
-                  <span className="text-secondary-text" title={t('decisionSignals.skillStatsPending')}>
+                  {/* 单元格列含义由上方表头承载；不要给这些 span 补原生 title，
+                      `tests/ui_governance.test.ts` 禁止在 span/div 等元素上用原生 title。 */}
+                  <span className="text-secondary-text">
                     {bucket.pending}
                   </span>
-                  <span className="text-secondary-text" title={t('decisionSignals.skillStatsEvaluated')}>
+                  <span className="text-secondary-text">
                     {bucket.evaluated}
                   </span>
-                  <span className="text-secondary-text" title={t('decisionSignals.statsTotal')}>
+                  <span className="text-secondary-text">
                     {bucket.total}
                   </span>
                   <span className="text-success">{bucket.hit}</span>
                   <span className="text-danger">{bucket.miss}</span>
                   <span
                     className={`tabular-nums text-secondary-text ${bucket.sampleSufficient ? '' : 'text-warning'}`}
-                    title={t('decisionSignals.skillStatsHitRate')}
                   >
                     {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
                   </span>
-                  <span className="tabular-nums text-secondary-text" title={t('decisionSignals.skillStatsAvgReturn')}>
+                  <span className="tabular-nums text-secondary-text">
                     {bucket.avgDirectionalReturnPct != null ? `${bucket.avgDirectionalReturnPct.toFixed(1)}%` : '-'}
                   </span>
                   <span
                     className={bucket.sampleSufficient ? 'text-secondary-text' : 'text-warning'}
-                    title={t('decisionSignals.skillStatsSampleStatus')}
                   >
                     {bucket.sampleStatus}
                   </span>
@@ -1672,8 +1677,8 @@ const DecisionSignalsPage: React.FC = () => {
           ) : (
             <EmptyState
               className="border-none bg-transparent py-6 shadow-none"
-              title={t('decisionSignals.noReviewedStatsTitle')}
-              description={t('decisionSignals.noReviewedStatsDescription')}
+              title={t('decisionSignals.skillStatsEmptyTitle')}
+              description={t('decisionSignals.skillStatsEmptyDescription')}
               icon={<BarChart3 className="h-6 w-6" />}
             />
           )}

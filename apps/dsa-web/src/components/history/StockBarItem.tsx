@@ -4,7 +4,7 @@ import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
-import { truncateStockName } from '../../utils/stockName';
+import { isStockCodeRedundantWithName, truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface StockBarItemProps {
@@ -28,6 +28,9 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   const sentimentScore = typeof item.sentimentScore === 'number' ? item.sentimentScore : null;
   const sentimentColor = sentimentScore !== null ? getSentimentColor(sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
+  // 名称与代码指向同一标的时（场外基金只回代码做名称、大盘复盘为 MARKET），
+  // 下面的 meta 里再展示一次代码就是重复，aria-label 也会被念两遍。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, item.stockCode);
   const actionLabels = buildDecisionActionLabelMap(t);
   const operationLabel = getDecisionActionLabel(
     item.action,
@@ -77,22 +80,28 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
     </>
   );
 
+  const hasMoreMeta = Boolean(item.lastAnalysisTime) || item.analysisCount > 1;
+
   const meta = (
     <>
-      <span className="text-[11px] text-secondary-text font-mono">
-        {item.stockCode}
-      </span>
-      {item.lastAnalysisTime && (
+      {hasDistinctName && (
         <>
-          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-          <span className="text-[11px] text-muted-text">
-            {formatDateTime(item.lastAnalysisTime)}
+          <span className="text-[11px] text-secondary-text font-mono">
+            {item.stockCode}
           </span>
+          {hasMoreMeta && <span className="w-1 h-1 rounded-full bg-subtle-hover" />}
         </>
+      )}
+      {item.lastAnalysisTime && (
+        <span className="text-[11px] text-muted-text">
+          {formatDateTime(item.lastAnalysisTime)}
+        </span>
       )}
       {item.analysisCount > 1 && (
         <>
-          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+          {(hasDistinctName || Boolean(item.lastAnalysisTime)) && (
+            <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+          )}
           <span className="text-[10px] text-muted-text">
             {t('history.analysisCount', { count: item.analysisCount })}
           </span>
@@ -109,7 +118,9 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
         buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
           isViewing ? 'home-history-item-selected' : ''
         }`}
-        ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
+        ariaLabel={hasDistinctName
+          ? t('history.itemAria', { name: stockName, code: item.stockCode })
+          : t('history.itemAriaSameName', { code: item.stockCode })}
         onClick={() => onClick(item.id)}
         leading={leading}
         title={(

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
@@ -1571,12 +1571,13 @@ describe('HomePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '今日' }));
 
     await waitFor(() => {
+      // 分页循环带 AbortSignal：切走标签页时要能中断在途的翻页请求。
       expect(historyApi.getList).toHaveBeenCalledWith({
         startDate,
         endDate,
         page: 2,
         limit: 100,
-      });
+      }, { signal: expect.any(AbortSignal) });
     });
 
     const highScoreButton = await screen.findByRole('button', { name: /NVIDIA/ });
@@ -1984,6 +1985,17 @@ describe('HomePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '删除 大盘复盘 历史记录' }));
 
+    // 删除会清空该代码的全部分析历史且不可恢复，必须先确认；取消时不得发出删除请求。
+    const dialog = await screen.findByRole('dialog', { name: '删除分析记录' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog', { name: '删除分析记录' })).not.toBeInTheDocument();
+    expect(historyApi.deleteByCode).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /MARKET/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 大盘复盘 历史记录' }));
+    const confirmDialog = await screen.findByRole('dialog', { name: '删除分析记录' });
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: '删除' }));
+
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /MARKET/ })).not.toBeInTheDocument();
     });
@@ -2165,7 +2177,8 @@ describe('HomePage', () => {
       </MemoryRouter>,
     );
 
-    const regionSelector = await screen.findByRole('button', { name: '选择大盘复盘市场' });
+    // 触发按钮的可访问名就是可见文案（不再额外挂 aria-label）。
+    const regionSelector = await screen.findByRole('button', { name: '服务器默认' });
     expect(regionSelector).toHaveTextContent('服务器默认');
     expect(regionSelector).not.toHaveTextContent('A 股');
     expect(systemConfigApi.getConfig).not.toHaveBeenCalled();
@@ -2210,7 +2223,7 @@ describe('HomePage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '选择大盘复盘市场' }));
+    fireEvent.click(await screen.findByRole('button', { name: '服务器默认' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /A 股/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /美股/ }));
     fireEvent.click(screen.getByRole('button', { name: '大盘复盘' }));

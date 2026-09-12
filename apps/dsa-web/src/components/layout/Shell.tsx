@@ -20,11 +20,16 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
   const { t } = useUiLanguage();
   const location = useLocation();
   const closeTimerRef = useRef<number | undefined>(undefined);
+  const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const current = ROUTE_TITLES[location.pathname];
 
-  const closeMenu = useCallback(() => {
+  const closeMenu = useCallback((restoreFocus = false) => {
     window.clearTimeout(closeTimerRef.current);
     setMenuOpen(false);
+    if (restoreFocus) {
+      menuTriggerRef.current?.focus();
+    }
   }, []);
 
   const openMenu = useCallback(() => {
@@ -38,6 +43,37 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
   }, []);
 
   useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
+
+  // 悬停关闭只在有指针设备时可靠：触屏没有 mouseleave，箭头键进入菜单项后也无法靠
+  // 悬停退出。因此菜单打开期间额外支持 Escape 与点击外部关闭。
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.preventDefault();
+      closeMenu(true);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRootRef.current?.contains(target)) {
+        return;
+      }
+      closeMenu();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    // 捕获阶段：菜单项自身不会阻止冒泡，但外部点击应先关菜单再执行原动作。
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [closeMenu, menuOpen]);
 
   // Reveal the pinned top bar only once the active scroll container has moved.
   // Scroll doesn't bubble, so use a capture-phase listener to catch the
@@ -88,11 +124,13 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
         }
       >
         <div
+          ref={menuRootRef}
           className="absolute left-0 top-0 bottom-0 z-10 flex items-center"
           onMouseEnter={openMenu}
           onMouseLeave={scheduleClose}
         >
           <button
+            ref={menuTriggerRef}
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
             className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border/60 bg-card/60 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
@@ -104,7 +142,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
 
           {menuOpen ? (
             <div className="absolute left-2 top-full mt-1.5 w-60 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl glass-surface-strong p-2.5 shadow-soft-card">
-              <SidebarNav onNavigate={closeMenu} />
+              <SidebarNav onNavigate={() => closeMenu()} />
             </div>
           ) : null}
         </div>

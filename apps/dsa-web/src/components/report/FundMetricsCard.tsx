@@ -2,6 +2,7 @@ import type React from 'react';
 import { Badge, Card } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import type { ReportLanguage } from '../../types/analysis';
 
 interface FundMetricsCardProps {
@@ -196,7 +197,9 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
                       <td className="px-3 py-2 font-mono text-right">{toFiniteNumber(h.rank) ?? text.noValue}</td>
                       <td className="px-3 py-2 text-left">
                         {h.stockName || text.noValue}
-                        {h.stockCode ? <span className="ml-1 font-mono text-muted-text">({h.stockCode})</span> : null}
+                        {h.stockCode && !isStockCodeRedundantWithName(h.stockName, h.stockCode)
+                          ? <span className="ml-1 font-mono text-muted-text">({h.stockCode})</span>
+                          : null}
                       </td>
                       <td className="px-3 py-2 font-mono text-right">{percentRaw(h.pctOfNav)}</td>
                       <td className="px-3 py-2 font-mono text-right">{num(h.shareCount)}</td>

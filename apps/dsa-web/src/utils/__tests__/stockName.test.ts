@@ -1,6 +1,7 @@
 import {
   truncateStockName,
   isStockNameTruncated,
+  isStockCodeRedundantWithName,
   STOCK_NAME_MAX_LENGTH,
 } from '../stockName';
 import { describe, expect, test } from 'vitest';
@@ -115,5 +116,30 @@ describe('truncateStockName', () => {
       expect(STOCK_NAME_MAX_LENGTH.CHINESE).toBe(8);
       expect(STOCK_NAME_MAX_LENGTH.MIXED).toBe(10);
     });
+  });
+});
+
+describe('isStockCodeRedundantWithName', () => {
+  test('最典型的两种重复：场外基金名称回退成代码、大盘复盘伪标的', () => {
+    expect(isStockCodeRedundantWithName('001052', '001052')).toBe(true);
+    expect(isStockCodeRedundantWithName('MARKET', 'MARKET')).toBe(true);
+  });
+
+  test('名称与代码指向不同标的时不判重复', () => {
+    expect(isStockCodeRedundantWithName('贵州茅台', '600519')).toBe(false);
+    expect(isStockCodeRedundantWithName('沪深300', '000300')).toBe(false);
+  });
+
+  test('带交易所前后缀时仍按同一标的判定', () => {
+    expect(isStockCodeRedundantWithName('00700', 'HK00700')).toBe(true);
+    expect(isStockCodeRedundantWithName('600519.SH', 'sh600519')).toBe(true);
+    expect(isStockCodeRedundantWithName('00700', 'HK01810')).toBe(false);
+  });
+
+  test('任一侧为空都不算重复（空名称应保留代码展示）', () => {
+    expect(isStockCodeRedundantWithName('', '600519')).toBe(false);
+    expect(isStockCodeRedundantWithName('   ', '600519')).toBe(false);
+    expect(isStockCodeRedundantWithName('贵州茅台', '')).toBe(false);
+    expect(isStockCodeRedundantWithName(undefined, undefined)).toBe(false);
   });
 });

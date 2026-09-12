@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
+import { BarChart3, Clipboard, FileText, Gauge, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
 import { historyApi } from '../../api/history';
 import { formatUiText, UI_TEXT } from '../../i18n/uiText';
 import type {
@@ -283,11 +283,6 @@ const toSectorBarRows = (items?: Array<{ name: string; changePct?: number }>): M
 const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   reviewSummary: string;
   noReviewSummary: string;
-  noSentimentScore: string;
-  rotationAndFunds: string;
-  noRotationView: string;
-  riskAndWatch: string;
-  noRiskWatch: string;
   structuredMarketData: string;
   noBreadthData: string;
   advancers: string;
@@ -307,11 +302,6 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   zh: {
     reviewSummary: '复盘摘要',
     noReviewSummary: '暂无摘要',
-    noSentimentScore: '暂无评分',
-    rotationAndFunds: '轮动与资金',
-    noRotationView: '暂无轮动观点',
-    riskAndWatch: '风险与观察',
-    noRiskWatch: '暂无观察重点',
     structuredMarketData: '结构化大盘数据',
     noBreadthData: '暂无数据',
     advancers: '上涨家数',
@@ -331,11 +321,6 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   en: {
     reviewSummary: 'Review Summary',
     noReviewSummary: 'No review summary yet',
-    noSentimentScore: 'No score yet',
-    rotationAndFunds: 'Rotation & Funds',
-    noRotationView: 'No rotation view yet',
-    riskAndWatch: 'Risks & Watchlist',
-    noRiskWatch: 'No key observations yet',
     structuredMarketData: 'Structured Market Data',
     noBreadthData: 'No data',
     advancers: 'Advancers',
@@ -355,11 +340,6 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   ko: {
     reviewSummary: '리뷰 요약',
     noReviewSummary: '요약 없음',
-    noSentimentScore: '점수 없음',
-    rotationAndFunds: '순환과 자금',
-    noRotationView: '순환 관점 없음',
-    riskAndWatch: '리스크와 관찰',
-    noRiskWatch: '관찰 포인트 없음',
     structuredMarketData: '구조화 시장 데이터',
     noBreadthData: '데이터 없음',
     advancers: '상승 종목 수',
@@ -464,31 +444,6 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
     }
   }, [content]);
 
-  const insightCards = useMemo(() => [
-    {
-      icon: FileText,
-      label: marketReviewText.reviewSummary,
-      value: summary?.analysisSummary || marketReviewText.noReviewSummary,
-    },
-    {
-      icon: Gauge,
-      label: text.marketSentiment,
-      value: summary?.sentimentScore !== undefined
-        ? `${summary.sentimentScore} / 100`
-        : marketReviewText.noSentimentScore,
-    },
-    {
-      icon: Layers,
-      label: marketReviewText.rotationAndFunds,
-      value: summary?.operationAdvice || marketReviewText.noRotationView,
-    },
-    {
-      icon: ShieldAlert,
-      label: marketReviewText.riskAndWatch,
-      value: summary?.trendPrediction || marketReviewText.noRiskWatch,
-    },
-  ], [marketReviewText, summary, text.marketSentiment]);
-
   return (
     <div className={`animate-fade-in space-y-4 pb-8 ${className}`}>
       <Card variant="gradient" padding="md" className="home-report-hero text-left">
@@ -574,21 +529,24 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
       </Card>
 
       {summary ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {insightCards.map(({ icon: Icon, label, value }) => (
-            <Card key={label} variant="bordered" padding="sm" className="home-panel-card text-left">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </div>
-                <div className="min-w-0">
-                  <p className="label-uppercase">{label}</p>
-                  <p className="mt-2 line-clamp-4 text-sm leading-6 text-foreground">{value}</p>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+        // 只保留「复盘摘要」一张卡。另外三张读的是 sentiment_score / operation_advice /
+        // trend_prediction，而大盘复盘落库时这三个字段填的是常量 50 和占位串
+        // （见 src/core/market_review.py 的 _persist_market_review_history），
+        // 渲染出来就是「50 / 100」「查看复盘」这类假数据——没有真实来源的字段不展示，
+        // 比编一个值更诚实。
+        <Card variant="bordered" padding="sm" className="home-panel-card text-left">
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FileText className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <p className="label-uppercase">{marketReviewText.reviewSummary}</p>
+              <p className="mt-2 text-sm leading-6 text-foreground">
+                {summary.analysisSummary || marketReviewText.noReviewSummary}
+              </p>
+            </div>
+          </div>
+        </Card>
       ) : null}
 
       {structuredMarketData.length > 0 ? (

@@ -9,6 +9,7 @@ import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText } from '../i18n/uiText';
+import { isStockCodeRedundantWithName } from '../utils/stockName';
 import { PAPER_TRADING_TEXT } from '../locales/featureText';
 import type { PaperAccount, PaperPosition, PaperSignalRecord, PaperSnapshot, PaperTrade } from '../types/paper';
 
@@ -314,7 +315,9 @@ export const PaperTradingPage: React.FC = () => {
                         <tr key={p.stockCode} className="border-t border-border/60">
                           <td className="py-2 pr-3 font-medium text-foreground">
                             {p.stockName || p.stockCode}
-                            <span className="ml-1.5 font-mono text-xs text-secondary-text">{p.stockCode}</span>
+                            {isStockCodeRedundantWithName(p.stockName, p.stockCode) ? null : (
+                              <span className="ml-1.5 font-mono text-xs text-secondary-text">{p.stockCode}</span>
+                            )}
                           </td>
                           <td className="py-2 pr-3 text-secondary-text">{qty}</td>
                           <td className="py-2 pr-3 text-secondary-text">{cost?.toFixed(2)}</td>
@@ -380,7 +383,9 @@ export const PaperTradingPage: React.FC = () => {
                         <tr key={p.stockCode} className="border-t border-border/60">
                           <td className="py-2 pr-3 font-medium text-foreground">
                             {p.stockName || p.stockCode}
-                            <span className="ml-1.5 font-mono text-xs text-secondary-text">{p.stockCode}</span>
+                            {isStockCodeRedundantWithName(p.stockName, p.stockCode) ? null : (
+                              <span className="ml-1.5 font-mono text-xs text-secondary-text">{p.stockCode}</span>
+                            )}
                           </td>
                           <td className="py-2 pr-3 text-secondary-text">{p.quantity}</td>
                           <td className="py-2 pr-3 text-secondary-text">{p.avgCost?.toFixed(2)}</td>

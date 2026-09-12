@@ -32,7 +32,8 @@ export interface UseWatchlistReturn {
   watchlistOptions: WatchlistOption[];
   /** 当前激活列表的展示标识；默认列表为 DEFAULT_WATCHLIST_ID。 */
   activeListId: string;
-  onCreateList: (name: string) => Promise<void>;
+  /** 返回是否创建成功，供调用方呈现字段级错误。 */
+  onCreateList: (name: string) => Promise<boolean>;
   onSwitchList: (listId: string) => Promise<void>;
   isInWatchlist: (stockCode: string) => boolean;
   addToWatchlist: (stockCode: string) => Promise<void>;
@@ -70,14 +71,19 @@ export function useWatchlist(): UseWatchlistReturn {
     [activeListId],
   );
 
-  const refreshCodes = useCallback(async (listName?: string) => {
+  // 返回是否成功：调用方需要区分「拉到了空列表」和「请求失败」。
+  // 此前这里是静默 catch，导致切换列表失败时界面停留在「新列表名 + 上一个列表的股票」，
+  // 新建列表失败时还会提示「已创建」。
+  const refreshCodes = useCallback(async (listName?: string): Promise<boolean> => {
     try {
       const result = await systemConfigApi.getWatchlist(listName);
       if (mountedRef.current) {
         setCodes(result);
       }
+      return true;
     } catch {
-      // keep existing codes
+      // 失败时保留已有 codes（不要清空成空列表，那会让误判成「列表被清空」）。
+      return false;
     }
   }, []);
 
@@ -200,43 +206,67 @@ export function useWatchlist(): UseWatchlistReturn {
 
   const onSwitchList = useCallback(async (listId: string) => {
     if (listId === activeListId) return;
+    const previousListId = activeListId;
     setActiveListId(listId);
     setIsLoading(true);
     const listName = listId === DEFAULT_WATCHLIST_ID ? undefined : listId;
     try {
-      await refreshCodes(listName);
+      const ok = await refreshCodes(listName);
+      if (!ok && mountedRef.current) {
+        // 回滚激活列表：否则用户看到的是新列表名配着上一个列表的内容，
+        // 比单纯的失败更难理解。
+        setActiveListId(previousListId);
+        showMessage(t('watchlist.actionFailed'));
+      }
     } finally {
       if (mountedRef.current) {
         setIsLoading(false);
       }
     }
-  }, [activeListId, refreshCodes]);
+  }, [activeListId, refreshCodes, showMessage, t]);
 
-  const onCreateList = useCallback(async (name: string) => {
+  // 返回是否创建成功；成功/失败的文案由调用方（新建列表 Dialog）呈现，
+  // 因为它能给出字段级错误提示，而 hook 只能弹一条通用 toast。
+  const onCreateList = useCallback(async (name: string): Promise<boolean> => {
     const trimmed = name.trim();
-    if (!trimmed || isActioningRef.current) return;
+    if (!trimmed || isActioningRef.current) return false;
     isActioningRef.current = true;
     setIsActioning(true);
+    const previousListId = activeListId;
+    // 创建列表目前是纯前端行为（后端没有 create 接口，列表在首次 add 时才落库），
+    // 所以仍然是乐观写入；但写完必须确认新列表真的可读——refreshCodes 以前会静默
+    // 吞掉失败，让用户在列表实际不可读时也看到「已创建」。
+    const inserted = !lists.some((item) => item.name === trimmed);
     try {
       const key = listNameToKey(trimmed);
       // 乐观更新：纳入候选但不覆盖已有同名列表。
-      setLists((prev) => {
-        const exists = prev.some((item) => item.name === trimmed);
-        if (exists) return prev;
-        return [...prev, { key, name: trimmed, count: 0 }];
-      });
+      setLists((prev) => (
+        prev.some((item) => item.name === trimmed)
+          ? prev
+          : [...prev, { key, name: trimmed, count: 0 }]
+      ));
       setActiveListId(trimmed);
-      await refreshCodes(trimmed);
-      showMessage(t('watchlist.listCreatedMessage', { name: trimmed }));
+      const ok = await refreshCodes(trimmed);
+      if (!ok) {
+        if (mountedRef.current) {
+          // 回滚乐观写入，避免留下一个「看起来建好了、打开却是空的」列表。
+          if (inserted) {
+            setLists((prev) => prev.filter((item) => item.name !== trimmed));
+          }
+          setActiveListId(previousListId);
+        }
+        return false;
+      }
+      return true;
     } catch {
-      if (mountedRef.current) showMessage(t('watchlist.actionFailed'));
+      return false;
     } finally {
       if (mountedRef.current) {
         isActioningRef.current = false;
         setIsActioning(false);
       }
     }
-  }, [showMessage, t, refreshCodes]);
+  }, [activeListId, lists, refreshCodes]);
 
   return {
     watchlistCodes: codes,

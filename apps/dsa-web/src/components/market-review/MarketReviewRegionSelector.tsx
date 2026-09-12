@@ -102,7 +102,9 @@ export const MarketReviewRegionSelector: React.FC<MarketReviewRegionSelectorProp
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? 'market-review-region-menu' : undefined}
-        aria-label={t('home.marketRegionSelector')}
+        // 不加 aria-label：可见文案（「A 股 + 港股」/「服务器默认」）本身就是可访问名。
+        // 覆盖它会让语音控制用户按可见文字无法激活该控件（WCAG 2.5.3 Label in Name）。
+        // 与同页策略按钮（HomePage 的 strategy-menu-button）保持一致。
         onClick={() => setOpen((current) => !current)}
         className={cn(
           'flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border border-subtle bg-surface/60 px-3 text-left text-xs text-secondary-text transition-colors',

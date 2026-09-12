@@ -11,6 +11,7 @@ import {
   getDecisionActionTone,
 } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 
 type Props = {
   /** Which list to render; the page owns the top-level tab state. */
@@ -84,7 +85,7 @@ export const PaperRecordsList: React.FC<Props> = ({
               <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="min-w-0 truncate text-sm font-medium text-foreground">
                   {record.stockName || record.stockCode || '—'}
-                  {record.stockCode ? (
+                  {record.stockCode && !isStockCodeRedundantWithName(record.stockName, record.stockCode) ? (
                     <span className="ml-1.5 font-mono text-xs text-secondary-text">{record.stockCode}</span>
                   ) : null}
                 </span>
@@ -110,7 +111,7 @@ export const PaperRecordsList: React.FC<Props> = ({
                 </Badge>
                 <span className="text-sm font-medium text-foreground">
                   {trade.stockName || trade.stockCode}
-                  {trade.stockCode ? (
+                  {trade.stockCode && !isStockCodeRedundantWithName(trade.stockName, trade.stockCode) ? (
                     <span className="ml-1.5 font-mono text-xs text-secondary-text">{trade.stockCode}</span>
                   ) : null}
                 </span>

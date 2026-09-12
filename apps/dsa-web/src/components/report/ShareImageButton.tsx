@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Share2, TriangleAlert } from 'lucide-react';
+import { getParsedApiError } from '../../api/error';
 import { historyApi } from '../../api/history';
 import type { ReportLanguage } from '../../types/analysis';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -52,16 +53,20 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
   const [stateSnapshot, setStateSnapshot] = useState<{
     recordId?: number;
     state: ShareState;
+    errorMessage: string | null;
   }>(() => ({
     recordId: activeRecordId,
     state: 'idle',
+    errorMessage: null,
   }));
   const resetTimerRef = useRef<number | null>(null);
   const loadTokenRef = useRef(0);
   const cachedImageRef = useRef<{ recordId: number; blob: Blob } | null>(null);
-  const state = stateSnapshot.recordId === activeRecordId ? stateSnapshot.state : 'idle';
-  const setState = useCallback((nextState: ShareState) => {
-    setStateSnapshot({ recordId: activeRecordId, state: nextState });
+  const isCurrentRecord = stateSnapshot.recordId === activeRecordId;
+  const state = isCurrentRecord ? stateSnapshot.state : 'idle';
+  const stateErrorMessage = isCurrentRecord ? stateSnapshot.errorMessage : null;
+  const setState = useCallback((nextState: ShareState, errorMessage: string | null = null) => {
+    setStateSnapshot({ recordId: activeRecordId, state: nextState, errorMessage });
   }, [activeRecordId]);
   const clearResetTimer = useCallback(() => {
     if (resetTimerRef.current !== null) {
@@ -76,7 +81,7 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
     resetTimerRef.current = window.setTimeout(() => {
       setStateSnapshot((current) => (
         current.recordId === scheduledRecordId
-          ? { recordId: scheduledRecordId, state: 'idle' }
+          ? { recordId: scheduledRecordId, state: 'idle', errorMessage: null }
           : current
       ));
     }, 2200);
@@ -111,7 +116,7 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
       } catch (error) {
         if (loadTokenRef.current !== loadToken) return;
         console.error('Generate share image failed:', error);
-        setState('error');
+        setState('error', getParsedApiError(error).message);
         return;
       }
       if (loadTokenRef.current !== loadToken) return;
@@ -163,7 +168,9 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
 
   if (activeRecordId === undefined) return null;
 
-  const tooltipText = state === 'loading'
+  // 按钮文案描述的是「动作」（失败后变成“重试”），不能被错误描述替换掉，
+  // 否则可访问名称与可见文案都会退化成一段报错文本。
+  const actionText = state === 'loading'
     ? text.generatingShareImage
     : state === 'ready'
       ? text.shareImageReadyToShare
@@ -172,6 +179,11 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
       : state === 'error'
         ? text.shareImageFailed
         : text.generateShareImage;
+  // 失败原因由服务端给出（例如未安装 wkhtmltoimage），比通用文案更有定位价值，
+  // 因此追加到 Tooltip 上，而不是只写进 console。
+  const tooltipText = state === 'error' && stateErrorMessage
+    ? `${actionText}：${stateErrorMessage}`
+    : actionText;
 
   return (
     <Tooltip content={tooltipText}>
@@ -181,13 +193,13 @@ export const ShareImageButton: React.FC<ShareImageButtonProps> = ({
           onClick={() => void handleShare()}
           disabled={state === 'loading'}
           className={`home-surface-button flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg font-medium text-secondary-text hover:text-foreground disabled:opacity-50 ${iconOnly ? 'h-8 w-8' : isSmall ? 'h-8 px-2.5 text-xs gap-2' : 'h-9 px-3 text-sm gap-2'} ${className}`}
-          aria-label={tooltipText}
+          aria-label={actionText}
         >
           {state === 'loading' ? <Loader2 className={`${iconClass} animate-spin`} aria-hidden="true" /> : null}
           {state === 'success' ? <Check className={`${iconClass} text-success`} aria-hidden="true" /> : null}
           {state === 'error' ? <TriangleAlert className={`${iconClass} text-danger`} aria-hidden="true" /> : null}
           {state === 'idle' || state === 'ready' ? <Share2 className={iconClass} aria-hidden="true" /> : null}
-          {!iconOnly ? <span>{tooltipText}</span> : null}
+          {!iconOnly ? <span>{actionText}</span> : null}
         </button>
       </span>
     </Tooltip>

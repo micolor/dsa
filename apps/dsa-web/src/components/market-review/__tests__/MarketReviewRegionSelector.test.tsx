@@ -23,11 +23,12 @@ describe('MarketReviewRegionSelector', () => {
       </UiLanguageProvider>,
     );
 
-    expect(screen.getByRole('button', { name: '选择大盘复盘市场' })).toHaveTextContent(
-      '服务器默认',
-    );
-    expect(screen.getByRole('button', { name: '选择大盘复盘市场' })).not.toHaveTextContent('A 股');
-    fireEvent.click(screen.getByRole('button', { name: '选择大盘复盘市场' }));
+    // 触发按钮不再挂 aria-label，它的可访问名就是可见文案；下面按可见文案查询，
+    // 同时锁住 WCAG 2.5.3 Label in Name：语音控制用户按可见文字能激活该控件。
+    const trigger = screen.getByRole('button', { name: '服务器默认' });
+    expect(trigger).toHaveTextContent('服务器默认');
+    expect(trigger).not.toHaveTextContent('A 股');
+    fireEvent.click(trigger);
     expect(screen.getByText('由服务器在提交时决定')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /A 股/ })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: /美股/ })).not.toBeChecked();
@@ -47,7 +48,7 @@ describe('MarketReviewRegionSelector', () => {
       </UiLanguageProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '选择大盘复盘市场' }));
+    fireEvent.click(screen.getByRole('button', { name: '美股' }));
     fireEvent.click(screen.getByRole('button', { name: '全部市场' }));
     expect(onChange).toHaveBeenLastCalledWith(['cn', 'hk', 'us', 'jp', 'kr']);
 
@@ -63,7 +64,7 @@ describe('MarketReviewRegionSelector', () => {
       </UiLanguageProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '选择大盘复盘市场' }));
+    fireEvent.click(screen.getByRole('button', { name: '美股' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /美股/ }));
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -76,7 +77,7 @@ describe('MarketReviewRegionSelector', () => {
       </UiLanguageProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '选择大盘复盘市场' }));
+    fireEvent.click(screen.getByRole('button', { name: '美股' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     const cnCheckbox = screen.getByRole('checkbox', { name: /A 股/ });
 
@@ -87,7 +88,7 @@ describe('MarketReviewRegionSelector', () => {
     );
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '选择大盘复盘市场' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '美股' })).toBeDisabled();
     fireEvent.click(cnCheckbox);
     expect(onChange).not.toHaveBeenCalled();
   });

@@ -19,6 +19,7 @@ import {
 import { cn } from '../../utils/cn';
 import { parseDecisionSignalDate } from '../../utils/decisionSignalTime';
 import { getDecisionSignalProfileLabel } from '../../utils/decisionSignalProfile';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import {
   getDecisionSignalHorizonLabel,
   getDecisionSignalMarketLabel,
@@ -243,6 +244,8 @@ export const DecisionSignalCard: React.FC<DecisionSignalCardProps> = ({ item, on
   const { language, t } = useUiLanguage();
   const actionLabel = getActionLabel(item, t);
   const profileLabel = getDecisionSignalProfileLabel(item, t);
+  // 名称与代码指向同一标的时（场外基金只回代码做名称），标题已经展示过这串代码。
+  const hasDistinctName = !isStockCodeRedundantWithName(item.stockName, item.stockCode);
   const interactive = Boolean(onSelect);
   const entryRange = formatEntryRange(item);
   const pricePlanItems = [
@@ -266,7 +269,9 @@ export const DecisionSignalCard: React.FC<DecisionSignalCardProps> = ({ item, on
             <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
             <Badge variant={STATUS_VARIANTS[item.status]}>{t(STATUS_LABEL_KEYS[item.status])}</Badge>
             <Badge variant="info">{t('decisionSignals.profile')}: {profileLabel}</Badge>
-            <span className="font-mono text-sm text-secondary-text">{item.stockCode}</span>
+            {hasDistinctName ? (
+              <span className="font-mono text-sm text-secondary-text">{item.stockCode}</span>
+            ) : null}
           </div>
         </div>
         <div className="text-right text-xs text-secondary-text">
@@ -370,6 +375,8 @@ export const DecisionSignalDetails: React.FC<DecisionSignalDetailsProps> = ({
   const { language, t } = useUiLanguage();
   const actionLabel = getActionLabel(item, t);
   const profileLabel = getDecisionSignalProfileLabel(item, t);
+  // 名称与代码指向同一标的时不再重复展示代码，只保留市场标签。
+  const hasDistinctName = !isStockCodeRedundantWithName(item.stockName, item.stockCode);
   const entryRange = formatEntryRange(item);
   const evidenceData = asJsonViewerData(item.evidence);
   const qualityData = asJsonViewerData(item.dataQualitySummary);
@@ -385,7 +392,10 @@ export const DecisionSignalDetails: React.FC<DecisionSignalDetailsProps> = ({
             <Badge variant="info" size="md">{t('decisionSignals.profile')}: {profileLabel}</Badge>
           </div>
           <h3 className="mt-3 text-xl font-semibold text-foreground">{item.stockName || item.stockCode}</h3>
-          <p className="mt-1 font-mono text-sm text-secondary-text">{item.stockCode} · {getDecisionSignalMarketLabel(item.market, t)}</p>
+          <p className="mt-1 font-mono text-sm text-secondary-text">
+            {hasDistinctName ? `${item.stockCode} · ` : ''}
+            {getDecisionSignalMarketLabel(item.market, t)}
+          </p>
         </div>
         {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </div>

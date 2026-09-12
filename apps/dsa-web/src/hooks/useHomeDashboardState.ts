@@ -1,5 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import { useStockPoolStore } from '../stores';
+import { isMarketReviewTask, isTaskInFlight } from '../utils/taskKind';
 
 /**
  * Keep HomePage focused on local UI state while the store owns dashboard business state.
@@ -54,6 +55,11 @@ export function useHomeDashboardState() {
       stockBarItems: state.stockBarItems,
       isLoadingStockBar: state.isLoadingStockBar,
       stockBarRefreshFailed: state.stockBarRefreshFailed,
+      // 只取「在途大盘复盘任务 ID」这一个字符串。直接订阅 activeTasks 会让每次任务进度
+      // 回调都重渲染整页；派生成字符串后，只有任务真正出现/消失时才触发。
+      activeMarketReviewTaskId: state.activeTasks.find(
+        (task) => isMarketReviewTask(task) && isTaskInFlight(task),
+      )?.taskId ?? '',
       loadStockBar: state.loadStockBar,
       refreshStockBar: state.refreshStockBar,
     })),

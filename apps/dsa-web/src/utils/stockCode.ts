@@ -94,19 +94,27 @@ export function normalizeStockCode(stockCode: string): string {
   return code;
 }
 
-function stockCodeMatchKey(stockCode: string): string {
-  return normalizeStockCode(stockCode).toUpperCase();
+/**
+ * 归一化后的代码匹配键：trim → 去交易所前后缀 → 大写；空值返回空串。
+ *
+ * 「代码是否指向同一标的」的所有判定都必须走这里。此前 HomePage、
+ * HomeStockWorkspace、stockPoolStore 各有一份逐字相同的私有实现，
+ * 任何一份改了归一化规则都会让任务匹配、待补齐历史 key、完成态计数静默错配。
+ */
+export function stockCodeKey(stockCode?: string | null): string {
+  const trimmed = (stockCode ?? '').trim();
+  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
 }
 
 export function areStockCodesEquivalent(left: string, right: string): boolean {
   if (!left.trim() || !right.trim()) return false;
-  return stockCodeMatchKey(left) === stockCodeMatchKey(right);
+  return stockCodeKey(left) === stockCodeKey(right);
 }
 
 export function findMatchingStockCode(codes: string[], stockCode: string): string | undefined {
   if (!stockCode.trim()) return undefined;
-  const targetKey = stockCodeMatchKey(stockCode);
-  return codes.find((code) => code.trim() && stockCodeMatchKey(code) === targetKey);
+  const targetKey = stockCodeKey(stockCode);
+  return codes.find((code) => code.trim() && stockCodeKey(code) === targetKey);
 }
 
 export function includesStockCode(codes: string[], stockCode: string): boolean {

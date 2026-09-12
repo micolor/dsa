@@ -515,6 +515,54 @@ describe('stockPoolStore', () => {
     expect(state.isAnalyzing).toBe(false);
   });
 
+  it('clears a stale dashboard error once a user-initiated history refresh succeeds', async () => {
+    vi.mocked(historyApi.getList).mockRejectedValueOnce(new Error('network down'));
+    await useStockPoolStore.getState().refreshHistory();
+    expect(useStockPoolStore.getState().error).not.toBeNull();
+
+    vi.mocked(historyApi.getList).mockResolvedValue({ total: 0, page: 1, limit: 20, items: [] });
+    await useStockPoolStore.getState().refreshHistory();
+
+    expect(useStockPoolStore.getState().error).toBeNull();
+  });
+
+  it('clears its own stale dashboard error even when the succeeding refresh is the silent one', async () => {
+    // 30 秒定时 / 回到前台的静默刷新成功后也要收回本路径的失败提示：
+    // 「无法连接到本地服务」是对当前状态的描述，后端恢复后不该继续挂在首页顶部。
+    vi.mocked(historyApi.getList).mockRejectedValueOnce(new Error('network down'));
+    await useStockPoolStore.getState().refreshHistory();
+    expect(useStockPoolStore.getState().errorScope).toBe('history');
+
+    vi.mocked(historyApi.getList).mockResolvedValue({ total: 0, page: 1, limit: 20, items: [] });
+    await useStockPoolStore.getState().refreshHistory(true);
+
+    const state = useStockPoolStore.getState();
+    expect(state.error).toBeNull();
+    expect(state.errorScope).toBeNull();
+  });
+
+  it('keeps an unread dashboard error written by another path when history refresh succeeds', async () => {
+    // 分析失败 / 任务失败没有来源标记，历史列表刷新成功不得顺手抹掉这条用户还没读到的提示。
+    useStockPoolStore.getState().syncTaskFailed({
+      taskId: 'task-scope',
+      stockCode: 'AAPL',
+      stockName: 'Apple',
+      status: 'failed',
+      progress: 100,
+      reportType: 'detailed',
+      createdAt: '2026-03-18T08:00:00Z',
+      error: '分析失败',
+    });
+    expect(useStockPoolStore.getState().error).not.toBeNull();
+    expect(useStockPoolStore.getState().errorScope).toBeNull();
+
+    vi.mocked(historyApi.getList).mockResolvedValue({ total: 0, page: 1, limit: 20, items: [] });
+    await useStockPoolStore.getState().refreshHistory();
+    await useStockPoolStore.getState().refreshHistory(true);
+
+    expect(useStockPoolStore.getState().error).not.toBeNull();
+  });
+
   it('rejects obviously invalid mixed alphanumeric input before calling the API', async () => {
     useStockPoolStore.getState().setQuery('00aaaaa');
 

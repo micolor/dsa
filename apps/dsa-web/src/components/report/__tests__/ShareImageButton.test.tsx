@@ -130,6 +130,35 @@ describe('ShareImageButton', () => {
     expect(mockedGetShareImage).toHaveBeenCalledWith(19);
   });
 
+  it('surfaces the server failure reason in the tooltip without replacing the retry label', async () => {
+    // 真实案例：本地服务返回 503 + {message: '分享图片生成失败，请检查 wkhtmltoimage ...'}。
+    const error = new Error('Request failed with status code 503');
+    Object.assign(error, {
+      response: {
+        status: 503,
+        data: { error: 'share_image_unavailable', message: '分享图片生成失败，请检查 wkhtmltoimage 转图工具是否已安装并可用' },
+        statusText: 'Service Unavailable',
+      },
+    });
+    mockedGetShareImage.mockRejectedValue(error);
+
+    render(
+      <ShareImageButton
+        recordId={21}
+        reportTitle="中钨高新"
+        reportLanguage="zh"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '分享' }));
+
+    // 按钮仍描述动作，不能被错误描述顶掉。
+    const retry = await screen.findByRole('button', { name: '重试' });
+    fireEvent.mouseEnter(retry);
+
+    expect(await screen.findByText(/wkhtmltoimage/)).toBeInTheDocument();
+  });
+
   it('does not render or prefetch share images during desktop runtime', () => {
     mockedGetShareImage.mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
     Object.defineProperty(window, 'dsaDesktop', {

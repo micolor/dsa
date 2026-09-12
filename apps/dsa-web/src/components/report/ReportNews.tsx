@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import type { ParsedApiError } from '../../api/error';
 import { getParsedApiError } from '../../api/error';
@@ -41,24 +41,35 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
   const [items, setItems] = useState<NewsIntelItem[]>([]);
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  // 记录级请求令牌：从 A 快速切到 B 时，A 的响应可能晚于 B 返回，
+  // 会把 B 的资讯列表覆盖成 A 的，而标题/概览已经是 B。
+  // ReportDiagnostics / MarketReviewReportView 用 loadedMarkdown.recordId 做同类校验。
+  const loadTokenRef = useRef(0);
 
   const fetchNews = useCallback(async () => {
     if (!recordId) return;
+    const token = ++loadTokenRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const response = await historyApi.getNews(recordId, limit);
+      if (token !== loadTokenRef.current) return;
       setItems(response.items || []);
     } catch (err) {
+      if (token !== loadTokenRef.current) return;
       setError(getParsedApiError(err));
     } finally {
-      setIsLoading(false);
-      setHasLoaded(true);
+      if (token === loadTokenRef.current) {
+        setIsLoading(false);
+        setHasLoaded(true);
+      }
     }
   }, [recordId, limit]);
 
   useEffect(() => {
+    // 先作废在途请求（包括 recordId 被清空、不会再发新请求的情况）。
+    loadTokenRef.current += 1;
     setItems([]);
     setError(null);
     setHasLoaded(false);

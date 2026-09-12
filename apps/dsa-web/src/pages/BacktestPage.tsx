@@ -25,6 +25,7 @@ import type {
   BacktestPhaseFilter,
 } from '../types/backtest';
 import { buildDecisionActionLabelMap, getDecisionActionLabel, getDecisionActionTone } from '../utils/decisionAction';
+import { isStockCodeRedundantWithName } from '../utils/stockName';
 import { SELECT_CHEVRON_CLASS, SELECT_INPUT_CLASS } from '../utils/formClasses';
 import { getMarketPhaseSummaryLabel } from '../utils/marketPhase';
 
@@ -276,7 +277,7 @@ function exportResultsCsv(
     const actionLabel = getDecisionActionLabel(row.action, row.actionLabel, null, null, actionLabels);
     const prediction = [actionLabel, row.trendPrediction, row.operationAdvice].filter(Boolean).join(' / ');
     return [
-      `${row.code}${row.stockName ? ` ${row.stockName}` : ''}`,
+      `${row.code}${row.stockName && !isStockCodeRedundantWithName(row.stockName, row.code) ? ` ${row.stockName}` : ''}`,
       row.analysisDate ?? '',
       phaseLabel(row, language),
       prediction,

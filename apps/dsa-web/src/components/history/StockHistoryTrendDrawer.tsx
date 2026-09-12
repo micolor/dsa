@@ -9,6 +9,7 @@ import {
   type DecisionActionLabelMap,
 } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import { Badge, Button, Card } from '../common';
 import { DashboardStateBlock } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
@@ -212,7 +213,9 @@ export const StockHistoryTrendDrawer: React.FC<StockHistoryTrendDrawerProps> = (
             <div>
               <h2 className="text-2xl font-bold text-foreground">{t('stockTrend.title')}</h2>
               <p className="mt-1 text-sm text-secondary-text">
-                {report.meta.stockName || report.meta.stockCode} · {report.meta.stockCode}
+                {isStockCodeRedundantWithName(report.meta.stockName, report.meta.stockCode)
+                  ? report.meta.stockCode
+                  : `${report.meta.stockName} · ${report.meta.stockCode}`}
               </p>
             </div>
           </div>

@@ -5,6 +5,7 @@ import { Badge, Button, Card, StatusDot, Tooltip } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import type { TaskInfo } from '../../types/analysis';
 import { getRequestedPhaseLabel } from '../../utils/marketPhase';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 /**
@@ -54,9 +55,12 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onOpenRunFlow }) => {
               <span className="max-w-full truncate text-sm font-medium text-foreground">
                 {task.stockName || task.stockCode}
               </span>
-              <span className="shrink-0 text-xs text-muted-text">
-                {task.stockCode}
-              </span>
+              {/* 名称与代码指向同一标的时（场外基金只回代码做名称），上面已经展示过这串代码。 */}
+              {isStockCodeRedundantWithName(task.stockName, task.stockCode) ? null : (
+                <span className="shrink-0 text-xs text-muted-text">
+                  {task.stockCode}
+                </span>
+              )}
             </div>
           </div>
         </div>

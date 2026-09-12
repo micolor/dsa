@@ -2338,7 +2338,8 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(2);
+    // 通知分类下有三个面板各带一条诊断提示：通知测试弹框、通知投递卡片、当前配置面板。
+    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(3);
     expect(screen.queryByText('desktop.log')).not.toBeInTheDocument();
   });
 
@@ -2348,7 +2349,8 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    expect(screen.getAllByText('desktop.log')).toHaveLength(2);
+    // 与上一用例同样三个面板，只是桌面端运行时换成 desktop.log 变体。
+    expect(screen.getAllByText('desktop.log')).toHaveLength(3);
     expect(screen.queryByText(/浏览器开发者工具控制台与后端日志/)).not.toBeInTheDocument();
   });
 

@@ -4,7 +4,7 @@ import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
-import { truncateStockName } from '../../utils/stockName';
+import { isStockCodeRedundantWithName, truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface HistoryListItemProps {
@@ -27,6 +27,9 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   const { language, t } = useUiLanguage();
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
+  // 名称与代码指向同一标的时（场外基金只回代码做名称、大盘复盘为 MARKET），
+  // meta 里再展示一次代码就是纯重复，aria-label 也会被念两遍。
+  const hasDistinctName = !isStockCodeRedundantWithName(stockName, item.stockCode);
   const actionLabels = buildDecisionActionLabelMap(t);
   const operationLabel = getDecisionActionLabel(
     item.action,
@@ -43,10 +46,14 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
 
   const meta = (
     <>
-      <span className="text-[11px] text-secondary-text font-mono">
-        {item.stockCode}
-      </span>
-      <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+      {hasDistinctName && (
+        <>
+          <span className="text-[11px] text-secondary-text font-mono">
+            {item.stockCode}
+          </span>
+          <span className="w-1 h-1 rounded-full bg-subtle-hover" />
+        </>
+      )}
       <span className="text-[11px] text-muted-text">
         {formatDateTime(item.createdAt)}
       </span>
@@ -71,7 +78,9 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
           buttonClassName={`w-full min-w-0 flex-1 text-left p-2.5 ${
             isViewing ? 'home-history-item-selected' : ''
           }`}
-          ariaLabel={t('history.itemAria', { name: stockName, code: item.stockCode })}
+          ariaLabel={hasDistinctName
+            ? t('history.itemAria', { name: stockName, code: item.stockCode })
+            : t('history.itemAriaSameName', { code: item.stockCode })}
           onClick={() => onClick(item.id)}
           leading={sentimentColor ? (
             <div

@@ -1,3 +1,5 @@
+import { stockCodeKey } from './stockCode';
+
 /**
  * Stock name truncation configuration
  * English characters: 15 chars max
@@ -43,4 +45,23 @@ export function truncateStockName(name: string): string {
 export function isStockNameTruncated(name: string): boolean {
   if (!name) return false;
   return name.length > getMaxLength(name);
+}
+
+/**
+ * 名称与代码是否指向同一标的。
+ *
+ * 后端对部分场外基金只回代码做名称（`stock_name === stock_code`，例如 001052），
+ * 大盘复盘这类伪标的则名称与代码同为 MARKET。此时界面上再展示一次代码就是纯重复：
+ * 卡片里同一串出现两遍，aria-label 也会被读屏念两遍（「001052 001052 历史记录」）。
+ *
+ * 判定统一走 stockCodeKey，因而兼容带交易所前后缀的写法（sh600519 / 600519.SH）。
+ */
+export function isStockCodeRedundantWithName(
+  name?: string | null,
+  code?: string | null,
+): boolean {
+  const trimmedName = (name ?? '').trim();
+  const trimmedCode = (code ?? '').trim();
+  if (!trimmedName || !trimmedCode) return false;
+  return stockCodeKey(trimmedName) === stockCodeKey(trimmedCode);
 }

@@ -1,6 +1,7 @@
 import type { AnalysisReport } from '../types/analysis';
 import { historyApi } from '../api/history';
 import { validateStockCode } from './validation';
+import { isStockCodeRedundantWithName } from './stockName';
 
 export interface ChatFollowUpContext {
   stock_code: string;
@@ -103,7 +104,10 @@ export function parseFollowUpRecordId(recordId: string | null): number | undefin
 }
 
 export function buildFollowUpPrompt(stockCode: string, stockName: string | null): string {
-  const displayName = stockName ? `${stockName}(${stockCode})` : stockCode;
+  // 名称与代码相同时（001052 这类只回代码做名称的标的）不拼「001052(001052)」。
+  const displayName = stockName && !isStockCodeRedundantWithName(stockName, stockCode)
+    ? `${stockName}(${stockCode})`
+    : stockCode;
   return `请深入分析 ${displayName}`;
 }
 

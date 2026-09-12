@@ -10,6 +10,7 @@ import {
 import { Card, Loading } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
 import { cn } from '../../utils/cn';
+import { formatPriceTick } from '../../utils/format';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 import type { ReportLanguage } from '../../types/analysis';
 import { stocksApi, type KLineItem } from '../../api/stocks';
@@ -151,6 +152,7 @@ export const StockPriceChart: React.FC<StockPriceChartProps> = ({
           <YAxis
             yAxisId="price"
             domain={[domainMin, domainMax]}
+            tickFormatter={formatPriceTick}
             width={52}
             tick={{ fontSize: 10, fill: 'currentColor' }}
             tickLine={false}

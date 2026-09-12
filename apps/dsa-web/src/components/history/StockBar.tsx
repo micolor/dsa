@@ -3,11 +3,17 @@ import { ScrollArea } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBarItemComponent } from './StockBarItem';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
+import { areStockCodesEquivalent } from '../../utils/stockCode';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface StockBarProps {
   items: StockBarItemType[];
   isLoading: boolean;
+  /**
+   * 上次刷新是否失败（store.stockBarRefreshFailed）。失败且没有缓存时展示错误态：
+   * 此前会落到「暂无个股记录」空态，让用户以为历史记录被清空了。
+   */
+  hasError?: boolean;
   selectedStockCode?: string;
   selectedRecordId?: number;
   onItemClick: (recordId: number) => void;
@@ -24,6 +30,7 @@ interface StockBarProps {
 export const StockBar: React.FC<StockBarProps> = ({
   items,
   isLoading,
+  hasError = false,
   selectedStockCode,
   selectedRecordId,
   onItemClick,
@@ -65,6 +72,19 @@ export const StockBar: React.FC<StockBarProps> = ({
             compact
             title={t('stockBar.loading')}
           />
+        ) : items.length === 0 && hasError ? (
+          // 请求失败且没有缓存：必须与「确实没有记录」区分开，
+          // 否则用户会把一次网络故障读成「历史被清空了」。
+          <DashboardStateBlock
+            title={t('stockBar.errorTitle')}
+            description={t('stockBar.errorDescription')}
+            titleClassName="text-danger"
+            icon={(
+              <svg className="w-5 h-5 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+            )}
+          />
         ) : items.length === 0 ? (
           <DashboardStateBlock
             title={t('stockBar.emptyTitle')}
@@ -80,7 +100,10 @@ export const StockBar: React.FC<StockBarProps> = ({
             {items.map((item) => {
               const code = item.stockCode || '';
               const isMarket = isMarketReview(code);
-              const isSelected = selectedRecordId === item.id || selectedStockCode === code;
+              // 选中判定统一走 areStockCodesEquivalent（自选行用的是同一套）：
+              // 裸 === 在带交易所前后缀的代码（SH600519 / 600519.SH）上会漏判高亮。
+              const isSelected = selectedRecordId === item.id
+                || areStockCodesEquivalent(selectedStockCode ?? '', code);
 
               return (
                 <StockBarItemComponent

@@ -8,7 +8,7 @@ import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { Button, Drawer, InlineAlert, Tooltip } from '../components/common';
+import { Button, ConfirmDialog, Drawer, InlineAlert, Tooltip } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
 import { HomeReportRegion, type MarketReviewNotice } from '../components/report/HomeReportRegion';
@@ -35,7 +35,9 @@ import type {
 } from '../types/analysis';
 import type { RunFlowSnapshotSource } from '../types/runFlow';
 import { getTodayInShanghai } from '../utils/format';
-import { normalizeStockCode } from '../utils/stockCode';
+import { stockCodeKey } from '../utils/stockCode';
+import { isMarketReviewTask } from '../utils/taskKind';
+import { isStockCodeRedundantWithName } from '../utils/stockName';
 
 type RunFlowDrawerState =
   | { open: false }
@@ -52,6 +54,9 @@ type StockAnalysisNavigationState = {
 const DUPLICATE_BANNER_AUTO_DISMISS_MS = 5000;
 const BATCH_ANALYSIS_CHUNK_SIZE = 50;
 const TODAY_ANALYSIS_PAGE_SIZE = 100;
+// 「今日分析」是整天维度的服务端分页查询（一次可能翻好几页）。在标签页之间来回切换
+// 不该每次都重新翻页，同一日期在该 TTL 内直接复用上次结果。
+const TODAY_ANALYSIS_CACHE_TTL_MS = 60_000;
 const WATCHLIST_HISTORY_LOOKUP_CONCURRENCY = 4;
 const SERVER_LOCAL_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 const MARKET_REVIEW_POLL_MAX_ATTEMPTS = 120;
@@ -138,11 +143,6 @@ function shiftDateKey(dateKey: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function getStockCodeKey(code?: string | null): string {
-  const trimmed = (code ?? '').trim();
-  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
-}
-
 function chunkStockCodes(codes: string[]): string[][] {
   const chunks: string[][] = [];
   for (let index = 0; index < codes.length; index += BATCH_ANALYSIS_CHUNK_SIZE) {
@@ -178,12 +178,17 @@ function toStockBarItemFromHistoryItem(item: HistoryItem): StockBarItem {
   };
 }
 
-async function getTodayAnalysisItems(dateKey: string): Promise<StockBarItem[]> {
+async function getTodayAnalysisItems(dateKey: string, signal?: AbortSignal): Promise<StockBarItem[]> {
   const items: StockBarItem[] = [];
   let loadedRecordCount = 0;
   let page = 1;
 
   while (true) {
+    // 分页循环要能被中断：切走标签页或整页卸载时，之前的实现只会丢掉结果，
+    // 在途请求仍会一页页翻到底（最长到当日全量记录）。
+    if (signal?.aborted) {
+      break;
+    }
     const response = await historyApi.getList({
       // History dates are filtered in the server's local timezone. Query the
       // adjacent dates too, then apply the exact Shanghai-day filter below.
@@ -191,7 +196,7 @@ async function getTodayAnalysisItems(dateKey: string): Promise<StockBarItem[]> {
       endDate: shiftDateKey(dateKey, 1),
       page,
       limit: TODAY_ANALYSIS_PAGE_SIZE,
-    });
+    }, { signal });
 
     loadedRecordCount += response.items.length;
     for (const item of response.items) {
@@ -232,6 +237,8 @@ const HomePage: React.FC = () => {
   const [marketReviewError, setMarketReviewError] = useState<ParsedApiError | null>(null);
   const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
   const [marketReviewPayload, setMarketReviewPayload] = useState<MarketReviewPayload | null>(null);
+  // 实时大盘复盘卡片对应的落库记录 ID（用于分享图片 / 运行流入口）。
+  const [marketReviewRecordId, setMarketReviewRecordId] = useState<number | undefined>();
   const [marketReviewRegionOverride, setMarketReviewRegionOverride] = useState<MarketReviewRegion[] | undefined>();
   const [analysisSkills, setAnalysisSkills] = useState<SkillInfo[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState('');
@@ -248,6 +255,11 @@ const HomePage: React.FC = () => {
     failedKeys: new Set(),
   });
   const [watchlistHistoryRetryVersion, setWatchlistHistoryRetryVersion] = useState(0);
+  // 「今日分析」列表的上次结果缓存（含取数时间），仅在 TTL 内、同一日期同一刷新版本时复用。
+  const todayAnalysisCacheRef = useRef<{ key: string; fetchedAt: number; items: StockBarItem[] } | null>(null);
+  // 自选历史回填已完成（或已发起）的请求键：`重试版本:待补齐签名`。
+  // 只记录**已完成**的那一轮：在途请求被取消时不留标记，下一轮会正常重来。
+  const watchlistHistoryFetchedKeyRef = useRef('');
   const [todayHistoryItems, setTodayHistoryItems] = useState<StockBarItem[]>([]);
   const [isLoadingTodayAnalysisItems, setIsLoadingTodayAnalysisItems] = useState(false);
   const [todayAnalysisLoadFailed, setTodayAnalysisLoadFailed] = useState(false);
@@ -327,6 +339,7 @@ const HomePage: React.FC = () => {
     syncTaskUpdated,
     syncTaskFailed,
     refreshActiveTasks,
+    activeMarketReviewTaskId,
     removeTask,
     openMarkdownDrawer,
     closeMarkdownDrawer,
@@ -472,8 +485,10 @@ const HomePage: React.FC = () => {
   }, []);
   const selectStrategy = useCallback((strategyId: string) => {
     setSelectedStrategyId(strategyId);
-    setStrategyMenuOpen(false);
-  }, []);
+    // 菜单项被激活后菜单会卸载，键盘用户（Enter/Space 触发 click）必须把焦点交回
+    // 触发按钮，否则焦点会掉到 body，与 Escape 分支的行为也不一致。
+    closeStrategyMenu(true);
+  }, [closeStrategyMenu]);
   const focusStrategyItem = useCallback((index: number) => {
     const itemCount = strategyOptions.length;
     if (itemCount === 0) {
@@ -560,10 +575,10 @@ const HomePage: React.FC = () => {
   }, [setupStatus, uiLanguage]);
 
   const handleCompletedTaskDataRefreshStarted = useCallback((task: TaskInfo) => {
-    if (task.reportType === 'market_review') {
+    if (isMarketReviewTask(task)) {
       return;
     }
-    const key = getStockCodeKey(task.stockCode);
+    const key = stockCodeKey(task.stockCode);
     if (!key) {
       return;
     }
@@ -575,10 +590,10 @@ const HomePage: React.FC = () => {
   }, []);
 
   const handleCompletedTaskDataRefreshed = useCallback((task: TaskInfo) => {
-    if (task.reportType === 'market_review') {
+    if (isMarketReviewTask(task)) {
       return;
     }
-    const key = getStockCodeKey(task.stockCode);
+    const key = stockCodeKey(task.stockCode);
     if (key) {
       setCompletedTaskRefreshPendingCounts((current) => {
         const pendingCount = current.get(key) ?? 0;
@@ -633,7 +648,7 @@ const HomePage: React.FC = () => {
   const watchlistCodesByNormalized = useMemo(() => {
     const codesByNormalized = new Map<string, string>();
     for (const code of watchlistState.watchlistCodes) {
-      const key = getStockCodeKey(code);
+      const key = stockCodeKey(code);
       if (!key || key === 'MARKET' || codesByNormalized.has(key)) {
         continue;
       }
@@ -648,7 +663,7 @@ const HomePage: React.FC = () => {
       if (item.stockCode === 'MARKET') {
         continue;
       }
-      const key = getStockCodeKey(item.stockCode);
+      const key = stockCodeKey(item.stockCode);
       if (key) {
         itemsByCode.set(key, item);
       }
@@ -674,8 +689,9 @@ const HomePage: React.FC = () => {
 
   useEffect(() => {
     if (!canLookupWatchlistHistory) {
-      setWatchlistHistoryItemsByCode(new Map());
-      setWatchlistHistoryLookupState({ signature: '', settledKeys: new Set(), failedKeys: new Set() });
+      // 不再清空已补齐的结果：canLookupWatchlistHistory 是瞬时值，可见刷新期间会短暂
+      // 变 false，此前那一次清空会让自选行丢掉已查到的名称/评分、闪一次 loading。
+      // 刷新期间的待定态由 watchlistRows 依据同一个瞬时值单独表达。
       return undefined;
     }
 
@@ -684,9 +700,21 @@ const HomePage: React.FC = () => {
     const currentSignature = watchlistMissingHistorySignature;
 
     if (missingCodes.length === 0) {
+      // 同时清掉去重键：集合清空又变回同一个签名（例如删除自选后重新加回）时，
+      // 残留的键会让本轮被误判成「已经查过」，而对应的 settled 状态已经被清空，
+      // 自选行会永久停在 pending。
+      watchlistHistoryFetchedKeyRef.current = '';
       setWatchlistHistoryItemsByCode(new Map());
       setWatchlistHistoryLookupState({ signature: '', settledKeys: new Set(), failedKeys: new Set() });
       return;
+    }
+
+    // 待补齐集合没变就不重发。stockBarItemByCode 每次刷新都会重建身份，
+    // watchlistMissingHistoryEntries 随之变成新数组，本 effect 会被反复触发；
+    // 此前每次都会把同一批代码重新查一遍。
+    const fetchKey = `${watchlistHistoryRetryVersion}:${currentSignature}`;
+    if (watchlistHistoryFetchedKeyRef.current === fetchKey) {
+      return undefined;
     }
 
     let isCanceled = false;
@@ -707,7 +735,7 @@ const HomePage: React.FC = () => {
         const next = new Map<string, StockBarItem>();
         const failedKeys = new Set<string>();
         for (const entry of results) {
-          const key = getStockCodeKey(entry.code);
+          const key = stockCodeKey(entry.code);
           if (!key) {
             continue;
           }
@@ -719,6 +747,7 @@ const HomePage: React.FC = () => {
             next.set(key, toStockBarItemFromHistoryItem(entry.item));
           }
         }
+        watchlistHistoryFetchedKeyRef.current = fetchKey;
         setWatchlistHistoryItemsByCode(next);
         setWatchlistHistoryLookupState({
           signature: currentSignature,
@@ -727,6 +756,9 @@ const HomePage: React.FC = () => {
         });
       } catch {
         if (!isCanceled) {
+          // 整批失败标记为已完成：否则下一次身份抖动会立刻原样重试，形成请求风暴。
+          // 单个代码失败走 failedKeys，用户可显式重试（watchlistHistoryRetryVersion）。
+          watchlistHistoryFetchedKeyRef.current = fetchKey;
           setWatchlistHistoryItemsByCode(new Map());
           setWatchlistHistoryLookupState({
             signature: currentSignature,
@@ -743,13 +775,20 @@ const HomePage: React.FC = () => {
     };
   }, [canLookupWatchlistHistory, watchlistHistoryRetryVersion, watchlistMissingHistoryEntries, watchlistMissingHistorySignature]);
 
-  const clearMarketReviewState = useCallback(() => {
-    stopMarketReviewPolling();
+  // 实时大盘复盘卡片由正文 + 结构化载荷 + 落库记录 ID 三者共同构成，必须同进同退：
+  // 少了 recordId，卡片上的分享图片与运行流入口会静默消失。
+  const clearLiveMarketReviewReport = useCallback(() => {
     setMarketReviewReport(null);
     setMarketReviewPayload(null);
+    setMarketReviewRecordId(undefined);
+  }, []);
+
+  const clearMarketReviewState = useCallback(() => {
+    stopMarketReviewPolling();
+    clearLiveMarketReviewReport();
     updateMarketReviewNotice(null);
     setMarketReviewError(null);
-  }, [stopMarketReviewPolling, updateMarketReviewNotice]);
+  }, [clearLiveMarketReviewReport, stopMarketReviewPolling, updateMarketReviewNotice]);
 
   const dismissMarketReviewError = useCallback(() => {
     setMarketReviewError(null);
@@ -779,6 +818,14 @@ const HomePage: React.FC = () => {
 
   const [isDeletingStock, setIsDeletingStock] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // 删除会清空该代码的**全部**分析历史记录且不可恢复，因此先确认再执行。
+  const [pendingDeleteStock, setPendingDeleteStock] = useState<{ code: string; name: string } | null>(null);
+
+  const requestDeleteStock = useCallback((stockCode: string) => {
+    const entry = stockBarItems.find((item) => item.stockCode === stockCode);
+    setPendingDeleteStock({ code: stockCode, name: entry?.stockName || stockCode });
+  }, [stockBarItems]);
+
   const handleDeleteStock = useCallback(async (stockCode: string) => {
     if (isDeletingStock) return;
     setIsDeletingStock(true);
@@ -796,6 +843,14 @@ const HomePage: React.FC = () => {
       setIsDeletingStock(false);
     }
   }, [isDeletingStock, refreshMarketReviewHistory, refreshStockBar, refreshHistory]);
+
+  const confirmDeleteStock = useCallback(() => {
+    const target = pendingDeleteStock;
+    setPendingDeleteStock(null);
+    if (target) {
+      void handleDeleteStock(target.code);
+    }
+  }, [handleDeleteStock, pendingDeleteStock]);
 
   const handleSubmitAnalysis = useCallback(
     (
@@ -924,8 +979,7 @@ const HomePage: React.FC = () => {
       const poll = async (): Promise<boolean> => {
         if (attempts >= maxAttempts) {
           stopMarketReviewPolling();
-          setMarketReviewReport(null);
-          setMarketReviewPayload(null);
+          clearLiveMarketReviewReport();
           applyMarketReviewNotice({
             variant: 'danger',
             title: t('home.marketReviewTimeout'),
@@ -943,8 +997,7 @@ const HomePage: React.FC = () => {
             return false;
           }
           if (status.status === 'pending' || status.status === 'processing') {
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
+            clearLiveMarketReviewReport();
             const progress = typeof status.progress === 'number'
               ? `${status.progress}%`
               : t('home.progressActive');
@@ -971,15 +1024,17 @@ const HomePage: React.FC = () => {
               message: marketReviewText ? t('home.marketReviewCompletedWithReport') : t('home.marketReviewCompletedWithoutReport'),
             });
             setMarketReviewError(null);
-            await refreshMarketReviewHistory(true);
+            // 刚落库的大盘复盘记录 ID：首页这张实时卡片本身不带 recordId，
+            // 缺少它时分享图片与运行流入口会静默消失，需要从最新历史里取回。
+            const latestMarketReviewPage = await refreshMarketReviewHistory(true);
+            setMarketReviewRecordId(latestMarketReviewPage?.items[0]?.id);
             scrollMarketReviewFeedbackIntoView();
             return false;
           }
 
           if (status.status === 'failed') {
             stopMarketReviewPolling();
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
+            clearLiveMarketReviewReport();
             setMarketReviewError(
               getParsedApiError({
                 response: {
@@ -997,8 +1052,7 @@ const HomePage: React.FC = () => {
           }
 
           stopMarketReviewPolling();
-          setMarketReviewReport(null);
-          setMarketReviewPayload(null);
+          clearLiveMarketReviewReport();
           applyMarketReviewNotice({
             variant: 'danger',
             title: t('home.marketReviewUnknownStatus'),
@@ -1013,8 +1067,7 @@ const HomePage: React.FC = () => {
           }
           if (attempts >= maxAttempts) {
             stopMarketReviewPolling();
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
+            clearLiveMarketReviewReport();
             setMarketReviewError(parsed);
             updateMarketReviewNotice(null);
             scrollMarketReviewFeedbackIntoView();
@@ -1034,15 +1087,29 @@ const HomePage: React.FC = () => {
         }, intervalMs);
       }
     },
-    [refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t, updateMarketReviewNotice],
+    [clearLiveMarketReviewReport, refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t, updateMarketReviewNotice],
   );
+
+  // 大盘复盘触发后的实时状态（notice / 正文 / recordId）都只存在本组件里，轮询也由触发它的
+  // 那次交互持有：切走页面或刷新浏览器后，任务还在跑，首页却已经什么都不显示，而且不会再恢复
+  // （重新回到首页只会看到一个空的复盘卡片）。挂载时若 store 里仍有在途的大盘复盘任务，就接回轮询。
+  const resumedMarketReviewTaskRef = useRef('');
+  useEffect(() => {
+    if (!activeMarketReviewTaskId || marketReviewPollTimer.current !== null) {
+      return;
+    }
+    if (resumedMarketReviewTaskRef.current === activeMarketReviewTaskId) {
+      return;
+    }
+    resumedMarketReviewTaskRef.current = activeMarketReviewTaskId;
+    void pollMarketReviewStatus(activeMarketReviewTaskId);
+  }, [activeMarketReviewTaskId, pollMarketReviewStatus]);
 
   const handleTriggerMarketReview = useCallback(async () => {
     setIsSubmittingMarketReview(true);
     updateMarketReviewNotice(null);
     setMarketReviewError(null);
-    setMarketReviewReport(null);
-    setMarketReviewPayload(null);
+    clearLiveMarketReviewReport();
     scrollMarketReviewFeedbackIntoView();
     try {
       const result = await analysisApi.triggerMarketReview({
@@ -1069,7 +1136,7 @@ const HomePage: React.FC = () => {
     } finally {
       setIsSubmittingMarketReview(false);
     }
-  }, [marketReviewRegionOverride, notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t, updateMarketReviewNotice]);
+  }, [clearLiveMarketReviewReport, marketReviewRegionOverride, notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t, updateMarketReviewNotice]);
 
   const todayDateKey = useMemo(() => getTodayInShanghai(), []);
   useEffect(() => {
@@ -1077,36 +1144,49 @@ const HomePage: React.FC = () => {
       return undefined;
     }
 
-    let active = true;
+    // 缓存键带上刷新版本：todayAnalysisRefreshVersion 变化代表用户在显式刷新，
+    // 必须绕过缓存，而正常的标签页来回切换命中缓存。
+    const cacheKey = `${todayDateKey}#${todayAnalysisRefreshVersion}`;
+    const cached = todayAnalysisCacheRef.current;
+    if (cached && cached.key === cacheKey && Date.now() - cached.fetchedAt < TODAY_ANALYSIS_CACHE_TTL_MS) {
+      setTodayHistoryItems(cached.items);
+      setTodayAnalysisLoadFailed(false);
+      setIsLoadingTodayAnalysisItems(false);
+      return undefined;
+    }
+
+    const abortController = new AbortController();
     setIsLoadingTodayAnalysisItems(true);
     setTodayAnalysisLoadFailed(false);
-    void getTodayAnalysisItems(todayDateKey)
+    void getTodayAnalysisItems(todayDateKey, abortController.signal)
       .then((items) => {
-        if (active) {
-          setTodayHistoryItems(items);
-          setTodayAnalysisLoadFailed(false);
+        if (abortController.signal.aborted) {
+          return;
         }
+        todayAnalysisCacheRef.current = { key: cacheKey, fetchedAt: Date.now(), items };
+        setTodayHistoryItems(items);
+        setTodayAnalysisLoadFailed(false);
       })
       .catch(() => {
-        if (active) {
+        if (!abortController.signal.aborted) {
           setTodayHistoryItems([]);
           setTodayAnalysisLoadFailed(true);
         }
       })
       .finally(() => {
-        if (active) {
+        if (!abortController.signal.aborted) {
           setIsLoadingTodayAnalysisItems(false);
         }
       });
 
     return () => {
-      active = false;
+      abortController.abort();
     };
   }, [sidebarWorkspaceTab, todayAnalysisRefreshVersion, todayDateKey]);
 
   const watchlistRows = useMemo<HomeWatchlistRow[]>(() => (
     watchlistState.watchlistCodes.map((code) => {
-      const key = getStockCodeKey(code);
+      const key = stockCodeKey(code);
       const latestItemCandidate = key
         ? stockBarItemByCode.get(key) ?? watchlistHistoryItemsByCode.get(key)
         : undefined;
@@ -1219,7 +1299,7 @@ const HomePage: React.FC = () => {
     const sourceCodes = mode === 'pending' ? pendingWatchlistCodes : watchlistState.watchlistCodes;
     const seen = new Set<string>();
     const targetCodes = sourceCodes.filter((code) => {
-      const key = getStockCodeKey(code);
+      const key = stockCodeKey(code);
       if (!key || seen.has(key)) {
         return false;
       }
@@ -1377,7 +1457,7 @@ const HomePage: React.FC = () => {
           selectedStockCode={selectedReport?.meta.stockCode}
           selectedRecordId={selectedReport?.meta.id}
           onHistoryItemClick={handleHistoryItemClick}
-          onDeleteStock={handleDeleteStock}
+          onDeleteStock={requestDeleteStock}
           isDeleting={isDeletingStock}
           watchlistOptions={watchlistState.watchlistOptions}
           activeListId={watchlistState.activeListId}
@@ -1390,7 +1470,6 @@ const HomePage: React.FC = () => {
     [
       batchAnalyzeStatus,
       handleAnalyzeWatchlist,
-      handleDeleteStock,
       handleDashboardDataRefresh,
       handleHistoryItemClick,
       handleRefreshWatchlist,
@@ -1400,6 +1479,7 @@ const HomePage: React.FC = () => {
       isLoadingTodayAnalysisItems,
       todayAnalysisLoadFailed,
       mergedStockBarItems,
+      requestDeleteStock,
       selectedReport?.meta.id,
       selectedReport?.meta.stockCode,
       sidebarWorkspaceTab,
@@ -1692,6 +1772,7 @@ const HomePage: React.FC = () => {
               onDismissMarketReviewError={dismissMarketReviewError}
               marketReviewReport={marketReviewReport}
               marketReviewPayload={marketReviewPayload}
+              marketReviewRecordId={marketReviewRecordId}
               error={error}
               onDismissError={clearError}
               isLoadingReport={isLoadingReport}
@@ -1752,6 +1833,24 @@ const HomePage: React.FC = () => {
           />
         </Drawer>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDeleteStock !== null}
+        title={t('home.deleteStockTitle')}
+        message={pendingDeleteStock
+          ? isStockCodeRedundantWithName(pendingDeleteStock.name, pendingDeleteStock.code)
+            // 大盘复盘这类伪标的名称与代码相同，避免拼出「MARKET（MARKET）」。
+            ? t('home.deleteStockMessageSameName', { code: pendingDeleteStock.code })
+            : t('home.deleteStockMessage', { name: pendingDeleteStock.name, code: pendingDeleteStock.code })
+          : ''}
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
+        confirmDisabled={isDeletingStock}
+        cancelDisabled={isDeletingStock}
+        isDanger
+        onConfirm={confirmDeleteStock}
+        onCancel={() => setPendingDeleteStock(null)}
+      />
     </div>
     </MotionConfig>
   );

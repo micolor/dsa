@@ -8,6 +8,7 @@ import { Badge, Button, Card, ScoreGauge } from '../common';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel, getPartialBarLabel } from '../../utils/marketPhase';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { isStockCodeRedundantWithName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { ShareImageButton } from './ShareImageButton';
 
@@ -221,6 +222,9 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   const partialBarLabel = meta.marketPhaseSummary?.isPartialBar === true
     ? getPartialBarLabel(reportLanguage)
     : null;
+  // 名称与代码指向同一标的时（场外基金只回代码做名称、大盘复盘为 MARKET），
+  // 标题下方再挂一枚同名 chip、分享标题里再拼一次代码都是纯重复。
+  const hasDistinctName = !isStockCodeRedundantWithName(meta.stockName, meta.stockCode);
   const relatedBoards = (Array.isArray(details?.belongBoards) ? details.belongBoards : [])
     .filter((board) => normalizeBoardName(board?.name).length > 0);
   const boardSignals = buildBoardSignalMaps(details);
@@ -316,9 +320,11 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                  <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
-                    {meta.stockCode}
-                  </span>
+                  {hasDistinctName ? (
+                    <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
+                      {meta.stockCode}
+                    </span>
+                  ) : null}
                   {marketPhaseLabel ? (
                     <Badge variant="info" className="shrink-0 gap-1.5 shadow-none" aria-label={marketPhaseLabel}>
                       {marketPhaseLabel}
@@ -339,7 +345,9 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
               </div>
               <ShareImageButton
                 recordId={meta.id}
-                reportTitle={`${meta.stockName || meta.stockCode}-${meta.stockCode}`}
+                reportTitle={hasDistinctName
+                  ? `${meta.stockName || meta.stockCode}-${meta.stockCode}`
+                  : meta.stockCode}
                 reportLanguage={reportLanguage}
                 size="sm"
                 iconOnly
@@ -355,7 +363,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
             </div>
           </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          <div className="flex flex-col gap-4">
             {/* 操作建议 */}
             <Card
               variant="bordered"
