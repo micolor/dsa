@@ -1427,6 +1427,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 创建所有表
             Base.metadata.create_all(self._engine)
             self._ensure_llm_usage_telemetry_columns()
+            self._ensure_paper_trade_fee_column()
             self._ensure_decision_signal_profile_schema()
             self._ensure_intelligence_item_scope_values()
             self._ensure_schema_migration_record()
@@ -1760,6 +1761,57 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     index_columns.append(column_name)
                 unique_indexes.append(index_columns)
             return unique_indexes
+
+    def _ensure_paper_trade_fee_column(self) -> None:
+        """Add the nullable `paper_trades.fee` column to existing SQLite DBs.
+
+        `create_all` only creates missing tables, so databases created before fee
+        modelling keep a `paper_trades` without the column. Existing rows stay
+        NULL and read back as 0, which is accurate for them: those fills were
+        booked with no fee, and their cash movements reflect that.
+        """
+        if not self._is_sqlite_engine:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns(PaperTradeRecord.__tablename__)
+            }
+        except Exception as exc:
+            logger.warning(
+                "[paper trade] failed to inspect fee column; "
+                "skipping best-effort SQLite fee column backfill: %s",
+                exc,
+            )
+            return
+
+        if "fee" in existing:
+            return
+
+        max_retries = self._sqlite_write_retry_max
+        for attempt in range(max_retries + 1):
+            try:
+                with self._engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {PaperTradeRecord.__tablename__} ADD COLUMN fee FLOAT"
+                    )
+                return
+            except OperationalError as exc:
+                if self._is_sqlite_duplicate_column_error(exc, "fee"):
+                    return
+                if self._is_sqlite_locked_error(exc) and attempt < max_retries:
+                    delay = self._sqlite_write_retry_base_delay * (2 ** attempt)
+                    logger.warning(
+                        "[paper trade] SQLite fee column backfill locked, retrying: %s (%s/%s, %.2fs)",
+                        exc,
+                        attempt + 1,
+                        max_retries + 1,
+                        delay,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                raise
 
     def _ensure_llm_usage_telemetry_columns(self) -> None:
         """Add nullable P0a usage telemetry columns to existing SQLite DBs."""
@@ -4070,6 +4122,10 @@ class PaperTradeRecord(Base):
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     amount = Column(Float, nullable=False)
+    # Commission + stamp duty + transfer fee charged on this fill (slippage is
+    # already inside `price`). Cash moves by `amount ± fee`, so without it the
+    # trade log cannot be reconciled against the account's cash.
+    fee = Column(Float, default=0.0)
     trade_date = Column(Date, nullable=False, index=True)
     reason = Column(String(32), default='signal_action')
     created_at = Column(DateTime, default=utc_naive_now, index=True)

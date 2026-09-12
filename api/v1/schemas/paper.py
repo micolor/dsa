@@ -55,6 +55,7 @@ class PaperTradeItem(BaseModel):
     quantity: float = 0.0
     price: Optional[float] = None
     amount: Optional[float] = None
+    fee: float = 0.0
     trade_date: str
     reason: Optional[str] = None
 

@@ -49,6 +49,8 @@ export const PaperRecordsList: React.FC<Props> = ({
     reduced: { label: text.dispReduced, variant: 'warning' },
     hold: { label: text.dispHold, variant: 'default' },
     ignored: { label: text.dispIgnored, variant: 'default' },
+    // 限价单当日区间没碰到计划买点 -> 不成交（区别于数据缺失，信号已消费）。
+    no_fill: { label: text.dispNoFill, variant: 'warning' },
   };
   // 成交流水 reason：区分「主动跟单」与「被动风控退出」，用徽章+颜色一眼可辨。
   // 未知值回退为原样文本，避免丢信息。
@@ -118,6 +120,12 @@ export const PaperRecordsList: React.FC<Props> = ({
                 <span className="text-xs text-secondary-text">
                   {trade.quantity} @ {trade.price}
                 </span>
+                {/* 费用只在真的收了才显示，避免旧记录（fee=0）挂一堆 0 值噪声。 */}
+                {trade.fee > 0 ? (
+                  <span className="text-xs text-secondary-text">
+                    {text.fee} {trade.fee.toFixed(2)}
+                  </span>
+                ) : null}
               </div>
               <div className="flex items-center gap-3">
                 {renderReason(trade.reason)}

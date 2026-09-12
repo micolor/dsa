@@ -248,6 +248,52 @@ def get_effective_trading_date(
         return fallback_date
 
 
+def resolve_fill_session(market: Optional[str], at: datetime) -> date:
+    """Resolve the session on which an order created at ``at`` can be worked.
+
+    ``at`` follows ``get_market_now``'s contract: naive values are treated as
+    already expressed in the market's timezone.
+
+    Rules:
+    - Trading day before the session close: that session
+    - Trading day at/after the close: the next session
+    - Non-trading day / holiday: the next session
+    - Unknown market or calendar unavailable: fail-open to the market-local
+      calendar date, matching ``get_effective_trading_date``
+
+    Callers that price fills against a daily bar need a session date, not a
+    timestamp date: a signal produced after the close (or on a weekend) has no
+    bar of its own, so its own date can only be priced against a bar that does
+    not exist.
+    """
+    market_now = get_market_now(market, current_time=at)
+    fallback_date = market_now.date()
+
+    if not _XCALS_AVAILABLE:
+        return fallback_date
+
+    ex = MARKET_EXCHANGE.get(market or "")
+    tz_name = MARKET_TIMEZONE.get(market or "")
+    if not ex or not tz_name:
+        return fallback_date
+
+    try:
+        cal = xcals.get_calendar(ex)
+        local_date = market_now.date()
+
+        if not cal.is_session(local_date):
+            return cal.date_to_session(local_date, direction="next").date()
+
+        session = cal.date_to_session(local_date, direction="previous")
+        session_close = _as_market_datetime(cal.session_close(session), tz_name)
+        if session_close is None or market_now < session_close:
+            return local_date
+        return cal.next_session(session).date()
+    except Exception as e:
+        logger.warning("trading_calendar.resolve_fill_session fail-open: %s", e)
+        return fallback_date
+
+
 def resolve_historical_daily_bar_date(
     market: Optional[str],
     target_date: date,

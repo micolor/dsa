@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from datetime import date
 
 import pytest
@@ -139,3 +140,47 @@ def test_add_snapshot_is_idempotent(repo):
     repo.add_snapshot(acc.id, date(2026, 1, 6), cash=900000.0, market_value=100000.0, net_value=1000000.0, return_pct=0.0)
     assert len(repo.list_snapshots(acc.id)) == 2
     assert repo.has_snapshot(acc.id, d) is True
+
+
+def test_legacy_paper_trades_table_gains_fee_column(tmp_path):
+    # 老库的 paper_trades 没有 fee 列，create_all 不会补列：必须靠启动时的
+    # ALTER 迁移补齐，否则新模型 INSERT 会直接失败。
+    db_path = tmp_path / "legacy_paper.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE paper_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                signal_id INTEGER,
+                stock_code VARCHAR(16) NOT NULL,
+                stock_name VARCHAR(64),
+                side VARCHAR(8) NOT NULL,
+                quantity FLOAT NOT NULL,
+                price FLOAT NOT NULL,
+                amount FLOAT NOT NULL,
+                trade_date DATE NOT NULL,
+                reason VARCHAR(32),
+                created_at DATETIME
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO paper_trades "
+            "(account_id, stock_code, side, quantity, price, amount, trade_date) "
+            "VALUES (1, '600519', 'buy', 100, 10, 1000, '2026-01-05')"
+        )
+        conn.commit()
+
+    DatabaseManager.reset_instance()
+    db = DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_trades)").fetchall()}
+        assert "fee" in columns
+        # 迁移前的成交确实没有收费，NULL 读回 0 与现金变动一致。
+        legacy_fee = conn.execute("SELECT fee FROM paper_trades WHERE id = 1").fetchone()[0]
+    assert legacy_fee is None
+
+    trades = PaperRepository(db).list_trades(1)
+    assert trades[0].fee is None

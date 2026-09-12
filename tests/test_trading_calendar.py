@@ -53,6 +53,13 @@ class _FakeCalendar:
             raise ValueError("no previous session")
         return pd.Timestamp(self._sessions[index - 1])
 
+    def next_session(self, session: pd.Timestamp) -> pd.Timestamp:
+        session_date = session.date()
+        index = self._sessions.index(session_date)
+        if index + 1 >= len(self._sessions):
+            raise ValueError("no next session")
+        return pd.Timestamp(self._sessions[index + 1])
+
     def session_open(self, session: pd.Timestamp) -> pd.Timestamp:
         local_open = datetime.combine(
             session.date(),
@@ -947,6 +954,63 @@ class ComputeEffectiveRegionTestCase(unittest.TestCase):
     def test_invalid_region_defaults_to_cn(self):
         result = trading_calendar.compute_effective_region("invalid", {"cn"})
         self.assertEqual(result, "cn")
+
+
+class TestResolveFillSession(unittest.TestCase):
+    """resolve_fill_session: the session an order created at `at` can be worked on.
+
+    Paper fills are priced against a daily bar, so a timestamp that lands outside
+    a session has to roll forward rather than be used as a trade date.
+    """
+
+    def setUp(self):
+        self.calendar = _FakeCalendar(
+            sessions=[date(2026, 8, 7), date(2026, 8, 10), date(2026, 8, 11)],
+            close_hour=15,
+            tz_name="Asia/Shanghai",
+        )
+
+    def _resolve(self, market, at: datetime) -> date:
+        with patch.object(trading_calendar, "_XCALS_AVAILABLE", True), patch.object(
+            trading_calendar,
+            "xcals",
+            _calendar_namespace(self.calendar),
+            create=True,
+        ):
+            return trading_calendar.resolve_fill_session(market, at)
+
+    def test_before_the_close_stays_on_that_session(self):
+        at = datetime(2026, 8, 10, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.assertEqual(self._resolve("cn", at), date(2026, 8, 10))
+
+    def test_at_the_close_rolls_to_the_next_session(self):
+        at = datetime(2026, 8, 10, 15, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.assertEqual(self._resolve("cn", at), date(2026, 8, 11))
+
+    def test_non_trading_day_rolls_to_the_next_session(self):
+        # 2026-08-08 is a Saturday: the previous behaviour used this date as the
+        # trade date even though no bar can exist for it.
+        at = datetime(2026, 8, 8, 16, 40, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.assertEqual(self._resolve("cn", at), date(2026, 8, 10))
+
+    def test_premarket_on_a_session_keeps_that_session(self):
+        at = datetime(2026, 8, 10, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.assertEqual(self._resolve("cn", at), date(2026, 8, 10))
+
+    def test_naive_input_is_read_in_the_market_timezone(self):
+        # get_market_now()'s contract: naive values are already market-local.
+        self.assertEqual(self._resolve("cn", datetime(2026, 8, 10, 10, 0)), date(2026, 8, 10))
+
+    def test_unknown_market_falls_back_to_the_local_calendar_date(self):
+        at = datetime(2026, 8, 8, 16, 40)
+        self.assertEqual(self._resolve(None, at), date(2026, 8, 8))
+
+    def test_missing_calendar_falls_back_to_the_local_calendar_date(self):
+        at = datetime(2026, 8, 8, 16, 40)
+        with patch.object(trading_calendar, "_XCALS_AVAILABLE", False):
+            self.assertEqual(
+                trading_calendar.resolve_fill_session("cn", at), date(2026, 8, 8)
+            )
 
 
 if __name__ == "__main__":

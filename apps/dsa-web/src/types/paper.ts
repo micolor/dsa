@@ -46,6 +46,8 @@ export interface PaperTrade {
   quantity: number;
   price: number | null;
   amount: number | null;
+  /** 佣金+印花税+过户费；滑点已含在 price 里。旧记录为 0。 */
+  fee: number;
   tradeDate: string;
   reason: string | null;
 }

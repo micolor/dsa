@@ -1037,6 +1037,9 @@ class Config:
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     paper_trading_enabled: bool = True  # Enable the paper-trading daily valuation background task
     paper_position_weight: float = 0.20  # Target weight of total assets allocated per opened position
+    paper_fee_enabled: bool = True  # Charge commission/stamp duty on paper-trading fills
+    paper_commission_rate: float = 0.00025  # Commission rate applied to every market (broker-negotiable)
+    paper_slippage_bps: float = 0.0  # Adverse slippage per fill in basis points (0 = assume no slippage)
     agent_event_alert_rules_json: str = ""  # JSON array of serialized EventMonitor rules
 
     # === 通知配置（可同时配置多个，全部推送）===
@@ -2013,6 +2016,21 @@ class Config:
                 field_name='PAPER_POSITION_WEIGHT',
                 minimum=0.01,
                 maximum=1.0,
+            ),
+            paper_fee_enabled=parse_env_bool(os.getenv('PAPER_FEE_ENABLED'), default=True),
+            paper_commission_rate=parse_env_float(
+                os.getenv('PAPER_FEE_COMMISSION_RATE'),
+                0.00025,
+                field_name='PAPER_FEE_COMMISSION_RATE',
+                minimum=0.0,
+                maximum=0.01,
+            ),
+            paper_slippage_bps=parse_env_float(
+                os.getenv('PAPER_FEE_SLIPPAGE_BPS'),
+                0.0,
+                field_name='PAPER_FEE_SLIPPAGE_BPS',
+                minimum=0.0,
+                maximum=500.0,
             ),
             agent_event_monitor_interval_minutes=parse_env_int(
                 os.getenv('AGENT_EVENT_MONITOR_INTERVAL_MINUTES'),

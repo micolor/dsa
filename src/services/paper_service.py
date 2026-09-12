@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.core.trading_calendar import get_effective_trading_date, get_market_for_stock
+from src.core.trading_calendar import (
+    get_effective_trading_date,
+    get_market_for_stock,
+    resolve_fill_session,
+)
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.paper_repo import PaperRepository
 from src.storage import DatabaseManager, DecisionSignalRecord
@@ -24,6 +28,40 @@ logger = logging.getLogger(__name__)
 POSITION_WEIGHT = 0.20
 # Default lookback used when loading price bars for live valuation.
 DEFAULT_LOOKBACK_DAYS = 365
+# Commission rate applied to every market unless `PAPER_FEE_COMMISSION_RATE`
+# overrides it. The broker-negotiable part of the cost, hence configurable.
+COMMISSION_RATE = 0.00025
+# Adverse slippage per fill, in basis points. Defaults to 0: slippage is an
+# assumption about execution quality, not an observable fee, so the simulation
+# does not invent it unless the user asks for it.
+SLIPPAGE_BPS = 0.0
+
+# Statutory / exchange fees per market. These are set by the venue rather than
+# negotiated, so they live here instead of in config. `stamp_duty_sell_only`
+# captures the A股 rule where 印花税 is charged on the sell side alone, while
+# 港股 charges it both ways. Unlisted markets fall back to the A股 profile, which
+# is the account's home market — assuming zero statutory cost would understate.
+_MARKET_FEE_PROFILE: Dict[str, Dict[str, Any]] = {
+    "cn": {
+        "min_commission": 5.0,
+        "stamp_duty_rate": 0.0005,
+        "stamp_duty_sell_only": True,
+        "transfer_fee_rate": 0.00001,
+    },
+    "hk": {
+        "min_commission": 0.0,
+        "stamp_duty_rate": 0.001,
+        "stamp_duty_sell_only": False,
+        # 交易费 + 交易征费 + 结算费 + 财务汇报局交易征费 合计约 0.0105%。
+        "transfer_fee_rate": 0.000105,
+    },
+    "us": {
+        "min_commission": 0.0,
+        "stamp_duty_rate": 0.0,
+        "stamp_duty_sell_only": False,
+        "transfer_fee_rate": 0.0,
+    },
+}
 
 # Actions that open or add to a position.
 _OPEN_ACTIONS = ("buy", "add")
@@ -39,6 +77,14 @@ _PORTFOLIO_CHANGING_DISPOSITIONS = ("opened", "added", "reduced", "closed")
 # than being permanently dropped (single data-source failures must not silently
 # discard a trade that should have filled).
 _DATA_UNAVAILABLE = "data_unavailable"
+
+# Disposition recorded when the session's range never reached the plan's limit
+# price. The order is consumed (it is not a data gap), but no position is opened.
+_NO_FILL = "no_fill"
+
+# Fill resolution for a buy/add limit order, see `_entry_fill_price`.
+_FILLED = "filled"
+_FILL_UNAVAILABLE = "unavailable"
 
 # Per-account serialization locks. Paper writes (signal consumption, daily
 # valuation, backfill, manual refresh) mutate cash/positions/trades across
@@ -95,6 +141,11 @@ class PaperService:
         self.decision_repo = decision_repo or DecisionSignalRepository(self.db)
         # Position weight as a fraction of total assets (e.g. 0.20 == 20%).
         self.position_weight = position_weight if position_weight is not None else self._default_position_weight()
+        # Cost model: charging nothing books every fill at an unreachable price.
+        fee_enabled, commission_rate, slippage_bps = self._fee_settings()
+        self.fee_enabled = fee_enabled
+        self.commission_rate = commission_rate
+        self.slippage_bps = slippage_bps
 
     @staticmethod
     def _default_position_weight() -> float:
@@ -107,6 +158,21 @@ class PaperService:
             return weight if 0 < weight <= 1.0 else POSITION_WEIGHT
         except Exception:  # pragma: no cover - defensive fallback
             return POSITION_WEIGHT
+
+    @staticmethod
+    def _fee_settings() -> Tuple[bool, float, float]:
+        """Resolve (fee_enabled, commission_rate, slippage_bps) from config."""
+        try:
+            from src.config import Config
+
+            cfg = Config.get_instance()
+            return (
+                bool(getattr(cfg, "paper_fee_enabled", True)),
+                float(getattr(cfg, "paper_commission_rate", COMMISSION_RATE) or 0.0),
+                float(getattr(cfg, "paper_slippage_bps", SLIPPAGE_BPS) or 0.0),
+            )
+        except Exception:  # pragma: no cover - defensive fallback
+            return True, COMMISSION_RATE, SLIPPAGE_BPS
 
     # ------------------------------------------------------------------
     # Public API
@@ -310,6 +376,7 @@ class PaperService:
                 "quantity": float(t.quantity or 0),
                 "price": t.price,
                 "amount": t.amount,
+                "fee": t.fee or 0.0,
                 "trade_date": t.trade_date.isoformat(),
                 "reason": t.reason,
             }
@@ -354,25 +421,38 @@ class PaperService:
 
     def _open_or_add(self, account, signal: DecisionSignalRecord, as_of: date) -> str:
         code = signal.stock_code
-        buy_price = self._entry_price(signal, as_of)
-        if not buy_price or buy_price <= 0:
-            # 拿不到现价/入场价属数据源瞬时不可用，区别于真正的观望：不落已消费，
-            # 留给后续轮次重试（见 process_signal / backfill_history）。
+        bar = self._bar_for(code, as_of)
+        if bar is None:
+            # 拿不到当日行情 bar（数据源尚未落库）属瞬时不可用，区别于真正的观望：
+            # 不落已消费，留给后续轮次重试（见 process_signal / backfill_history）。
             return _DATA_UNAVAILABLE
+        fill_status, buy_price = self._entry_fill_price(signal, bar)
+        if fill_status == _FILL_UNAVAILABLE:
+            # bar 存在但缺 open/low，无法判定限价单是否成交，按数据不可用重试。
+            return _DATA_UNAVAILABLE
+        if fill_status != _FILLED or not buy_price or buy_price <= 0:
+            return _NO_FILL
+        buy_price = self._apply_slippage(buy_price, "buy")
+        if signal.entry_high and float(signal.entry_high) > 0:
+            # 限价买单不会成交在限价之上：滑点最多吃掉成交价优于限价的那部分。
+            buy_price = min(buy_price, float(signal.entry_high))
 
         position = self.paper_repo.get_open_position(account.id, code)
         total = self._net_value(account)
         target_value = total * self.position_weight
         available_cash = max(float(account.cash or 0), 0.0)
+        spendable = self._spendable_cash(available_cash, signal.market)
 
         if position is None:
             # Cap the buy to what cash actually covers; lot rounding never exceeds this.
-            spend = min(target_value, available_cash)
+            spend = min(target_value, spendable)
             if spend <= 0:
                 return "ignored"
             quantity = self._buy_quantity(spend, buy_price, market=signal.market)
             if quantity <= 0:
                 return "ignored"
+            amount = buy_price * quantity
+            fee = self._fee_for(amount, "buy", signal.market)
             self.paper_repo.upsert_position(
                 account.id,
                 code,
@@ -380,9 +460,10 @@ class PaperService:
                     "stock_name": signal.stock_name,
                     "market": signal.market,
                     "quantity": quantity,
-                    "avg_cost": buy_price,
+                    # 成本价含买入费用，与券商展示口径一致；否则已实现盈亏对不上现金变动。
+                    "avg_cost": (amount + fee) / quantity,
                     "current_price": buy_price,
-                    "market_value": buy_price * quantity,
+                    "market_value": amount,
                     "open_signal_id": signal.id,
                     "entry_date": as_of,
                     "stop_loss": signal.stop_loss,
@@ -390,7 +471,7 @@ class PaperService:
                     "status": "open",
                 },
             )
-            self._apply_cash(account, -buy_price * quantity)
+            self._apply_cash(account, -(amount + fee))
             self.paper_repo.add_trade(
                 account.id,
                 signal_id=signal.id,
@@ -399,7 +480,8 @@ class PaperService:
                 side="buy",
                 quantity=quantity,
                 price=buy_price,
-                amount=buy_price * quantity,
+                amount=amount,
+                fee=fee,
                 trade_date=as_of,
                 reason="signal_action",
             )
@@ -410,7 +492,7 @@ class PaperService:
         current_value = float(position.market_value or 0)
         if current_value >= target_value:
             return "hold"
-        spend = min(target_value - current_value, available_cash)
+        spend = min(target_value - current_value, spendable)
         if spend <= 0:
             return "hold"
         quantity = self._buy_quantity(spend, buy_price, market=signal.market)
@@ -419,7 +501,10 @@ class PaperService:
         prev_qty = float(position.quantity or 0)
         prev_cost = float(position.avg_cost or buy_price)
         new_qty = prev_qty + quantity
-        new_cost = (prev_cost * prev_qty + buy_price * quantity) / new_qty
+        amount = buy_price * quantity
+        fee = self._fee_for(amount, "buy", signal.market)
+        # 原成本已含费，本次也在摊薄里带上本次费用，保持加权口径一致。
+        new_cost = (prev_cost * prev_qty + amount + fee) / new_qty
         fields: Dict[str, Any] = {
             "quantity": new_qty,
             "avg_cost": new_cost,
@@ -432,7 +517,7 @@ class PaperService:
         if signal.target_price is not None:
             fields["target_price"] = signal.target_price
         self.paper_repo.upsert_position(account.id, code, fields)
-        self._apply_cash(account, -buy_price * quantity)
+        self._apply_cash(account, -(amount + fee))
         self.paper_repo.add_trade(
             account.id,
             signal_id=signal.id,
@@ -441,7 +526,8 @@ class PaperService:
             side="buy",
             quantity=quantity,
             price=buy_price,
-            amount=buy_price * quantity,
+            amount=amount,
+            fee=fee,
             trade_date=as_of,
             reason="signal_action",
         )
@@ -458,6 +544,8 @@ class PaperService:
         sell_price = self._close_price(code, as_of) or position.current_price
         if not sell_price or sell_price <= 0:
             return _DATA_UNAVAILABLE
+        market = getattr(position, "market", None) or signal.market
+        sell_price = self._apply_slippage(sell_price, "sell")
 
         quantity = float(position.quantity or 0) * fraction
         quantity = self._round_lot(quantity, market=signal.market)
@@ -486,7 +574,9 @@ class PaperService:
             side = "sell"
             disposition = "reduced"
 
-        self._apply_cash(account, sell_price * quantity)
+        amount = sell_price * quantity
+        fee = self._fee_for(amount, "sell", market)
+        self._apply_cash(account, amount - fee)
         self.paper_repo.add_trade(
             account.id,
             signal_id=signal.id,
@@ -495,7 +585,8 @@ class PaperService:
             side=side,
             quantity=quantity,
             price=sell_price,
-            amount=sell_price * quantity,
+            amount=amount,
+            fee=fee,
             trade_date=as_of,
             reason="signal_action",
         )
@@ -548,10 +639,19 @@ class PaperService:
                 },
             )
 
-        return self._record_snapshot(account, as_of, positions)
+        return self._record_snapshot(account, as_of)
 
     def _daily_exit(self, position, bar: Dict[str, float]) -> Tuple[Optional[float], str]:
-        """Return (exit_price, reason) if today's bar triggers stop-loss or take-profit."""
+        """Return (exit_price, reason) if today's bar triggers stop-loss or take-profit.
+
+        A daily bar only says both levels were touched, not which came first. The
+        open is the one ordering signal the bar does carry: an open at/below the
+        stop gives the stop away at the bell, and an open at/above the target
+        reaches the target first. Only a bar that opens *between* the two levels
+        leaves the order genuinely unknown, and that residue is booked as
+        `ambiguous_stop_loss` on the stop — pessimistically, so the simulated
+        result never depends on the assumption that the good outcome came first.
+        """
         low = bar.get("low")
         high = bar.get("high")
         stop_loss = position.stop_loss
@@ -561,16 +661,43 @@ class PaperService:
         tp_hit = take_profit is not None and high is not None and high >= take_profit
 
         if stop_hit and tp_hit:
-            return stop_loss, "ambiguous_stop_loss"
+            open_price = bar.get("open")
+            if open_price is not None and open_price > 0:
+                open_price = float(open_price)
+                if open_price <= float(stop_loss):
+                    return self._exit_fill(stop_loss, bar, below=True), "stop_loss"
+                if open_price >= float(take_profit):
+                    return self._exit_fill(take_profit, bar, below=False), "take_profit"
+            return self._exit_fill(stop_loss, bar, below=True), "ambiguous_stop_loss"
         if stop_hit:
-            return stop_loss, "stop_loss"
+            return self._exit_fill(stop_loss, bar, below=True), "stop_loss"
         if tp_hit:
-            return take_profit, "take_profit"
+            return self._exit_fill(take_profit, bar, below=False), "take_profit"
         return None, ""
+
+    @staticmethod
+    def _exit_fill(trigger: float, bar: Dict[str, float], below: bool) -> float:
+        """Fill price for a triggered stop-loss / take-profit, gap-adjusted.
+
+        A bar that opens beyond the trigger fills at the open — the level was
+        already gone when the session started — while an intraday touch fills at
+        the trigger itself. ``below`` marks a downside trigger. Booking the
+        trigger price unconditionally overstated take-profits on gap-up opens and
+        understated stop-losses on gap-down opens.
+        """
+        open_price = bar.get("open")
+        if open_price is None or open_price <= 0:
+            return float(trigger)
+        open_price = float(open_price)
+        return min(float(trigger), open_price) if below else max(float(trigger), open_price)
 
     def _close_by_exit(self, account, position, exit_price: float, as_of: date, reason: str):
         quantity = float(position.quantity or 0)
-        self._apply_cash(account, exit_price * quantity)
+        exit_price = self._apply_slippage(exit_price, "sell")
+        market = getattr(position, "market", None)
+        amount = exit_price * quantity
+        fee = self._fee_for(amount, "sell", market)
+        self._apply_cash(account, amount - fee)
         self.paper_repo.close_position(
             account.id,
             position.stock_code,
@@ -584,7 +711,8 @@ class PaperService:
             side="sell",
             quantity=quantity,
             price=exit_price,
-            amount=exit_price * quantity,
+            amount=amount,
+            fee=fee,
             trade_date=as_of,
             reason=reason,
         )
@@ -592,12 +720,13 @@ class PaperService:
             "paper: closed %s %s @ %.2f (%s)", position.stock_code, quantity, exit_price, reason
         )
 
-    def _record_snapshot(self, account, as_of: date, positions=None) -> Dict[str, Any]:
-        # `_valuate` already fetched open positions; pass them in to avoid a
-        # second list_open_positions query for the same batch. Fall back to a
-        # fresh query only when not provided (keeps other/legacy callers intact).
-        if positions is None:
-            positions = self.paper_repo.list_open_positions(account.id)
+    def _record_snapshot(self, account, as_of: date) -> Dict[str, Any]:
+        # Re-read open positions *after* the marking/exit loop above. The records
+        # fetched at the start of `_valuate` are stale by then: upsert_position /
+        # close_position write to the database, not to those objects. Summing them
+        # priced every snapshot on the previous mark, and on an exit day it added
+        # a position that no longer exists on top of the cash it was sold for.
+        positions = self.paper_repo.list_open_positions(account.id)
         market_value = sum(float(p.market_value or 0) for p in positions)
         cash = float(account.cash or 0)
         net_value = cash + market_value
@@ -629,6 +758,51 @@ class PaperService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _fee_for(self, amount: float, side: str, market: Optional[str]) -> float:
+        """Commission + statutory fees charged on a fill of ``amount``.
+
+        Rounding to 分 mirrors how brokers bill: each order's fee is a cent-level
+        amount, so an unrounded total would leave cash off by fractions of a
+        cent and make the trade log impossible to reconcile.
+        """
+        if not self.fee_enabled or amount <= 0:
+            return 0.0
+        profile = _MARKET_FEE_PROFILE.get(market or "", _MARKET_FEE_PROFILE["cn"])
+        fee = max(amount * self.commission_rate, float(profile["min_commission"]))
+        if side == "sell" or not profile["stamp_duty_sell_only"]:
+            fee += amount * float(profile["stamp_duty_rate"])
+        fee += amount * float(profile["transfer_fee_rate"])
+        return round(fee, 2)
+
+    def _apply_slippage(self, price: float, side: str) -> float:
+        """Move a fill price against the order by ``slippage_bps``.
+
+        A buy pays up and a sell gives up, so the simulated fill is never
+        better than the level the plan assumed.
+        """
+        if self.slippage_bps <= 0 or price <= 0:
+            return float(price)
+        drift = float(price) * self.slippage_bps / 10000.0
+        return float(price) + drift if side == "buy" else float(price) - drift
+
+    def _spendable_cash(self, available_cash: float, market: Optional[str]) -> float:
+        """Cash that can be spent on a fill once the fee it will incur is reserved.
+
+        The fee is charged on top of the fill amount, so spending the whole cash
+        balance would overdraw the account by the fee.
+        """
+        if not self.fee_enabled:
+            return available_cash
+        profile = _MARKET_FEE_PROFILE.get(market or "", _MARKET_FEE_PROFILE["cn"])
+        # Upper bound on the fee rate; over-reserving by a sell-only 印花税 on a
+        # buy is a few 万分之 that the order sizing can absorb, and never negative.
+        max_rate = (
+            self.commission_rate
+            + float(profile["stamp_duty_rate"])
+            + float(profile["transfer_fee_rate"])
+        )
+        return available_cash / (1.0 + max_rate) if max_rate > 0 else available_cash
+
     def _net_value(self, account) -> float:
         positions = self.paper_repo.list_open_positions(account.id)
         market_value = sum(float(p.market_value or 0) for p in positions)
@@ -641,13 +815,24 @@ class PaperService:
 
     @staticmethod
     def _signal_trade_date(signal: DecisionSignalRecord) -> date:
+        """Resolve the session the signal's order can actually be worked on.
+
+        ``created_at`` is stored UTC-naive (``utc_naive_now``), so it is
+        converted to the stock's market timezone before picking a session: a
+        signal produced after that market's close, or on a non-trading day, has
+        no bar of its own and must roll to the next session. Fills are priced
+        against a daily bar, so booking them on the timestamp date filled plans
+        on days the market was shut.
+        """
         created = getattr(signal, "created_at", None)
-        if created is not None:
-            if isinstance(created, datetime):
-                return created.date()
-            if isinstance(created, date):
-                return created
-        return date.today()
+        if not isinstance(created, datetime):
+            return created if isinstance(created, date) else date.today()
+
+        market = getattr(signal, "market", None) or get_market_for_stock(
+            getattr(signal, "stock_code", "") or ""
+        )
+        aware = created if created.tzinfo is not None else created.replace(tzinfo=timezone.utc)
+        return resolve_fill_session(market, aware)
 
     @staticmethod
     def _lot_size(market: Optional[str]) -> int:
@@ -676,10 +861,44 @@ class PaperService:
             return max(int(quantity / lot) * lot, 0)
         return quantity
 
-    def _entry_price(self, signal: DecisionSignalRecord, as_of: date) -> Optional[float]:
-        if signal.entry_high:
-            return float(signal.entry_high)
-        return self._close_price(signal.stock_code, as_of)
+    @staticmethod
+    def _entry_fill_price(
+        signal: DecisionSignalRecord, bar: Dict[str, float]
+    ) -> Tuple[str, Optional[float]]:
+        """Resolve the limit-order fill for a buy/add inside ``bar``.
+
+        ``entry_high`` is the top of the plan's intended buy range, so the order
+        is a limit at that price: it only fills when the session actually traded
+        down to it, and then it fills at the session open (already inside the
+        range) or at the limit itself. A session whose low stays above the limit
+        never fills — the previous behaviour booked the limit price anyway, which
+        filled plans the market never reached.
+
+        Without a planned range the order is treated as a market order and fills
+        at the session close.
+
+        Returns ``(_FILLED, price)``, ``(_NO_FILL, None)`` when the range never
+        reached the limit, or ``(_FILL_UNAVAILABLE, None)`` when the bar lacks the
+        open/low needed to decide — a partial bar must not be read as a fill.
+        """
+        entry_high = signal.entry_high
+        if not entry_high or float(entry_high) <= 0:
+            close = bar.get("close")
+            if close is None or close <= 0:
+                return _FILL_UNAVAILABLE, None
+            return _FILLED, float(close)
+
+        limit = float(entry_high)
+        low = bar.get("low")
+        if low is None:
+            return _FILL_UNAVAILABLE, None
+        if float(low) > limit:
+            return _NO_FILL, None
+
+        open_price = bar.get("open")
+        if open_price is None or open_price <= 0:
+            return _FILLED, limit
+        return _FILLED, min(float(open_price), limit)
 
     def _close_price(self, code: str, as_of: date) -> Optional[float]:
         bar = self._bar_for(code, as_of)
@@ -718,6 +937,7 @@ class PaperService:
                 if d is None:
                     continue
                 bars[d] = {
+                    "open": getattr(row, "open", None),
                     "high": getattr(row, "high", None),
                     "low": getattr(row, "low", None),
                     "close": getattr(row, "close", None),
