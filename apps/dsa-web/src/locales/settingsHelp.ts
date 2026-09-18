@@ -980,9 +980,12 @@ const settingsHelpZhCN: SettingsHelpMap = {
     title: '策略路由模式',
     summary: '控制策略选择方式。',
     usage: 'auto 模式根据市场环境自动检测并选择相关策略；manual 模式仅使用 AGENT_SKILLS 中手动指定的策略。',
-    valueNotes: ['auto 模式会根据市场状态（牛市/熊市/震荡等）动态调整策略选择。'],
+    valueNotes: ['auto 模式会根据市场状态（趋势向上/趋势向下/震荡/放量）动态调整策略选择。'],
     impact: ['影响 Agent 分析时的策略覆盖面。'],
-    notes: ['manual 模式下需要确保 AGENT_SKILLS 已正确配置。'],
+    notes: [
+      'manual 模式下需要确保 AGENT_SKILLS 已正确配置。',
+      '当前可检测的市场状态只有 trending_up / trending_down / sideways / volatile 四种；策略 YAML 里声明的 market_regimes: [sector_hot] 没有任何检测来源，因此只声明 sector_hot 的策略不会被 auto 模式选中，需要显式指定或在 manual 模式下使用。',
+    ],
   },
   'settings.agent.context_compression': {
     title: '问股上下文压缩',
@@ -2179,9 +2182,12 @@ const settingsHelpEnUS: SettingsHelpMap = {
     title: 'Strategy Routing Mode',
     summary: 'Controls how strategies are selected.',
     usage: 'auto mode detects market regime and picks relevant strategies; manual mode uses only the strategies listed in AGENT_SKILLS.',
-    valueNotes: ['auto mode dynamically adjusts strategy selection based on market conditions (bull/bear/range).'],
+    valueNotes: ['auto mode dynamically adjusts strategy selection based on market conditions (trending up / trending down / sideways / heavy volume).'],
     impact: ['Affects the strategy coverage during Agent analysis.'],
-    notes: ['In manual mode, make sure AGENT_SKILLS is correctly configured.'],
+    notes: [
+      'In manual mode, make sure AGENT_SKILLS is correctly configured.',
+      'Only four regimes can currently be detected: trending_up / trending_down / sideways / volatile. A `market_regimes: [sector_hot]` tag in a strategy YAML has no detector behind it, so strategies declaring only `sector_hot` are never picked by auto mode — name them explicitly or use manual mode.',
+    ],
   },
   'settings.agent.context_compression': {
     title: 'Ask-Stock Context Compression',

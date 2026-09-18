@@ -94,8 +94,6 @@ class SkillRouter:
             if volume_status == "heavy" and 30 < trend_score < 70:
                 return "volatile"
 
-        if ctx.meta.get("sector_hot"):
-            return "sector_hot"
         return None
 
     @staticmethod
