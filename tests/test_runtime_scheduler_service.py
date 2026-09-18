@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from src.services import runtime_scheduler
 from src.services.runtime_scheduler import (
     CLI_SCHEDULER_OWNER_ENV,
     RUNTIME_SCHEDULER_ARGS_ENV,
@@ -106,6 +107,31 @@ class _CaptureTimer:
 
 
 class RuntimeSchedulerServiceTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        # 这些用例构造的 config 是 SimpleNamespace，没有 production 一定有的 `database_path`，
+        # 于是 `_analysis_lock_path_from_config` 落回仓库真实路径
+        # `./data/stock_analysis.db.analysis.lock`。本机跑着后端（或另一个 pytest）时该锁被
+        # 别的进程持有，`_run_analysis_locked` 会按设计「拿不到锁就跳过本次运行」，依赖运行
+        # 结果的用例于是假失败——生产行为是对的，缺的是用例前提（`/tmp` 下没有竞争者）。
+        # 只重定向「本来会落回仓库路径」的那一类；flock、非阻塞、竞争返回 False 这套机制
+        # 仍走真实实现。自带 `database_path` 的用例（如 test_cross_process_busy_records_skip_reason
+        # 用临时库路径验证竞争）必须原样走真实推导，否则它持有并期待「被占用」的那把锁会落空。
+        lock_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(lock_dir.cleanup)
+        real_lock_path = runtime_scheduler._analysis_lock_path_from_config
+
+        def _lock_path(config):
+            if getattr(config, "database_path", None):
+                return real_lock_path(config)
+            return str(Path(lock_dir.name) / "analysis.lock")
+
+        lock_patch = patch(
+            "src.services.runtime_scheduler._analysis_lock_path_from_config",
+            side_effect=_lock_path,
+        )
+        lock_patch.start()
+        self.addCleanup(lock_patch.stop)
+
     def test_run_analysis_args_include_workers(self) -> None:
         config = SimpleNamespace(
             schedule_enabled=True,
