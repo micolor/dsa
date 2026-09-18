@@ -28,6 +28,8 @@ Outcome 统计是只读数据面，按 `skill_id + horizon + engine_version` 独
 
 样本不足时，bucket 的 `sample_status` 为 `observational`，计数继续返回，但 `hit_rate_pct`、`miss_rate_pct`、`avg_directional_return_pct` 和 `unable_rate_pct` 全部为 `null`，不得输出排名或推导权重。样本充足时，hit/miss rate 以 `hit + miss` 为分母，平均方向收益只使用 evaluated rows；unable rate 以终态记录 `evaluated + observational + unable` 为分母，临时 `pending` 不得稀释永久失败比例。
 
+每个 bucket 另外返回 `pending_reasons` 与 `unable_reasons` 两个 `reason → 计数` 映射。它们只是计数面，不参与样本充足度、不改变任何 rate 分母；没有原因的行（服务层记录瞬时异常时写入的不带原因 `pending`）归入 `unknown`，因此每个映射的计数之和恒等于同 bucket 的 `pending` / `unable`，明细不会静默漏数。引入这两个字段的原因是只给出 `pending` 总数无法区分两类完全不同的处境：`insufficient_future_data` 是未来 bar 还没攒够、会自行消解；`missing_start_bar` 是本地日线里根本没有该 session 的 bar，需要有人去查数据源或调用方。当前库中 40 条 `missing_start_bar` 全部来自 3 个标的——`006229` 与 `001052` 是场外基金代码却被按裸代码（无 `fund:` 前缀）当作 A 股分析，股票日线链路不可能产出它们的净值 bar；`HK00700` 则是本地 `stock_daily` 中文档为空、尚未成功落过一次港股日线。这两类都按第 21 行的规则保持可重试 `pending`，不得为了「让队列看起来干净」而提前转成终态 `unable`：港股日线由 AkShare / Tushare / Yfinance / Longbridge 提供，一旦有一次成功落库，这些 key 就会自行转成 `evaluated` 或 `observational`，提前终态化会把本可恢复的样本永久丢掉。
+
 只读统计阶段（PR #2119）本身不修改 `BacktestService.get_skill_summary()`、`AgentMemory` 或 `SkillAggregator`，也不新增 API、Pipeline 自动触发和 Web 展示；本页后文的 Phase 4 在该统计契约之上独立接入保守运行时权重。当前组合实现仍只读消费已经持久化的 Outcome，不负责自动触发 evaluator。
 
 ## 术语与边界

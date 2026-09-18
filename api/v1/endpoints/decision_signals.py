@@ -44,7 +44,10 @@ from src.services.decision_signal_reassess_service import (
     DecisionSignalUnsupportedReportTypeError,
 )
 from src.services.skill_opinion_outcome_service import SkillOpinionOutcomeService
-from src.services.skill_opinion_performance_service import SkillOpinionPerformanceService
+from src.services.skill_opinion_performance_service import (
+    MIN_SKILL_OUTCOME_SAMPLE_SIZE,
+    SkillOpinionPerformanceService,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -592,8 +595,11 @@ def run_skill_outcomes(request: SkillOpinionOutcomeRunRequest) -> SkillOpinionOu
     },
     summary="查询 skill 意见后验统计",
     description=(
-        "按 skill / horizon 聚合命中率统计；低于最小评估样本数（30）的 bucket "
+        "按 skill / horizon 聚合命中率统计；低于最小评估样本数"
+        f"（{MIN_SKILL_OUTCOME_SAMPLE_SIZE}）的 bucket "
         "标记为 observational（sample_sufficient=false），hit_rate_pct 为 null。"
+        "pending_reasons / unable_reasons 给出非终态与终态的原因分布，"
+        "用于区分「还在等数据」和「等不到数据」。"
     ),
     operation_id="getSkillOpinionOutcomeStats",
 )

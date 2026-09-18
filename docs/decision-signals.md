@@ -76,6 +76,10 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 - `GET /api/v1/decision-signals/outcomes`、`GET /api/v1/decision-signals/outcomes/stats`、`GET /api/v1/decision-signals/{signal_id}/outcomes`：查询后验结果与统计。
 - `GET/PUT /api/v1/decision-signals/{signal_id}/feedback`：查询或写入 useful / not useful 反馈。
 - `POST /api/v1/decision-signals/reassess`：基于来源历史报告快照重新计算不同决策风格下的信号；`persist=false` 只预览，`persist=true` 由服务端重算并保存通过 guardrail 的结果。
+- `POST /api/v1/decision-signals/skill-outcomes/run`：显式触发 skill 意见后验评估，`limit` 控制单次最多评估的 key 数。
+- `GET /api/v1/decision-signals/skill-outcomes/stats`：按 skill / horizon 聚合命中率；低于最小评估样本数（`MIN_SKILL_OUTCOME_SAMPLE_SIZE`，当前为 5）的 bucket 标记为 `sample_sufficient=false`，比率字段为 `null`。该阈值此前为 30，而实测每个 bucket 的 `total` 上限只有 13、`evaluated` 仅占其中约一成，30 属于结构性不可达，加权因此恒定返回 1.0；下调后仍受真实样本量约束，当前数据下暂无 bucket 达标。
+
+后两个接口与 `decision_signals` 表无关，服务的是相邻的 skill 意见资产（`skill_opinion_outcomes`），只是复用同一 router 前缀。
 
 这些接口继承现有 `/api/v1/*` 管理员鉴权；`ADMIN_AUTH_ENABLED=true` 时需要有效管理员会话 Cookie。
 

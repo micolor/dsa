@@ -13,6 +13,7 @@ from src.repositories.skill_opinion_outcome_repo import (
     SkillOpinionOutcomeRepository,
 )
 from src.services.skill_opinion_performance_service import (
+    MIN_SKILL_OUTCOME_SAMPLE_SIZE,
     SkillOpinionPerformanceService,
 )
 from src.services.skill_opinion_outcome_service import (
@@ -26,6 +27,9 @@ from src.storage import (
 )
 
 _ROW_SEQUENCE = count(1)
+
+# 哨兵：区分「调用方没传 reason，用默认值」和「显式传 None，构造无原因的行」。
+_REASON_UNSET = object()
 
 
 @pytest.fixture()
@@ -55,6 +59,7 @@ def _add_outcome(
     eval_status: str,
     outcome: str | None = None,
     directional_return_pct: float | None = None,
+    reason: object = _REASON_UNSET,
 ) -> None:
     with db.session_scope() as session:
         history = AnalysisHistory(
@@ -89,7 +94,9 @@ def _add_outcome(
                 ),
                 directional_return_pct=directional_return_pct,
                 unable_reason=(
-                    "invalid_metadata" if eval_status == "unable" else None
+                    ("invalid_metadata" if eval_status == "unable" else None)
+                    if reason is _REASON_UNSET
+                    else reason
                 ),
             )
         )
@@ -154,7 +161,10 @@ def test_service_keeps_insufficient_bucket_observational(isolated_db) -> None:
     ).get_stats()
 
     assert stats["engine_version"] == SKILL_OPINION_OUTCOME_ENGINE_VERSION
-    assert stats["minimum_evaluated_sample_size"] == 30
+    assert (
+        stats["minimum_evaluated_sample_size"]
+        == MIN_SKILL_OUTCOME_SAMPLE_SIZE
+    )
     assert len(stats["buckets"]) == 1
     bucket = stats["buckets"][0]
     assert bucket["total"] == 5
@@ -207,7 +217,9 @@ def test_service_unlocks_metrics_at_exact_sample_threshold(isolated_db) -> None:
 
 
 def test_non_evaluated_rows_do_not_unlock_metrics(isolated_db) -> None:
-    for _ in range(29):
+    # 边界值跟随 MIN_SKILL_OUTCOME_SAMPLE_SIZE，避免阈值调整后这条测试
+    # 从「差一条不解锁」变成「差很多条不解锁」而失去边界意义。
+    for _ in range(MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1):
         _add_outcome(
             isolated_db,
             eval_status="evaluated",
@@ -227,8 +239,8 @@ def test_non_evaluated_rows_do_not_unlock_metrics(isolated_db) -> None:
         db_manager=isolated_db
     ).get_stats()["buckets"][0]
 
-    assert bucket["total"] == 44
-    assert bucket["evaluated"] == 29
+    assert bucket["total"] == MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1 + 15
+    assert bucket["evaluated"] == MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1
     assert bucket["sample_sufficient"] is False
     assert bucket["sample_status"] == "observational"
     assert bucket["hit_rate_pct"] is None
@@ -320,7 +332,7 @@ def test_sibling_buckets_cannot_combine_to_unlock_metrics(
         ("beta", "1d", SKILL_OPINION_OUTCOME_ENGINE_VERSION),
         ("alpha", "1d", "skill-opinion-outcome-v2"),
     ]:
-        for _ in range(16):
+        for _ in range(MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1):
             _add_outcome(
                 isolated_db,
                 skill_id=skill_id,
@@ -338,13 +350,16 @@ def test_sibling_buckets_cannot_combine_to_unlock_metrics(
     )["buckets"]
 
     assert len(current_buckets) == 3
-    assert all(bucket["evaluated"] == 16 for bucket in current_buckets)
+    assert all(
+        bucket["evaluated"] == MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1
+        for bucket in current_buckets
+    )
     assert all(
         bucket["sample_sufficient"] is False
         for bucket in current_buckets
     )
     assert len(future_buckets) == 1
-    assert future_buckets[0]["evaluated"] == 16
+    assert future_buckets[0]["evaluated"] == MIN_SKILL_OUTCOME_SAMPLE_SIZE - 1
     assert future_buckets[0]["sample_sufficient"] is False
 
 
@@ -409,3 +424,135 @@ def test_service_returns_empty_buckets_for_valid_empty_filter(
     ).get_stats(skill_id="missing")
 
     assert stats["buckets"] == []
+
+
+def test_repository_breaks_down_pending_and_unable_reasons(isolated_db) -> None:
+    for _ in range(4):
+        _add_outcome(
+            isolated_db, eval_status="pending", reason="missing_start_bar"
+        )
+    for _ in range(2):
+        _add_outcome(
+            isolated_db, eval_status="pending", reason="insufficient_future_data"
+        )
+    _add_outcome(
+        isolated_db, eval_status="unable", reason="invalid_effective_daily_bar_date"
+    )
+    _add_outcome(
+        isolated_db, eval_status="unable", reason="invalid_market_phase_context"
+    )
+
+    bucket = SkillOpinionOutcomeRepository(
+        isolated_db
+    ).list_performance_buckets(
+        engine_version=SKILL_OPINION_OUTCOME_ENGINE_VERSION,
+    )[0]
+
+    assert bucket.pending == 6
+    assert bucket.unable == 2
+    assert bucket.pending_reasons == {
+        "insufficient_future_data": 2,
+        "missing_start_bar": 4,
+    }
+    assert bucket.unable_reasons == {
+        "invalid_effective_daily_bar_date": 1,
+        "invalid_market_phase_context": 1,
+    }
+    # 明细必须能独立还原总数：pending 与 unable 的行在库里必定带 status，
+    # 分桶只按 status 切，两边相加等于总量。
+    assert sum(bucket.pending_reasons.values()) == bucket.pending
+    assert sum(bucket.unable_reasons.values()) == bucket.unable
+
+
+def test_reasonless_rows_are_counted_as_unknown(isolated_db) -> None:
+    # 服务层记录瞬时异常时会写不带原因的 pending（见 _record_retry_attempt）。
+    # 这类行不能从明细里消失，否则明细之和小于 pending 总数，读的人会以为漏数。
+    _add_outcome(isolated_db, eval_status="pending", reason=None)
+    _add_outcome(
+        isolated_db, eval_status="pending", reason="missing_start_bar"
+    )
+
+    bucket = SkillOpinionPerformanceService(
+        db_manager=isolated_db
+    ).get_stats()["buckets"][0]
+
+    assert bucket["pending"] == 2
+    assert bucket["pending_reasons"] == {"missing_start_bar": 1, "unknown": 1}
+    assert bucket["unable_reasons"] == {}
+
+
+def test_service_exposes_reason_breakdown_in_bucket_payload(isolated_db) -> None:
+    _add_outcome(
+        isolated_db,
+        eval_status="evaluated",
+        outcome="hit",
+        directional_return_pct=1.0,
+    )
+    _add_outcome(
+        isolated_db, eval_status="pending", reason="missing_start_bar"
+    )
+    _add_outcome(
+        isolated_db, eval_status="unable", reason="unresolvable_expected_start_date"
+    )
+
+    bucket = SkillOpinionPerformanceService(
+        db_manager=isolated_db
+    ).get_stats()["buckets"][0]
+
+    assert bucket["pending_reasons"] == {"missing_start_bar": 1}
+    assert bucket["unable_reasons"] == {
+        "unresolvable_expected_start_date": 1
+    }
+
+
+def test_reason_breakdown_is_isolated_per_bucket(isolated_db) -> None:
+    # 原因明细必须和其他计数一样按 (skill_id, horizon, engine_version) 隔离，
+    # 不能把同 skill 的其他 horizon 或同 horizon 的其他 skill 的原因并进来。
+    _add_outcome(
+        isolated_db,
+        skill_id="alpha",
+        horizon="1d",
+        eval_status="pending",
+        reason="missing_start_bar",
+    )
+    _add_outcome(
+        isolated_db,
+        skill_id="alpha",
+        horizon="3d",
+        eval_status="pending",
+        reason="insufficient_future_data",
+    )
+    _add_outcome(
+        isolated_db,
+        skill_id="beta",
+        horizon="1d",
+        eval_status="pending",
+        reason="missing_start_bar",
+    )
+    _add_outcome(
+        isolated_db,
+        skill_id="alpha",
+        horizon="1d",
+        engine_version="skill-opinion-outcome-v2",
+        eval_status="pending",
+        reason="unsupported_horizon",
+    )
+
+    buckets = {
+        (bucket["skill_id"], bucket["horizon"]): bucket
+        for bucket in SkillOpinionPerformanceService(
+            db_manager=isolated_db
+        ).get_stats()["buckets"]
+    }
+
+    assert buckets[("alpha", "1d")]["pending_reasons"] == {
+        "missing_start_bar": 1
+    }
+    assert buckets[("alpha", "3d")]["pending_reasons"] == {
+        "insufficient_future_data": 1
+    }
+    assert buckets[("beta", "1d")]["pending_reasons"] == {
+        "missing_start_bar": 1
+    }
+    # v2 engine version 的桶不进入当前版本统计，也不会把它的原因并进 v1 的同名桶。
+    assert len(buckets) == 3

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -44,6 +44,12 @@ class SkillOpinionPerformanceBucket:
     hit: int
     miss: int
     avg_directional_return_pct: Optional[float]
+    # 非终态的分布明细。只给出 pending / unable 的总数不足以区分「还在等数据」
+    # 和「永远等不到数据」：真实库里 40 条 missing_start_bar 与 24 条
+    # insufficient_future_data 都是 pending，但前者是本地日线缺失、后者只是
+    # 未来 bar 还没攒够。没有这两个字段时，只有手工查库才能分辨。
+    pending_reasons: Dict[str, int] = field(default_factory=dict)
+    unable_reasons: Dict[str, int] = field(default_factory=dict)
 
 
 class SkillOpinionOutcomeRepository:
@@ -262,6 +268,50 @@ class SkillOpinionOutcomeRepository:
                 )
             ).all()
 
+            reason_rows = session.execute(
+                select(
+                    SkillOpinionSampleRecord.skill_id,
+                    SkillOpinionOutcomeRecord.horizon,
+                    SkillOpinionOutcomeRecord.eval_status,
+                    SkillOpinionOutcomeRecord.unable_reason,
+                    func.count(SkillOpinionOutcomeRecord.id),
+                )
+                .join(
+                    SkillOpinionSampleRecord,
+                    SkillOpinionSampleRecord.id
+                    == SkillOpinionOutcomeRecord.skill_opinion_sample_id,
+                )
+                .where(
+                    and_(
+                        *conditions,
+                        SkillOpinionOutcomeRecord.eval_status.in_(
+                            ("pending", "unable")
+                        ),
+                    )
+                )
+                .group_by(
+                    SkillOpinionSampleRecord.skill_id,
+                    SkillOpinionOutcomeRecord.horizon,
+                    SkillOpinionOutcomeRecord.eval_status,
+                    SkillOpinionOutcomeRecord.unable_reason,
+                )
+            ).all()
+
+        reasons: Dict[Tuple[str, str, str], Dict[str, int]] = {}
+        for skill_id, horizon, eval_status, unable_reason, count in reason_rows:
+            key = (
+                str(skill_id),
+                str(horizon),
+                "pending_reasons"
+                if str(eval_status) == "pending"
+                else "unable_reasons",
+            )
+            # 无原因的行确实存在（服务层记录重试失败时只写 pending，不带原因），
+            # 归到 unknown 而不是丢弃，否则明细之和不等于 pending 总数。
+            reasons.setdefault(key, {})[str(unable_reason or "unknown")] = int(
+                count or 0
+            )
+
         return [
             SkillOpinionPerformanceBucket(
                 skill_id=str(row[0]),
@@ -276,6 +326,20 @@ class SkillOpinionOutcomeRepository:
                 miss=int(row[9] or 0),
                 avg_directional_return_pct=(
                     float(row[10]) if row[10] is not None else None
+                ),
+                pending_reasons=dict(
+                    sorted(
+                        reasons.get(
+                            (str(row[0]), str(row[1]), "pending_reasons"), {}
+                        ).items()
+                    )
+                ),
+                unable_reasons=dict(
+                    sorted(
+                        reasons.get(
+                            (str(row[0]), str(row[1]), "unable_reasons"), {}
+                        ).items()
+                    )
                 ),
             )
             for row in rows

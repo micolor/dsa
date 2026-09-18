@@ -19,6 +19,9 @@ except ModuleNotFoundError:
 import src.auth as auth
 from api.app import create_app
 from src.config import Config
+from src.services.skill_opinion_performance_service import (
+    MIN_SKILL_OUTCOME_SAMPLE_SIZE,
+)
 from src.storage import DatabaseManager
 
 
@@ -96,7 +99,7 @@ def test_skill_outcome_stats_shape(client_and_db):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["engine_version"] == "skill-opinion-outcome-v1"
-    assert body["minimum_evaluated_sample_size"] == 30
+    assert body["minimum_evaluated_sample_size"] == MIN_SKILL_OUTCOME_SAMPLE_SIZE
     assert isinstance(body["buckets"], list)
 
 

@@ -679,6 +679,83 @@ describe('decisionSignalsApi', () => {
     expect(stats.unableReasons).toEqual({});
   });
 
+  it('keeps skill outcome pending/unable reason keys in snake_case', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        engine_version: 'decision-signal-v1',
+        minimum_evaluated_sample_size: 5,
+        buckets: [
+          {
+            skill_id: 'technical-trend',
+            horizon: '3d',
+            engine_version: 'decision-signal-v1',
+            total: 13,
+            pending: 5,
+            evaluated: 1,
+            observational: 7,
+            unable: 1,
+            // reason 标识是对照后端枚举的字典键，不能被 camelcaseKeys 改写成
+            // missingStartBar / invalidMarketPhaseContext。
+            pending_reasons: { missing_start_bar: 3, insufficient_future_data: 2 },
+            unable_reasons: { invalid_market_phase_context: 1 },
+            hit: 1,
+            miss: 0,
+            sample_sufficient: false,
+            sample_status: 'observational',
+            hit_rate_pct: null,
+            miss_rate_pct: null,
+            avg_directional_return_pct: null,
+            unable_rate_pct: null,
+          },
+        ],
+      },
+    });
+
+    const stats = await decisionSignalsApi.getSkillOutcomeStats({ horizons: ['3d'] });
+
+    expect(stats.minimumEvaluatedSampleSize).toBe(5);
+    expect(stats.buckets[0].horizon).toBe('3d');
+    expect(stats.buckets[0].pendingReasons).toEqual({
+      missing_start_bar: 3,
+      insufficient_future_data: 2,
+    });
+    expect(stats.buckets[0].unableReasons).toEqual({ invalid_market_phase_context: 1 });
+  });
+
+  it('defaults missing skill outcome reason maps to empty objects', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        engine_version: 'decision-signal-v1',
+        minimum_evaluated_sample_size: 5,
+        buckets: [
+          {
+            skill_id: 'technical-trend',
+            horizon: '3d',
+            engine_version: 'decision-signal-v1',
+            total: 2,
+            pending: 0,
+            evaluated: 2,
+            observational: 0,
+            unable: 0,
+            hit: 1,
+            miss: 1,
+            sample_sufficient: false,
+            sample_status: 'insufficient',
+            hit_rate_pct: 50,
+            miss_rate_pct: 50,
+            avg_directional_return_pct: 1,
+            unable_rate_pct: 0,
+          },
+        ],
+      },
+    });
+
+    const stats = await decisionSignalsApi.getSkillOutcomeStats();
+
+    expect(stats.buckets[0].pendingReasons).toEqual({});
+    expect(stats.buckets[0].unableReasons).toEqual({});
+  });
+
   it('gets per-signal outcomes and upserts feedback', async () => {
     get
       .mockResolvedValueOnce({

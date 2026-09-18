@@ -339,6 +339,10 @@ export interface SkillOpinionPerformanceBucket {
   unable: number;
   hit: number;
   miss: number;
+  // 键是后端的原因标识（如 missing_start_bar），必须按原样保留，不能跟着
+  // 外层字段一起转成 camelCase——转了就再也对不上后端的原因枚举。
+  pendingReasons: Record<string, number>;
+  unableReasons: Record<string, number>;
   sampleSufficient: boolean;
   sampleStatus: string;
   hitRatePct: number | null;

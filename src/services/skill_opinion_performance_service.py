@@ -18,7 +18,17 @@ from src.services.skill_opinion_outcome_service import (
 from src.storage import DatabaseManager
 
 
-MIN_SKILL_OUTCOME_SAMPLE_SIZE = 30
+# 每个 (skill_id, horizon) 桶进入加权所需的最小 evaluated 样本数。
+#
+# 原值 30 在任何桶上都不可能达标，而不是「等样本长起来就会到」：实测每个桶的
+# total 上限只有 13（24 个桶中最大者），而 evaluated 仅占其中约 10%（152 条后验
+# 中只有 16 条 evaluated）。阈值 30 因此是结构性不可达的，compute_weights 恒定
+# 返回 1.0，加权结果与「没有复盘」逐位相同。
+#
+# 下调到 5 的真实效果：当前数据下仍然一个桶都不达标（桶内 evaluated 最大为 2），
+# 所以今天的行为与改前完全一致。它的意义是让阈值回到样本成熟后确实可以达到的
+# 量级，而不是继续保留一个永远不会触发的开关。
+MIN_SKILL_OUTCOME_SAMPLE_SIZE = 5
 
 
 class SkillOpinionPerformanceService:
@@ -106,6 +116,8 @@ class SkillOpinionPerformanceService:
             "unable": bucket.unable,
             "hit": bucket.hit,
             "miss": bucket.miss,
+            "pending_reasons": bucket.pending_reasons,
+            "unable_reasons": bucket.unable_reasons,
             "sample_sufficient": sample_sufficient,
             "sample_status": (
                 "sufficient" if sample_sufficient else "observational"

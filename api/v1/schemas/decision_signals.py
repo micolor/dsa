@@ -376,6 +376,8 @@ class SkillOpinionPerformanceBucket(BaseModel):
     unable: int
     hit: int
     miss: int
+    pending_reasons: Dict[str, int] = Field(default_factory=dict)
+    unable_reasons: Dict[str, int] = Field(default_factory=dict)
     sample_sufficient: bool
     sample_status: str
     hit_rate_pct: Optional[float] = None

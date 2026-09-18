@@ -180,10 +180,21 @@ function toDecisionSignalOutcomeStatsResponse(data: Record<string, unknown>): De
   return response;
 }
 
+function toSkillOpinionPerformanceBucket(data: Record<string, unknown>): SkillOpinionPerformanceBucket {
+  const bucket = toCamelCase<SkillOpinionPerformanceBucket>(data);
+  // toCamelCase 走的是 camelcaseKeys(..., { deep: true })，会把嵌套字典的键一起
+  // 改写，reason 标识（missing_start_bar / insufficient_future_data）会变成
+  // missingStartBar，前端再拿它去比对或展示就对不上了。与
+  // toDecisionSignalStatsBucket 同样从原始 data 取这两个映射。
+  bucket.pendingReasons = (data.pending_reasons as Record<string, number> | undefined) ?? {};
+  bucket.unableReasons = (data.unable_reasons as Record<string, number> | undefined) ?? {};
+  return bucket;
+}
+
 function toSkillOpinionPerformanceStatsResponse(data: Record<string, unknown>): SkillOpinionPerformanceStatsResponse {
   const response = toCamelCase<SkillOpinionPerformanceStatsResponse>(data);
   response.buckets = Array.isArray(data.buckets)
-    ? data.buckets.map((bucket) => toCamelCase<SkillOpinionPerformanceBucket>(bucket as Record<string, unknown>))
+    ? data.buckets.map((bucket) => toSkillOpinionPerformanceBucket(bucket as Record<string, unknown>))
     : [];
   return response;
 }

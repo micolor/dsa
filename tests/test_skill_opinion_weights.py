@@ -15,6 +15,7 @@ from src.services.skill_opinion_outcome_service import (
     SKILL_OPINION_OUTCOME_ENGINE_VERSION,
 )
 from src.services.skill_opinion_performance_service import (
+    MIN_SKILL_OUTCOME_SAMPLE_SIZE,
     SkillOpinionPerformanceService,
 )
 from src.services.skill_opinion_weight_service import (
@@ -40,7 +41,7 @@ class _FakePerformanceService:
             raise self.error
         return {
             "engine_version": SKILL_OPINION_OUTCOME_ENGINE_VERSION,
-            "minimum_evaluated_sample_size": 30,
+            "minimum_evaluated_sample_size": MIN_SKILL_OUTCOME_SAMPLE_SIZE,
             "buckets": self.buckets,
         }
 
