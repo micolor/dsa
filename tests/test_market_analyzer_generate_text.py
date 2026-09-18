@@ -3205,6 +3205,43 @@ Index text.
         assert "今日指数分化" in sections[0]["markdown"]
         assert all(section["title"] != "2026-06-03 大盘复盘" for section in sections)
 
+    def test_market_review_section_placeholder_titles_follow_review_language(self):
+        from src.market_analyzer import MarketAnalyzer
+
+        ma = MarketAnalyzer.__new__(MarketAnalyzer)
+        report = """## 2026-06-03 大盘复盘
+
+> 今日指数分化。
+
+### 一、盘面总览
+正文
+"""
+
+        zh_sections = ma._split_report_sections(report, "zh")
+        # 无标题段落没有正文可供取名，只能给固定文案；中文报告里出现过英文 "Overview"
+        # 是首页唯一一个纯拉丁标题，因此这里锁定中文占位名。
+        assert zh_sections[0]["title"] == "复盘概览"
+        assert "Overview" not in [section["title"] for section in zh_sections]
+        # 有标题的段落直接沿用报告自身标题，不受语言参数影响。
+        assert zh_sections[1]["title"] == "一、盘面总览"
+
+        en_sections = ma._split_report_sections(report, "en")
+        assert en_sections[0]["title"] == "Overview"
+        assert en_sections[0]["key"] == "overview"
+        assert zh_sections[0]["key"] == "overview"
+
+    def test_market_review_section_keys_stay_stable_across_languages(self):
+        from src.market_analyzer import MarketAnalyzer
+
+        ma = MarketAnalyzer.__new__(MarketAnalyzer)
+        plain_report = "只有正文，没有任何 Markdown 标题。"
+
+        # key 是 Web / 通知消费的契约字段，不能随语言变化；只有 title 允许本地化。
+        assert ma._split_report_sections(plain_report, "zh")[0]["key"] == "full_review"
+        assert ma._split_report_sections(plain_report, "en")[0]["key"] == "full_review"
+        assert ma._split_report_sections(plain_report, "zh")[0]["title"] == "复盘正文"
+        assert ma._split_report_sections(plain_report, "en")[0]["title"] == "Review"
+
     def test_news_block_renders_title_source_and_link_only(self):
         from src.market_analyzer import MarketAnalyzer
 

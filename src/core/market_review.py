@@ -942,10 +942,16 @@ def _build_market_review_context_overview(
 
 
 def _summarize_market_review(review_report: str, report_language: str) -> str:
+    # 报告首行一定是标题（如「## 2026-09-12 大盘复盘」），它会被前端当作记录名展示，
+    # 不能同时充当摘要——否则「复盘摘要」卡片显示的就是报告标题本身，等于什么都没有。
+    # 同理，各级 Markdown 标题都只是目录，摘要只取第一行正文。
     for line in (review_report or "").splitlines():
-        text = line.strip().lstrip("#").strip()
-        if text and not text.startswith("---") and not text.startswith(">"):
-            return text[:200]
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if not stripped or stripped.startswith("---") or stripped.startswith(">"):
+            continue
+        return stripped[:200]
     if report_language == "en":
         return "Market review report generated."
     if report_language == "ko":

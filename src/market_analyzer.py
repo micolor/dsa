@@ -761,7 +761,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     ) -> Dict[str, Any]:
         """Build the structured market-review contract consumed by API, Web, and notifications."""
         language = self._get_output_language()
-        sections = self._split_report_sections(report)
+        sections = self._split_report_sections(report, self._get_review_language())
         title = self._extract_report_title(report) or self._get_review_title(overview.date).lstrip("# ").strip()
         light = (
             market_light_snapshot or self.build_market_light_snapshot(overview)
@@ -842,14 +842,33 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 return stripped.lstrip("#").strip()
         return ""
 
+    # 无标题段落（overview / full_review）没有正文可供取名，只能用固定文案。
+    # 其余段落的 title 直接取自报告自身的 Markdown 标题（由提示词按语言生成），
+    # 因此这里只需要本地化这两个占位名；key 是 API 契约，任何语言下都必须保持不变。
+    _SECTION_TITLE_OVERVIEW = {"zh": "复盘概览", "en": "Overview"}
+    _SECTION_TITLE_FULL_REVIEW = {"zh": "复盘正文", "en": "Review"}
+
     @classmethod
-    def _split_report_sections(cls, report: str) -> List[Dict[str, str]]:
+    def _section_placeholder_title(cls, names: Dict[str, str], review_language: str) -> str:
+        # 韩语复用英语骨架（与 _get_review_language 的约定一致）。
+        return names.get(review_language, names["zh"])
+
+    @classmethod
+    def _split_report_sections(
+        cls,
+        report: str,
+        review_language: str = "zh",
+    ) -> List[Dict[str, str]]:
         text = (report or "").strip()
         if not text:
             return []
         matches = list(re.finditer(r"^(#{2,3})\s+(.+?)\s*$", text, flags=re.MULTILINE))
         if not matches:
-            return [{"key": "full_review", "title": "Review", "markdown": text}]
+            return [{
+                "key": "full_review",
+                "title": cls._section_placeholder_title(cls._SECTION_TITLE_FULL_REVIEW, review_language),
+                "markdown": text,
+            }]
 
         sections: List[Dict[str, str]] = []
         first_match = matches[0]
@@ -863,7 +882,11 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         )
         intro = text[intro_start:intro_end].strip()
         if intro:
-            sections.append({"key": "overview", "title": "Overview", "markdown": intro})
+            sections.append({
+                "key": "overview",
+                "title": cls._section_placeholder_title(cls._SECTION_TITLE_OVERVIEW, review_language),
+                "markdown": intro,
+            })
 
         for index, match in enumerate(matches[content_start_index:], start=content_start_index):
             start = match.end()

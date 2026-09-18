@@ -926,5 +926,33 @@ class MarketReviewLocalizationTestCase(unittest.TestCase):
                     os.environ["DATABASE_PATH"] = old_db_path
 
 
+    def test_summarize_market_review_skips_report_title(self) -> None:
+        # 「复盘摘要」卡片读的是 analysis_summary。报告首行是标题，与记录名重复，
+        # 各级 Markdown 标题只是目录，两者都不能当摘要——否则卡片等于没有信息。
+        report = (
+            "## 2026-09-12 大盘复盘\n"
+            "\n"
+            "> 今日指数分化。\n"
+            "\n"
+            "### 一、盘面总览\n"
+            "\n"
+            "两市成交额放大。\n"
+        )
+        summary = market_review_module._summarize_market_review(report, "zh")
+        self.assertEqual(summary, "两市成交额放大。")
+        self.assertNotIn("大盘复盘", summary)
+
+    def test_summarize_market_review_falls_back_when_no_body_paragraph(self) -> None:
+        report = "## 2026-09-12 大盘复盘\n\n> 仅有引言。\n\n---\n"
+        self.assertEqual(
+            market_review_module._summarize_market_review(report, "zh"),
+            "大盘复盘报告已生成。",
+        )
+        self.assertEqual(
+            market_review_module._summarize_market_review(report, "en"),
+            "Market review report generated.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
