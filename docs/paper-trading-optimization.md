@@ -455,3 +455,25 @@
 - `_open_or_add` 加仓路径的 `spend <= 0` 分支在正常数据下不可达——`_default_position_weight` 把目标权重钳在 `(0, 1]`，`_spendable_cash` 仅在 `available_cash == 0` 时返回 0，此时目标权重守卫（`current_value >= target_value`）会先返回 `hold`。该分支作为防御保留并已注明，未删除（无法证明所有存量数据下都不可达，例如存储的 `market_value == 0` 但另有持仓）。
 - 通知侧未改动：`paper_notify._action_label` 只区分 `added` / `closed`，新增取值走既有 fallback。
 
+## 17. 方向 L：信号终态与它派生的持仓「不对账」（已确认，未改代码）
+
+**结论：这是两套账本的分工，不是缺陷。已把该分工写进 `docs/decision-signals.md`，不改代码。**
+
+**排查起点**
+
+交易闭环审计（`.claude/reviews/2026-09-13-trading-loop-audit.md` P2-1）提出：`paper_positions` 有 `open_signal_id` 但没有 `close_signal_id`，模拟盘平仓只写 `paper_positions` / `paper_trades`、从不回写 `decision_signals.status`，`closed` 只能人工 PATCH。给出的失败场景是「buy 开仓 → 次日止损清仓 → 信号仍 `active`，且仍在「可以动手」档首位」。
+
+**为什么不做「平仓时自动把开仓信号置为 `closed`」**
+
+- `closed` 在本仓库是**用户动作**：`docs/decision-signals.md` 写明「Web 只能把信号标记为 `closed`、`invalidated` 或 `archived`」，全仓库除人工 PATCH 外没有任何路径写入 `closed`。系统自动写入的终态只有两个——`expired`（TTL）与 `invalidated`（同 profile 的相反 active 信号），二者都由**信号域自身**的事件触发。让模拟盘的平仓去写 `closed`，等于把 `closed` 变成「用户行为和系统行为」的双义词。
+- 模拟盘和信号是**两个不同的账本**，且已经各自完整：模拟盘侧 `paper_signals`（`account_id + signal_id` 唯一）记录 `disposition`，`paper_positions.open_signal_id` 指向开仓信号，`paper_trades.signal_id` 沿用它且 `side='sell'` 的行带 `reason`（`stop_loss` / `take_profit` / `signal_action`）。「这条建议在模拟盘里最后怎么了」在模拟盘一侧就能还原，不需要借用 `decision_signals.status`。
+- 合并后最直接的副作用是**损害未跟单的用户**：模拟账户止损退出 ≠ 用户不该买。若自动置 `closed`，一条仍然有效的 buy 会从「可以动手」里静默消失，而用户无从知道原因。
+- 影响面本身有界：`3d` horizon 的 `expires_at` 是 3 天，审计场景里「一直 active」实际最多持续到 TTL 到期。
+
+**为什么不加 `close_signal_id` 列**
+
+平仓原因与关联信号已经在 `paper_trades` 里（`signal_id = open_signal_id`、`reason` 区分止损/止盈/信号驱动），单加一列是给同一事实建第二份存储，且需要一个 DB migration 与历史回填策略。按「稳定性优先于顺手优化、非直接需要的迁移克制」，本次不加。
+
+**若将来要做，正确的形态是什么**
+
+不是自动改 `decision_signals.status`，而是**把模拟盘侧的结论透出到信号上**：例如在信号列表/详情里显示「模拟盘：已止损退出（2026-09-13）」这类**只读**关联信息（数据取 `paper_signals` + `open_signal_id`，可查询即可得出），或提供 `closed_by` 之类的来源字段区分「用户关闭」与「系统关闭」。两者都需要 API 字段与 Web 展示的设计评审，属新增能力，应另立改动。

@@ -59,6 +59,7 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 - `intraday` 过期时间优先读取低敏 `metadata.market_phase_summary.minutes_to_close/minutes_to_open`；缺失时按市场 fallback TTL。
 - `1d/3d/5d/10d/swing/long` 的默认有效期取 `DEFAULT_HORIZON_TTL_DAYS`，分别为 1/3/5/10/20/60 天。`swing` 与 `long` 此前不在这张表里，`_horizon_days` 返回 `None` 使 `expires_at` 落成 `NULL`，信号永不进入 `expired` 终态；现已补齐，与其他 horizon 一致。
 - `expired`、`invalidated`、`closed`、`archived` 不能通过 `PATCH /status` 直接恢复为 `active`。
+- **`status` 描述的是「这条建议本身还有效吗」，不是「模拟盘对它做了什么」**，因此**系统只自动写入两个终态**：`expired`（TTL 到期）与 `invalidated`（同 profile 的相反 active 信号出现）。`closed` 与 `archived` 是**用户动作**，不接受任何自动写入——模拟盘平仓、止损/止盈退出都不回写信号状态。模拟盘有自己的账本：`paper_signals`（按 `account_id + signal_id` 唯一）记录 `disposition`，`paper_positions.open_signal_id` 指向开仓信号、`paper_trades.signal_id` 沿用它，因此「这条建议在模拟盘里最后怎么了」在模拟盘一侧就能完整还原，不需要借用 `decision_signals.status`。把两者合并会让**未跟单**的用户失去仍可执行的建议（模拟账户已止损退出 ≠ 用户不该买），也会让 `closed` 同时表示用户行为和系统行为两种互不相干的事实。相关取舍记在 `docs/paper-trading-optimization.md` 第 17 节。
 - 同源去重优先使用 `(source_report_id, source_type, market, stock_code, decision_profile, action, horizon, market_phase)`；没有 report 但有 `trace_id` 时使用 trace 维度。
 - `decision_profile` 参与信号身份：`NULL` 只与 `NULL` 匹配，非空 profile 只与相同 profile 匹配。Exact dedup、relaxed dedup、horizon/phase fill、expired refresh、active invalidation 和 stale backfill invalidation 都遵循该 same-profile 语义。
 - 新的相反 active 信号只会把同 profile 的旧 active 信号标记为 `invalidated`，并把失效来源写入 metadata。不同非 `NULL` profile 可并存，即使 action 相反。
