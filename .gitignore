@@ -96,3 +96,10 @@ docs/specs/
 # 本地后端运行日志
 backend.out.log
 backend.err.log
+tmp_server_server.log
+
+# 一次性验收 / 审计截图：按 AGENTS.md 不得作为仓库文件合入，只放在 PR 描述或外部证据链接
+.screenshots/
+
+# superpowers 协作 skill 的本地工作区（根目录那份自带 `*` 的 .gitignore，子目录里的不会）
+.superpowers/
