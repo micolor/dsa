@@ -267,6 +267,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 首页取数去重与可取消：自选历史补齐的 effect 依赖 `canLookupWatchlistHistory`，每次后台刷新该值会抖动一次并 abort 后对全部代码重发一轮请求；现按「刷新版本 + 待补齐签名」去重，只记录**已完成**的那一轮（在途请求被取消时不留标记，下一轮正常重来），并在待补齐集合清空时重置标记；「今日分析」分页查询带 `AbortSignal`（切走标签页即中断在途翻页，此前只拦住 `setState`、请求仍会翻到当日全量），同一日期 60 秒内复用上次结果
 - [测试] 同步 dsa-web 前端测试到新契约：`MarketReviewRegionSelector` 4 个用例改按可见文案查询触发按钮（顺带锁住 Label in Name 契约）、`MarketReviewReportView` 改为断言三张已删除的空态卡片不再渲染、`HomePage` 今日榜用例的 `historyApi.getList` 断言补上 `AbortSignal` 参数，并为 `isStockCodeRedundantWithName` 补 4 个用例（场外基金/大盘复盘伪标的、带交易所前后缀、空名称保底）、为「按来源回收红条（静默成功同样生效）/ 别处来源的红条不被顺手抹掉」补 3 个 store 用例；本批次全量 `npx vitest run` 112 文件 / 1198 用例通过（`tsc --noEmit`、`eslint`、`vite build` 均通过）
 - [修复] 选股市场闸门不再宣称支持实际没有策略支持的市场：`screen()` 此前硬编码接受 `("cn", "us")`，于是 `market="us"` 先拿到「supported: cn, us」，紧接着又被策略级校验拒掉（内置 10 个策略的 `market_scope` 均为 `[cn]`）；现改为用已加载策略 `market_scope` 的并集校验，报错文案列出真实支持的市场集合，`market="cn"` 行为不变
+- [修复] 模拟盘消费决策信号失败从 debug 提到 warning 并补上堆栈：`_try_consume_paper_signal()` 的异常此前只记 `logger.debug`，默认日志级别下完全不可见，与同一文件里抽取失败用 `logger.warning` 的可见性不对等；现升到 `logger.warning` 并加 `exc_info=True`——这条 best-effort 路径只在失败时触发，而 `error=%s` 只给异常文本、看不到调用链，而「为什么这条信号没被消费掉」恰恰需要堆栈；best-effort 语义（消费失败不中断主流程）不变
 - [文档] 修正 `docs/screening-engine.md` 关于美股选股能力的表述：原文把「美股」列进「原始数据与选股能力均已纳入」，实际仓库只有美股数据适配器（`snapshot_us.py`）、内置策略 `market_scope` 均为 `[cn]`，默认没有任何策略支持美股选股
 
 ## [3.29.0] - 2026-08-02

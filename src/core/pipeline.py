@@ -2743,10 +2743,15 @@ class StockAnalysisPipeline:
 
             PaperService(self.db).process_signal(signal_id)
         except Exception as exc:
-            logger.debug(
+            # 这是一条 best-effort 路径（消费失败不中断主流程），但原先记在
+            # debug 级别，等于线上默认看不见。升到 warning 后补上 exc_info：
+            # 这里只在失败时触发，且 `error=%s` 只给出异常文本、没有堆栈，
+            # 而「为什么没消费掉」几乎总要看调用链。与上方抽取失败的处理一致。
+            logger.warning(
                 "paper signal consumption skipped: signal_id=%s error=%s",
                 signal_id,
                 exc,
+                exc_info=True,
             )
 
     @staticmethod
