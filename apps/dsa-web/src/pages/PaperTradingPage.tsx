@@ -239,6 +239,10 @@ export const PaperTradingPage: React.FC = () => {
 
           <PaperMetricsCards snapshot={snapshot} language={language} />
 
+          {/* 口径说明：模拟盘无币种维度，跨市场按 1:1 记账；不写明会让人把这里
+              的收益当成跨市场真实收益，而实盘持仓页是分币种折算的。 */}
+          <p className="text-xs text-secondary-text">{text.currencyNote}</p>
+
           <div className="home-subpanel p-4">
             <h2 className="mb-3 text-sm font-semibold text-foreground">{text.equityCurve}</h2>
             <EquityCurveChart points={curve} language={language} />

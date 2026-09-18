@@ -387,6 +387,33 @@
 
 - 分类是**展示层**信息，不影响配置读写：`.env`、注册表校验、`/api/v1/config` 响应结构与热重载行为均未变，老配置文件不需要迁移。
 - 「基础设置」是设置页的默认落地 Tab（`useSystemConfig.ts:81` 的初始 `activeCategory`），`PaperAccountCard` 挂上去后打开设置页即渲染；而 `GET /api/v1/paper/account` 走 `get_or_create_account()` 会**写库**（无账户时建账户）。这不是本次引入的新副作用——`runtime_scheduler.py` 的模拟盘日估值后台任务本就在服务启动时调 `get_or_create_account()`，任何在跑的服务都已存在账户；但若把「设置页首屏会创建账户」当成问题，需另立改动（例如卡片先只读探测、或账户获取与创建拆成两个端点）。
+
+## 15. 方向 J：币种口径说明（已实施）
+
+**问题**
+
+模拟盘侧没有任何币种维度：`paper_accounts`（`cash`）、`paper_positions`、`paper_trades`、`paper_equity_snapshots` 均无 `currency` 列，全仓库 paper 侧没有汇率代码，跨市场持仓一律按 **1:1** 记账。实盘侧相反——`portfolio_service` 按币种分桶、有 FX 与 `fx_stale` 标记。
+
+**决策：不做多币种改造，改为把口径写明。**
+
+给 paper 表加 `currency` 列意味着一次数据库迁移、账户/持仓/成交/净值四处聚合逻辑重写，以及历史数据的币种回填策略；它的收益是让模拟盘盈亏「更准」，但模拟盘本身的定位是**策略跟踪**而非真实盈亏核算，且当前真实库中模拟盘只有 1 个持仓、2 笔成交，跨市场记账偏差的实际影响面几乎为零。因此本次只消除「用户误以为它是真实盈亏」这一信息缺口，不动数据模型。
+
+**改动**
+
+- `apps/dsa-web/src/pages/PaperTradingPage.tsx`：净值卡片下方新增一行口径说明，渲染 `text.currencyNote`。
+- `apps/dsa-web/src/locales/featureText.ts`：`PAPER_TRADING_TEXT` 的 zh / en 各新增 `currencyNote`，正文说明「按 1:1 记账、不做汇率折算；实盘「持仓分析」页按币种分别折算，两者口径不同，不要直接互相比较」。
+
+**验证**
+
+- `npx tsc -b`：除既有 `DecisionSignalsPage.tsx` 的 `TS18047 'skillStats' is possibly 'null'`（本计划外，改动前后一致）外无新增错误；`npx eslint` 0 error。
+- 截图见交付说明（AGENTS.md 要求 Web UI 改动附受影响页面截图）。
+
+**边界与已知限制**
+
+- **不改数据模型**：`paper_*` 仍无币种维度，跨市场盈亏数字本身依旧不是真实盈亏，本次只是让它不再被误读。
+- 若将来要做多币种，属于新增能力，需要 DB migration 与历史数据回填策略，应另立改动。
+- 说明是**静态文案**，不随账户实际持仓的市场构成变化——即使账户只持有 A 股也会显示该说明。这是刻意的：口径描述的是记账机制，不是当前持仓。
+
 ## 16. 方向 K：“想做但没做成”的成交结果区分（已实施）
 
 **问题**
