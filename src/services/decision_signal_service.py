@@ -65,6 +65,18 @@ DEFAULT_INTRADAY_TTL_HOURS = {
     "hk": 5.5,
     "us": 6.5,
 }
+# 每个 horizon 的默认有效期（自然日）。`swing` / `long` 原先在这张表里缺席，
+# 导致 _horizon_days 返回 None、expires_at 落成 NULL，信号永不进入终态；
+# 现补上保守的默认值，使其与其余 horizon 一样会自然过期。
+# 调用方仍可通过显式传入 expires_at 覆盖这里的值。
+DEFAULT_HORIZON_TTL_DAYS = {
+    "1d": 1,
+    "3d": 3,
+    "5d": 5,
+    "10d": 10,
+    "swing": 20,
+    "long": 60,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -929,9 +941,15 @@ class DecisionSignalService:
 
     @staticmethod
     def _horizon_days(horizon: Optional[str]) -> Optional[int]:
-        if horizon in {"1d", "3d", "5d", "10d"}:
-            return int(horizon[:-1])
-        return None
+        """Return the default TTL in days, or None for horizons with no default.
+
+        `intraday` is handled by the caller before reaching here; it has no
+        day-granularity TTL. Any horizon absent from DEFAULT_HORIZON_TTL_DAYS
+        (including unknown values) yields None, preserving the previous
+        behaviour for inputs outside HORIZONS.
+        """
+
+        return DEFAULT_HORIZON_TTL_DAYS.get(horizon)
 
     @classmethod
     def _metadata_minutes(cls, metadata: Any, field_name: str) -> Optional[int]:

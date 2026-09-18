@@ -57,6 +57,7 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 - `horizon` 和 `expires_at` 显式传入时优先。
 - 未传 `horizon` 时，`alert` 或盘前/盘中/午间休市/集合竞价阶段默认 `intraday`，盘后、非交易时段、未知阶段或缺少阶段时默认 `3d`。
 - `intraday` 过期时间优先读取低敏 `metadata.market_phase_summary.minutes_to_close/minutes_to_open`；缺失时按市场 fallback TTL。
+- `1d/3d/5d/10d/swing/long` 的默认有效期取 `DEFAULT_HORIZON_TTL_DAYS`，分别为 1/3/5/10/20/60 天。`swing` 与 `long` 此前不在这张表里，`_horizon_days` 返回 `None` 使 `expires_at` 落成 `NULL`，信号永不进入 `expired` 终态；现已补齐，与其他 horizon 一致。
 - `expired`、`invalidated`、`closed`、`archived` 不能通过 `PATCH /status` 直接恢复为 `active`。
 - 同源去重优先使用 `(source_report_id, source_type, market, stock_code, decision_profile, action, horizon, market_phase)`；没有 report 但有 `trace_id` 时使用 trace 维度。
 - `decision_profile` 参与信号身份：`NULL` 只与 `NULL` 匹配，非空 profile 只与相同 profile 匹配。Exact dedup、relaxed dedup、horizon/phase fill、expired refresh、active invalidation 和 stale backfill invalidation 都遵循该 same-profile 语义。

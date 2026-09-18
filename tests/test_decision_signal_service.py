@@ -16,7 +16,11 @@ import pytest
 
 from src.config import Config
 from src.repositories.decision_signal_repo import DecisionSignalCreateResult
-from src.services.decision_signal_service import DecisionSignalService, DecisionSignalStorageError
+from src.services.decision_signal_service import (
+    DEFAULT_HORIZON_TTL_DAYS,
+    DecisionSignalService,
+    DecisionSignalStorageError,
+)
 from src.storage import AnalysisHistory, DatabaseManager, DecisionSignalRecord, utc_naive_now
 from src.utils.sanitize import sanitize_decision_signal_text, sanitize_diagnostic_text
 
@@ -295,15 +299,30 @@ def test_service_defaults_lifecycle_and_preserves_explicit_values(isolated_db) -
     assert before_null_lifecycle + timedelta(minutes=29) <= null_lifecycle_expiry
     assert null_lifecycle_expiry <= utc_naive_now() + timedelta(minutes=31)
 
-    swing = service.create_signal(
-        _payload(
-            source_report_id=154,
-            trace_id="trace-lifecycle-swing",
-            horizon="swing",
+    # swing / long 此前没有默认 TTL：_horizon_days 返回 None，expires_at 落成 NULL，
+    # 信号永远不会进入 expired 终态。现在两者与其余 horizon 一样带默认有效期。
+    for source_report_id, horizon in ((154, "swing"), (159, "long")):
+        before_horizon = utc_naive_now()
+        horizon_item = service.create_signal(
+            _payload(
+                source_report_id=source_report_id,
+                trace_id=f"trace-lifecycle-{horizon}",
+                horizon=horizon,
+            )
+        )["item"]
+        assert horizon_item["horizon"] == horizon
+        assert horizon_item["expires_at"] is not None
+        horizon_expiry = datetime.fromisoformat(horizon_item["expires_at"])
+        assert (
+            before_horizon
+            + timedelta(days=DEFAULT_HORIZON_TTL_DAYS[horizon], seconds=-1)
+            <= horizon_expiry
         )
-    )["item"]
-    assert swing["horizon"] == "swing"
-    assert swing["expires_at"] is None
+        assert (
+            horizon_expiry
+            <= utc_naive_now()
+            + timedelta(days=DEFAULT_HORIZON_TTL_DAYS[horizon], seconds=1)
+        )
 
     explicit_expires_at = "2099-01-01T00:00:00Z"
     explicit = service.create_signal(
