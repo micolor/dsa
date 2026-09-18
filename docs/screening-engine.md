@@ -44,7 +44,7 @@ SCREENING_EASTMONEY_JITTER_SEC=0.3
 
 | 路径 | 方法 | 行为 |
 | --- | --- | --- |
-| `/api/v1/screening/status` | GET | 返回开关、引擎状态、契约版本、参考项目和数据源健康信息 |
+| `/api/v1/screening/status` | GET | 返回开关、引擎状态、契约版本、参考项目、支持的市场集合（`supported_markets`）和数据源健康信息 |
 | `/api/v1/screening/strategies` | GET | 返回选股策略 |
 | `/api/v1/screening/hotspots` | GET | 读取缓存或显式刷新热点题材 |
 | `/api/v1/screening/hotspots/{topic}` | GET | 返回题材路线、成分股与核心股；`include_search=true` 时按需搜索近期消息 |
@@ -56,6 +56,8 @@ SCREENING_EASTMONEY_JITTER_SEC=0.3
 | `/api/v1/screening/source-history` | GET | 汇总历史运行中的快照源命中、错误和降级次数 |
 
 后台任务使用 `report_type=screening_screen`，Web 会保存活动任务 ID，并在页面恢复时继续轮询。任务状态会分别提示全市场快照、候选上下文、LLM 重排、最终评分和新闻事件增强等阶段；完成后的结果同时写入 DSA 数据库，因此服务重启后仍可按 `run_id` 查询。
+
+市场校验有两层，都以各策略 `market_scope` 的并集（`src/services/screening/strategy.py::union_market_scopes`）为准：API 层 `_ensure_supported_market` 先按 `/screening/status` 返回的 `supported_markets` 拦截，返回 `422 screening_invalid_market`；策略层闸门再按单个策略声明的 `market_scope` 拦截，返回 `400 screening_screen_rejected`（引擎内 `screen()` 抛出 `Unsupported market: 'xx' (supported: ...)` / `Strategy 'xx' does not support market 'yy'`）。两层都按**原样字符串**比较，不做大小写或空白归一——因此策略 YAML 里的 `market_scope` 与调用方传入的 `market` 必须字面一致（当前内置策略均为小写 `cn`）；写成 `CN` 会让该策略声明的市场既不通过并集闸门、也不通过策略级闸门，两处给出同一结论而不是互相矛盾。
 
 ## 核心流程
 
@@ -77,6 +79,7 @@ SCREENING_EASTMONEY_JITTER_SEC=0.3
 - 日 K 优先通过请求级 fetcher 复用 DSA 历史行情链路，无结果时再走筛选引擎的数据源降级；该桥接不会替换进程级函数，因此重叠选股请求之间不会共享 wrapper 或阻塞彼此。
 - LLM 重排前只补充有限候选上下文，最终候选再补行情、基本面、新闻和摘要，控制请求量。
 - 默认本地 `scorecard` 会覆盖完整短名单，保证所有可能进入近分轮换的候选使用同一最终评分口径；多个后置分析器串联时，每一步完成后都会按最新分数重排，因此后续 `dsa` 与 `external_http` 的 `POST_ANALYSIS_MAX_PICKS` 上限作用于当前真实前列。远程状态按实际提交候选记录，外部响应中的超限代码不会改写未提交候选；启用远程分析时轮换只会在已完成相同分析的候选之间发生。
+- `LLM_MAX_CANDIDATES` 同样封顶最终返回条数：进入 LLM 重排的候选数 `top_k = min(max(max_output, max_output * LLM_CANDIDATE_MULTIPLIER), LLM_MAX_CANDIDATES, 快照行数)`，而返回的 `picks` 直接由这批候选构建，之后只会被取子集或重排、不会再扩充。因此调用方请求的条数大于该上限时（默认上限 12、Web 默认请求 20），实际只会返回上限条数。这类「上限把候选压到低于请求条数」的情况以 `LLM candidate cap <top_k> < requested output <n>; ...` 写入 `degradation`，与下方远程后置分析使用同款措辞和同一判据（`<上限> < requested output`）；`degradation` 会并入 API 的 `warnings`，Web 把这两条渲染成「候选数量受…上限限制」提示。注意 `after_filter_count` 是上限生效前的候选池大小（语义为「硬过滤后」），不能用它区分「策略只产出这么多」和「只重排了这么多」。
 - 模型、渠道、base URL、额外 headers、fallback、timeout 和 token 上限在单次调用范围内注入，不改写用户配置；主模型即使 HTTP 调用成功，但返回空内容、非 JSON 或覆盖率不足，也会继续尝试已配置的备用模型。最终 JSON 必须在 `content` 块或 `output` 块中；`reasoning_content`（链式思考）被视为内部辅助，不作为最终结果。
 - 热点榜单刷新与选股长流程可并行执行；列表默认不批量预取详情，用户选中具体题材时才加载该题材详情；显式刷新后若继续保留当前题材，Web 会同步绕过详情缓存重拉该题材，保证榜单与详情来自同次刷新。
 - 热点成分股并行获取东方财富与同花顺数据，并按固定数据源优先级合并，避免响应先后改变重复股票的字段：正数 `SCREENING_HOTSPOT_CALL_TIMEOUT_SEC` 作为默认 provider 整次调用的共享预算，板块列表、成分股以及引擎失败后的直接详情 fallback 都进入该预算；AkShare/东方财富的可终止子进程与同花顺 HTTP connect/read timeout 每一步只使用剩余时间，fallback 不会重新获得完整预算。直接详情 fallback 不再额外启动无法由该预算强制回收的实时行情预取，行情字段以已受控的成分股源结果为准。超时子进程会 terminate/kill 并回收；进程级并发槽限制活跃任务数量，方法返回前会等待已接纳的 worker 结束，不遗留后台线程。关闭整次调用预算时，各单源仍保留默认硬超时；单源失败不会阻止另一源和本地核心股回退。
@@ -124,7 +127,7 @@ DSA 中存在两类用途不同的策略文件：
 - 任务与页面：复用 DSA 后台任务队列、Web 轮询和桌面端同源 Web 资源。
 - 存储与后续分析：运行结果写入 DSA 数据库；候选可进入 DSA 原生单股分析并携带策略 skill。
 
-对照固定参考提交，快照、日 K、美股、行业/概念、热点、候选新闻/公告/资金流、字段标准化、过滤、评分、风险、排序和数据源熔断等原始数据与选股能力均已纳入；其中公告/事件和资金流在 DSA 编排层分别接入原生事件搜索与基本面上下文。参考项目另外提供独立 CLI/server、JSON 文件 store、报告渲染、doctor、运行/数据源历史和 T+N 评估：本实现只吸收 DSA 确实缺少的运行历史与数据源历史，并接到 DSA 数据库；CLI/server 不重复建设，T+N 评估与表现统计继续复用 DSA 已有 BacktestService，避免形成第二套回测真源。实时 source health 已在 `/status` 返回，历史稳定性由 `/source-history` 补齐。
+对照固定参考提交，快照、日 K、行业/概念、热点、候选新闻/公告/资金流、字段标准化、过滤、评分、风险、排序和数据源熔断等原始数据与选股能力均已纳入；美股目前只有数据适配器（`src/services/screening/snapshot_us.py`，`market="us"` 走 `fetch_us_snapshot`），仓库内置策略的 `market_scope` 均为 `[cn]`，因此默认没有任何策略支持美股选股；其中公告/事件和资金流在 DSA 编排层分别接入原生事件搜索与基本面上下文。参考项目另外提供独立 CLI/server、JSON 文件 store、报告渲染、doctor、运行/数据源历史和 T+N 评估：本实现只吸收 DSA 确实缺少的运行历史与数据源历史，并接到 DSA 数据库；CLI/server 不重复建设，T+N 评估与表现统计继续复用 DSA 已有 BacktestService，避免形成第二套回测真源。实时 source health 已在 `/status` 返回，历史稳定性由 `/source-history` 补齐。
 
 ## 收益
 

@@ -33,6 +33,7 @@ from src.config import Config
 from src.services import screening_service
 from src.services.screening import REFERENCE_REVISION
 from src.services.screening.config import Config as ScreeningPipelineConfig
+from src.services.screening.strategy import union_market_scopes
 from src.services.task_queue import TaskInfo, TaskStatus as QueueTaskStatus
 
 
@@ -161,6 +162,30 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         self.assertTrue(payload["available"])
         self.assertEqual(payload["engine"], "builtin")
         self.assertEqual(payload["reference_revision"], REFERENCE_REVISION)
+
+    def test_status_endpoint_exposes_supported_markets(self) -> None:
+        """HTTP 契约必须真的透出 supported_markets，而不只是服务内部有。
+
+        `ScreeningService.status()` 是按字段 allowlist 拼载荷的，`engine_status`
+        里多出来的键不会自动出现在响应里——闸门读得到、客户端看不到是可以同时
+        成立的。所以这里断言的是**端点返回值**，与断言 `_call_screening_status()`
+        的那个用例是两个面，不能互相替代。
+        """
+        payload = screening_endpoint.screening_status(config=self._config(enabled=True))
+
+        self.assertIn("supported_markets", payload)
+        self.assertTrue(payload["supported_markets"])
+        self.assertEqual(
+            payload["supported_markets"],
+            screening_service._call_screening_status()["supported_markets"],
+        )
+
+    def test_status_endpoint_omits_supported_markets_when_engine_unavailable(self) -> None:
+        """引擎探测失败时不写这个键，避免空集合被读成「没有市场可选」。"""
+        with patch("src.services.screening_service._call_screening_status", side_effect=_raise_screening_unavailable):
+            payload = screening_endpoint.screening_status(config=self._config(enabled=True))
+
+        self.assertNotIn("supported_markets", payload)
 
 
     def test_status_defaults_to_disabled(self) -> None:
@@ -3908,18 +3933,64 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["candidate_count"], 0)
 
     def test_screen_rejects_unsupported_market(self) -> None:
+        # 这里刻意不 patch `_call_screening_status`：那道闸门读的
+        # `supported_markets` 必须由真实实现产出。此前本用例把 status 换成
+        # `{"supported_markets": ["hk", "us"]}` 这个生产代码永远产不出的形状，
+        # 于是断言通过而闸门在生产里恒为死代码（真实 status 无该键，
+        # `_ensure_supported_market` 在 `if not supported_markets` 处提前返回）。
+        # 现在只替换策略来源，让状态载荷走真实推导路径。
         config = self._config(enabled=True)
         fake_module = _make_screening_core(
-            get_status=lambda: {"supported_markets": ["hk", "us"]},
+            list_strategies=lambda: [
+                SimpleNamespace(market_scope=["hk", "us"]),
+            ],
             screen=MagicMock(return_value=[]),
         )
 
-        with _patch_screening_core(fake_module):
+        with (
+            patch(
+                "src.services.screening_service.load_screening_strategies",
+                new=fake_module.list_strategies,
+            ),
+            patch("src.services.screening_service.run_screening_pipeline", new=fake_module.screen),
+        ):
             with self.assertRaises(HTTPException) as caught:
                 self._screen(config, market="cn", strategy="dual_low", max_results=5)
 
         self.assertEqual(caught.exception.status_code, 422)
         self.assertEqual(caught.exception.detail["error"], "screening_invalid_market")
+        # 闸门放行 ≠ 走到选股：被拒时不应发起任何选股
+        fake_module.screen.assert_not_called()
+
+    def test_status_supported_markets_drives_the_market_gate(self) -> None:
+        """status 的 supported_markets 必须真实存在，且与 pipeline 闸门同源。
+
+        这道守卫针对的是一类特定漂移：`_ensure_supported_market` 读的键一旦
+        没人写，闸门不会报错，只会静默变成死代码（非法市场降级到 pipeline 的
+        400）。所以这里同时断言「键存在且非空」「声称支持的都放行」「不支持的
+        以 422 拦下」「与 pipeline 用的并集逐位相等」。
+        """
+        status = screening_service._call_screening_status()
+        self.assertIn("supported_markets", status)
+        supported = status["supported_markets"]
+        self.assertTrue(supported, "status 未暴露任何支持市场，市场闸门会退化为死代码")
+
+        for market in supported:
+            screening_service._ensure_supported_market(market)
+
+        with self.assertRaises(HTTPException) as caught:
+            screening_service._ensure_supported_market("__unsupported__")
+
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertEqual(caught.exception.detail["error"], "screening_invalid_market")
+
+        # `_list_strategies` 返回的是归一化 dict（服务自己的序列化形态），
+        # 而 status 直接读 `load_screening_strategies` 返回的 StrategyInfo，
+        # 两条路径互为独立消费方，正好用来挡住其中一条被改而另一条没跟上的漂移。
+        expected = union_market_scopes(
+            info["market_scope"] for info in screening_service._list_strategies()
+        )
+        self.assertEqual(supported, expected)
 
     def test_screen_maps_pipeline_value_error_to_bad_request(self) -> None:
         config = self._config(enabled=True)

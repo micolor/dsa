@@ -5,6 +5,7 @@
 
 import hashlib
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict, fields
 from pathlib import Path
 
@@ -315,6 +316,25 @@ def list_strategies(strategies_dir: Path | None = None) -> list[StrategyInfo]:
             style=_style_to_dict(s.style),
         ))
     return infos
+
+
+def union_market_scopes(scopes: Iterable[Iterable[object]]) -> list[str]:
+    """Return the sorted union of the given ``market_scope`` collections.
+
+    This is the single source for "which markets can the engine screen". Both
+    the API-level gate (``screening_service._ensure_supported_market``, fed by
+    ``_call_screening_status``) and the pipeline gate
+    (``screening.pipeline.screen``) derive their answer here, so a change to a
+    strategy YAML cannot leave one gate claiming a market that the other
+    rejects. Callers pass the scope lists themselves because the two sides hold
+    different objects: ``StrategyInfo.market_scope`` on the API side,
+    ``Strategy.screening.market_scope`` on the pipeline side.
+
+    Blank entries are dropped so an empty or malformed ``market_scope`` cannot
+    produce an empty-string market in a user-facing error message.
+    """
+
+    return sorted({str(scope) for group in scopes for scope in (group or []) if str(scope)})
 
 
 def strategy_facets(strategies_dir: Path | None = None) -> dict[str, object]:

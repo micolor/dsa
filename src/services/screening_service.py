@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -36,6 +37,7 @@ from src.services.screening.config import Config as ScreeningPipelineConfig
 from src.services.screening.pipeline import screen as run_screening_pipeline
 from src.services.screening.source_guard import parse_source_timeout_seconds
 from src.services.screening.strategy import list_strategies as load_screening_strategies
+from src.services.screening.strategy import union_market_scopes
 from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -920,6 +922,14 @@ class ScreeningService:
             "reference_project": engine_status.get("reference_project"),
             "reference_revision": engine_status.get("reference_revision"),
         }
+        # 与 _ensure_supported_market 读到的是同一个值（都出自
+        # _call_screening_status），这里透出给客户端，让「哪些市场可选」在
+        # HTTP 契约上可见而不是只能靠试错。引擎探测失败时 engine_status 为空，
+        # 此时刻意不写这个键——空集合会被误读成「没有策略支持任何市场」，
+        # 与 source_health / diagnostics 的省略式一致。
+        supported_markets = engine_status.get("supported_markets")
+        if supported_markets:
+            payload["supported_markets"] = supported_markets
         source_health = _get_screening_source_health_snapshot()
         if source_health:
             payload["source_health"] = source_health
@@ -1572,21 +1582,59 @@ def _is_engine_available(engine_status: Any) -> bool:
     return True
 
 
+def _declared_market_scope(strategy: Any) -> List[Any]:
+    """Read one strategy's declared ``market_scope``, whatever shape it arrived in.
+
+    ``load_screening_strategies`` returns ``StrategyInfo`` objects, but tests and
+    any future loader may hand back mappings. Reading it with a bare
+    ``getattr(..., None)`` would quietly turn an unreadable strategy into "supports
+    nothing", which is the exact failure mode this helper exists to prevent: the
+    downstream gate treats an empty set as "no opinion" and goes silent rather
+    than refusing the request. So an unreadable shape raises here instead.
+    """
+
+    if isinstance(strategy, Mapping):
+        scope = strategy.get("market_scope")
+    else:
+        scope = getattr(strategy, "market_scope", None)
+
+    if scope is None:
+        name = strategy.get("name") if isinstance(strategy, Mapping) else getattr(strategy, "name", "?")
+        raise _screening_unavailable_exception(
+            f"选股策略 {name} 未声明 market_scope，无法确定支持的市场范围。",
+            diagnostics={"reason": "missing_market_scope", "stage": "status"},
+        )
+
+    if isinstance(scope, str):
+        return [scope]
+
+    return list(scope)
+
+
 def _call_screening_status() -> Dict[str, Any]:
     try:
-        strategy_count = len(load_screening_strategies())
+        strategies = load_screening_strategies()
     except Exception as exc:
         diagnostics = _log_unexpected_screening_exception("strategy_load", exc)
         raise _screening_unavailable_exception(
             f"选股功能状态检查失败：{exc}",
             diagnostics=diagnostics,
         ) from exc
+    # supported_markets 是 _ensure_supported_market 的唯一入参来源。此前这里不返回
+    # 该键（也不返回它读取的 markets / market 兜底键），于是那道市场闸门恒定在
+    # `if not supported_markets: return` 提前返回，实际从未拦下过任何请求；真正拦下
+    # 非法市场的只有 pipeline 里的闸门，报错也从 422 降级成了 pipeline 的 400。
+    # 取值与 pipeline 闸门同源（union_market_scopes），避免两处各说各的支持集合。
+    supported_markets = union_market_scopes(
+        _declared_market_scope(strategy) for strategy in strategies
+    )
     return {
         "available": True,
         "engine": "builtin",
         "version": SCREENING_VERSION,
         "contract_version": SCREENING_CONTRACT_VERSION,
-        "strategy_count": strategy_count,
+        "strategy_count": len(strategies),
+        "supported_markets": supported_markets,
         "reference_project": REFERENCE_PROJECT,
         "reference_revision": REFERENCE_REVISION,
     }

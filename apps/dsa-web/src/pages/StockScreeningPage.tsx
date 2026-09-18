@@ -324,7 +324,16 @@ const formatScreenMessage = (value: string) => {
   if (/^(?:LLM ranking prompt|LLM context) truncated:/i.test(value)) {
     return '';
   }
-  if (/^(?:Remote post-analysis cap|Risk veto excluded|Snapshot hard-filter waterfall|Daily hard-filter waterfall|Daily hard-filter rejections|Candidate context collected rows=)/i.test(value)) {
+  // 条数被上限压缩时必须让用户看见：调用方请求 N 条、上限只有 M 条（M < N）时返回条数
+  // 会少于请求条数，而此前这类消息被整条抹掉，页面上只剩「N 条候选」，读的人无从判断是
+  // 策略只产出这么多、还是被上限截住了。这两种上限（LLM_MAX_CANDIDATES / POST_ANALYSIS_MAX_PICKS）
+  // 是后端仅有的、会把结果压到低于请求条数的闸门，故一并透出。
+  const cappedOutput = value.match(/^(LLM candidate cap|Remote post-analysis cap) (\d+) < requested output (\d+);/i);
+  if (cappedOutput) {
+    const label = /^LLM candidate cap/i.test(cappedOutput[1]) ? '智能重排候选' : '远程后置分析';
+    return `候选数量受${label}上限限制：请求 ${cappedOutput[3]} 条，最多返回 ${cappedOutput[2]} 条。`;
+  }
+  if (/^(?:Risk veto excluded|Snapshot hard-filter waterfall|Daily hard-filter waterfall|Daily hard-filter rejections|Candidate context collected rows=)/i.test(value)) {
     return '';
   }
   if (/^Daily K-line (?:enrichment attempted|sources|quality flags|source ordering|source health):?/i.test(value)) {

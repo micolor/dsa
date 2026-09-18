@@ -39,7 +39,7 @@ from src.services.screening.risk import apply_portfolio_overlay, apply_risk_over
 from src.services.screening.scorer import compute_screen_scores, factor_score_columns
 from src.services.screening.selection_variant import apply_seeded_selection_variant
 from src.services.screening.snapshot import fetch_snapshot_with_fallback
-from src.services.screening.strategy import load_all_strategies
+from src.services.screening.strategy import load_all_strategies, union_market_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -108,14 +108,21 @@ def screen(
     if config is None:
         config = Config.from_env()
 
-    if market not in ("cn", "us"):
-        raise ValueError(f"Unsupported market: {market!r} (supported: cn, us)")
-
     run_id = uuid.uuid4().hex[:12]
     degradation: list[str] = []
 
     # 1. Load strategy
     strategies = load_all_strategies(config.strategies_dir)
+    # 市场闸门与策略能力同源：只接受已加载策略 market_scope 的并集，报错文案列出
+    # 真实支持的市场。此前这里硬编码 (cn, us)，会在策略级校验之前先宣称支持 us。
+    # 与 API 侧 _call_screening_status 共用 union_market_scopes，两处不会各说各的支持集合。
+    supported_markets = union_market_scopes(
+        loaded.screening.market_scope for loaded in strategies.values()
+    )
+    if supported_markets and market not in supported_markets:
+        raise ValueError(
+            f"Unsupported market: {market!r} (supported: {', '.join(supported_markets)})"
+        )
     if strategy not in strategies:
         available = ", ".join(strategies.keys()) or "(none)"
         raise ValueError(f"Strategy '{strategy}' not found. Available: {available}")
@@ -328,6 +335,18 @@ def screen(
         config.llm_max_candidates,
         len(df),
     )
+    # 上限把候选压到低于请求条数时必须留痕：picks 由 df_top 构建且此后只会被
+    # 子集化或重排、不会再扩充，所以 llm_max_candidates 实际上也封顶了最终返回条数。
+    # 调用方传的 max_results 大于该上限时（默认 20 > 12），要 20 条只会回 12 条，
+    # 而结果里此前没有任何字段说明「只重排了前 top_k 条」——after_filter_count 是
+    # 上限生效前的池子大小，语义是「硬过滤后」，读的人无法据此区分「策略只产出 12 只」
+    # 和「只看了 12 只」。这里与下方 remote post-analysis cap 用同款措辞与相同的
+    # `<上限> < requested output` 判据，便于前端统一识别为「条数被上限压缩」。
+    if top_k < output_count:
+        degradation.append(
+            f"LLM candidate cap {top_k} < requested output {output_count}; "
+            "results are limited to candidates that entered LLM ranking"
+        )
     df_top = df.head(top_k)
 
     # 6. Build Pick list

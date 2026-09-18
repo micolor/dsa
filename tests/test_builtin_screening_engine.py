@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import pandas as pd
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient as FastAPITestClient
 
@@ -510,6 +511,97 @@ def test_default_scorecard_scores_full_pool_before_seeded_rotation(monkeypatch) 
     assert len(variants) >= 2
 
 
+def _stub_pipeline_for_cap_test(monkeypatch, snapshot_df, *, llm_max_candidates: int, max_output: int):
+    """跑通 screen() 所需的最小桩：只保留快照/硬过滤/打分/上下文四步。"""
+    config = ScreeningRuntimeConfig(
+        strategies_dir=SCREENING_ROOT / "strategies",
+        post_analyzers=[],
+        llm_candidate_multiplier=2,
+        llm_max_candidates=llm_max_candidates,
+        risk_enabled=False,
+        portfolio_diversity_enabled=False,
+    )
+    strategy = Strategy(
+        name="demo",
+        display_name="Demo",
+        description="demo",
+        screening=ScreeningConfig(
+            enabled=True,
+            market_scope=["cn"],
+            hard_filters=HardFilterConfig(),
+            factor_weights={"value": 1.0},
+            max_output=max_output,
+        ),
+    )
+    monkeypatch.setattr(screening_pipeline, "load_all_strategies", lambda _path: {"demo": strategy})
+    monkeypatch.setattr(screening_pipeline, "fetch_snapshot_with_fallback", lambda *args, **kwargs: snapshot_df.copy())
+    monkeypatch.setattr(screening_pipeline, "apply_hard_filters", lambda df, _filters: df.copy())
+    monkeypatch.setattr(
+        screening_pipeline,
+        "compute_screen_scores",
+        lambda df, _screening: df.assign(screen_score=df["raw_score"]),
+    )
+    monkeypatch.setattr(screening_pipeline, "apply_dsa_provider_context", lambda picks, _context: [])
+    return config
+
+
+def _cap_test_snapshot() -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "code": f"00000{index}",
+            "name": f"Stock {index}",
+            "price": 10.0,
+            "change_pct": 1.0,
+            "amount": 200_000_000.0,
+            "raw_score": score,
+        }
+        for index, score in enumerate([84.2, 84.1, 84.0, 83.9, 83.8], start=1)
+    ])
+
+
+def test_llm_candidate_cap_is_reported_when_it_lowers_the_requested_output(monkeypatch) -> None:
+    """llm_max_candidates 压到请求条数以下时必须留痕。
+
+    picks 由 df_top 构建、此后只被子集化或重排而不再扩充，所以这个上限同时封顶了最终
+    返回条数：请求 10 条、上限 2 条时只会回 2 条。此前结果里没有任何字段说明这件事，
+    页面上只剩「N 条候选」，读的人无法区分「策略只产出这么多」和「被上限截住」——
+    after_filter_count 是上限生效之前的池子大小，语义是「硬过滤后」，据此也推不出来。
+    """
+    snapshot_df = _cap_test_snapshot()
+    snapshot_df.attrs.update({"snapshot_source": "sina", "source_errors": [], "fallback_used": False})
+    config = _stub_pipeline_for_cap_test(
+        monkeypatch, snapshot_df, llm_max_candidates=2, max_output=10,
+    )
+
+    result = screening_pipeline.screen("demo", use_llm=False, config=config)
+
+    assert any(
+        note.startswith("LLM candidate cap 2 < requested output 10;")
+        for note in result.degradation
+    ), result.degradation
+    # 上限同时封顶了返回条数本身——这正是要在界面上说清的事实。
+    assert len(result.picks) == 2
+
+
+def test_no_llm_candidate_cap_note_when_the_requested_output_still_fits(monkeypatch) -> None:
+    """上限没有压到请求条数以下时不得留痕。
+
+    multiplier 的用意是让 LLM 看到比请求量更多的候选、再从中挑，所以 top_k 大于
+    output_count 是正常状态而非降级；若此时也留痕，每个正常请求都会多一条噪声，
+    真正被截断的那次反而淹没在里面。
+    """
+    snapshot_df = _cap_test_snapshot()
+    snapshot_df.attrs.update({"snapshot_source": "sina", "source_errors": [], "fallback_used": False})
+    # output_count=3 -> top_k=min(max(6,3), 10, 5)=5 > 3，上限未生效。
+    config = _stub_pipeline_for_cap_test(
+        monkeypatch, snapshot_df, llm_max_candidates=10, max_output=3,
+    )
+
+    result = screening_pipeline.screen("demo", use_llm=False, config=config)
+
+    assert not [note for note in result.degradation if note.startswith("LLM candidate cap")], result.degradation
+
+
 def test_dsa_provider_context_respects_host_max_candidates_setting() -> None:
     picks = [
         Pick(rank=index + 1, code=f"00000{index + 1}", name=f"Stock {index + 1}", final_score=90.0, screen_score=90.0)
@@ -815,3 +907,56 @@ def test_fresh_snapshot_cache_reuses_fallback_from_same_source_chain(tmp_path, m
     assert second.attrs["snapshot_source"] == "last_good_cache"
     assert second.attrs["last_good_snapshot_source"] == "sina"
     assert second.attrs["fallback_used"] is False
+
+
+def _market_scope_strategy(name: str, market_scope: list[str]) -> Strategy:
+    return Strategy(
+        name=name,
+        display_name=name,
+        description=name,
+        screening=ScreeningConfig(
+            enabled=True,
+            market_scope=market_scope,
+            hard_filters=HardFilterConfig(),
+            factor_weights={"value": 1.0},
+            max_output=3,
+        ),
+    )
+
+
+def test_market_gate_reports_only_markets_that_strategies_support(monkeypatch) -> None:
+    """市场闸门口径必须与真实策略能力一致（同源于策略 YAML 的 ``market_scope``）。
+
+    回归：旧实现在加载策略前硬编码接受 ``("cn", "us")``，于是 ``market="us"``
+    先被告知 "supported: cn, us"，紧接着又被策略级校验拒绝——文案宣称支持的市场
+    实际并不支持。
+    """
+    strategies = {
+        "cn_only": _market_scope_strategy("cn_only", ["cn"]),
+        "cn_hk": _market_scope_strategy("cn_hk", ["cn", "hk"]),
+    }
+    config = ScreeningRuntimeConfig(strategies_dir=SCREENING_ROOT / "strategies")
+
+    class _SnapshotReached(Exception):
+        """闸门放行后到达取快照步骤的哨兵。"""
+
+    def _fail_snapshot(*_args, **_kwargs):
+        raise _SnapshotReached()
+
+    monkeypatch.setattr(screening_pipeline, "load_all_strategies", lambda _path: dict(strategies))
+    monkeypatch.setattr(screening_pipeline, "fetch_snapshot_with_fallback", _fail_snapshot)
+
+    # "us" 没有任何策略声明支持，文案只能列出真实支持的并集。
+    with pytest.raises(ValueError) as excinfo:
+        screening_pipeline.screen("cn_only", market="us", config=config)
+    message = str(excinfo.value)
+    assert "Unsupported market: 'us'" in message
+    assert "(supported: cn, hk)" in message
+
+    # 文案说支持的市场必须真的过闸门，否则仍是"宣称支持、实际拒绝"。
+    with pytest.raises(_SnapshotReached):
+        screening_pipeline.screen("cn_only", market="cn", config=config)
+
+    # 市场被支持、但该策略不支持时，仍由策略级校验给出准确文案。
+    with pytest.raises(ValueError, match="does not support market 'hk'"):
+        screening_pipeline.screen("cn_only", market="hk", config=config)

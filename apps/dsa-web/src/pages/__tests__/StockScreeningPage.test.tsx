@@ -1330,6 +1330,49 @@ describe('StockScreeningPage', () => {
     expect(screen.queryByText(/RemoteDisconnected/)).not.toBeInTheDocument();
   });
 
+  it('surfaces caps that lower the result count below the requested output', async () => {
+    getScreeningStatus.mockResolvedValueOnce({
+      enabled: true,
+      available: true,
+    });
+    screenStocks.mockResolvedValueOnce({
+      enabled: true,
+      candidates: [
+        {
+          rank: 1,
+          code: '600016',
+          name: '民生银行',
+          score: 80.12,
+          raw: {},
+        },
+      ],
+      candidateCount: 1,
+      llmRanked: true,
+      // 后端把 degradation 合并进 warnings，所以这两条会走到同一个格式器。
+      // 它们是仅有的会把结果压到低于请求条数的闸门：请求 20 条时调用方只会拿到
+      // 12 条 / 3 条，此前这类消息被整条抹掉，页面上只剩「1 条候选」。
+      warnings: [
+        'LLM candidate cap 12 < requested output 20; results are limited to candidates that entered LLM ranking',
+        'Remote post-analysis cap 3 < requested output 20; rotation eligibility constrained to remotely analyzed picks',
+      ],
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+
+    expect(
+      await screen.findByText('候选数量受智能重排候选上限限制：请求 20 条，最多返回 12 条。'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('候选数量受远程后置分析上限限制：请求 20 条，最多返回 3 条。'),
+    ).toBeInTheDocument();
+    // 内部诊断原文不得直接透给用户。
+    expect(screen.queryByText(/entered LLM ranking/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/rotation eligibility constrained/)).not.toBeInTheDocument();
+  });
+
   it('shows DSA enrichment summary, news, and enrichment metadata', async () => {
     getScreeningStatus.mockResolvedValueOnce({
       enabled: true,
