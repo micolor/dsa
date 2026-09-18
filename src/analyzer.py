@@ -1862,6 +1862,22 @@ def populate_decision_action_fields(
     return result
 
 
+# 基金 LLM 解读的字段清单。``GeminiAnalyzer.FUND_SYSTEM_PROMPT`` 用它渲染
+# 「必须输出以下字段」，``src/schemas/fund_report_schema.py`` 用它收口解析结果；
+# 两边共用同一份清单，改一处不会漏另一处（由 tests/test_fund_llm_prompt.py 守卫）。
+#
+# 只列**解读**字段：净值、区间收益、回撤、波动率、夏普、持仓、资产配置这些事实
+# 由 build_fund_report 确定性算出并直接进入载荷，不请模型复述，避免同一张卡片上
+# 出现两个可能互相矛盾的数据源。
+FUND_REPORT_FIELDS = (
+    "holdings_concentration",
+    "analysis_summary",
+    "operation_advice",
+    "risk_warning",
+    "sentiment_score",
+)
+
+
 class GeminiAnalyzer:
     """
     Gemini AI 分析器
@@ -2263,6 +2279,59 @@ class GeminiAnalyzer:
 - 不要编造价格、财报或新闻事实
 """
 
+    # 基金基线用中文书写，en/ko 由 ``_get_fund_system_prompt`` 追加输出语言段落，
+    # 与 ``_get_analysis_system_prompt`` 的既有做法一致：一份基线 + 语言后缀，
+    # 避免为三种语言维护三份会各自漂移的长 prompt。
+    # ``{fields}`` 由 ``FUND_REPORT_FIELDS`` 渲染，不得手写字段名。
+    FUND_SYSTEM_PROMPT = """你是一位场外基金投资分析师，负责生成【基金分析】报告。
+
+## 数据边界
+
+场外基金只有每日净值（单位净值 / 累计净值 / 日涨跌幅），没有盘中行情。
+**不得使用股票概念**：涨跌停、龙虎榜、北向资金、融资融券、成交量、均线、
+支撑压力位、筹码分布、主力资金流向。盘中价格、分时走势一律不得出现。
+
+基金的操作倾向是**申赎**（申购 / 赎回 / 持有观望），不是买卖点；
+不要输出买入价、卖出价、止损位、目标价。
+
+## 你的职责
+
+净值、区间收益、回撤、波动率、夏普比率、持仓明细、资产配置这些**事实**已经
+由系统确定性算出，会与你的输出一起展示。你**不要复述这些数字**，也不要给出
+与它们冲突的说法；你只负责在给定事实之上给出**解读与判断**：
+
+- 净值表现与回撤说明了什么（能否收复、波动是否高于同类）
+- 持仓集中度与行业暴露意味着什么风险
+- 综合来看，当前更适合申购、赎回还是持有观望，以及触发条件
+- 最需要提醒投资者的风险是什么
+
+数据不足时按已知信息作答，不得编造净值、持仓、基金经理、规模或成立日期。
+
+## 输出格式：基金解读 JSON
+
+请严格按照以下 JSON 格式输出，只输出一个 JSON 对象，不要输出多余文字：
+
+```json
+{
+  "holdings_concentration": "对持仓集中度的解读（如 前十大重仓占净值 68%，集中度较高）",
+  "analysis_summary": "综合解读：把净值表现、回撤、波动、持仓结构串成一个判断",
+  "operation_advice": "申赎倾向（申购 / 赎回 / 持有观望）及触发条件，不是买卖点",
+  "risk_warning": "最需要提醒投资者的风险",
+  "sentiment_score": 60
+}
+```
+
+字段口径：
+
+- `sentiment_score` 是 0-100 的整数，50 为中性；它衡量的是该基金的
+  风险收益吸引力，不是短期涨跌预期。
+- 其余字段是面向投资者的自然语言文本，不要只填一个形容词。
+
+必须输出以下字段：{fields}。
+
+缺失的字段用 null，不要虚构。
+"""
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -2397,6 +2466,45 @@ class GeminiAnalyzer:
 
 - 所有 JSON 键名保持不变。
 - `decision_type` 必须保持为 `buy|hold|sell`。
+- 所有面向用户的人类可读文本值必须使用中文。
+"""
+
+    def _get_fund_system_prompt(self, report_language: str) -> str:
+        """Build the fund analyzer system prompt with output-language guidance.
+
+        与 :meth:`_get_analysis_system_prompt` 同构：中文基线 + 语言后缀。
+        区别是这里不能复用股票版的语言段落——那段要求 ``decision_type`` 保持
+        ``buy|hold|sell``，而基金是申赎语义，没有买卖档。
+        """
+        lang = normalize_report_language(report_language)
+        base_prompt = self.FUND_SYSTEM_PROMPT.replace(
+            "{fields}", ",".join(FUND_REPORT_FIELDS)
+        )
+        if lang == "en":
+            return base_prompt + """
+
+## Output Language (highest priority)
+
+- Keep all JSON keys unchanged.
+- All human-readable JSON values must be written in English.
+- Do not translate fund codes, stock codes or fund names that have no established English name.
+- This includes `fund_name`, `holdings_concentration`, `analysis_summary`, `operation_advice`, `risk_warning`, holding names and every nested text value.
+"""
+        if lang == "ko":
+            return base_prompt + """
+
+## Output Language (highest priority)
+
+- Keep all JSON keys unchanged.
+- All human-readable JSON values must be written in Korean (한국어).
+- Do not translate fund codes, stock codes or fund names that have no established Korean name.
+- This includes `fund_name`, `holdings_concentration`, `analysis_summary`, `operation_advice`, `risk_warning`, holding names and every nested text value.
+"""
+        return base_prompt + """
+
+## 输出语言（最高优先级）
+
+- 所有 JSON 键名保持不变。
 - 所有面向用户的人类可读文本值必须使用中文。
 """
 
@@ -4668,7 +4776,81 @@ class GeminiAnalyzer:
             ) from exc
 
         self._validate_analysis_minimal_contract(data)
-    
+
+    def _validate_fund_json_response(self, text: str) -> None:
+        """Validate that *text* contains one parseable JSON object (fund contract).
+
+        与 :meth:`_validate_json_response` 同样是 ``_call_litellm`` 的
+        ``response_validator``，让「模型没吐 JSON」被当作模型失败而切到下一个
+        模型。区别是不校验 ``_validate_analysis_minimal_contract``——那是股票
+        契约（要求 ``decision_type`` 等字段），基金载荷没有这些字段。
+        """
+        try:
+            _json_str, data = self._extract_analysis_json_object(text)
+        except ValueError as exc:
+            reason = str(exc) or "invalid_json"
+            message = (
+                "JSON source is ambiguous"
+                if reason == "ambiguous_json"
+                else "No unique JSON object found in LLM response"
+            )
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason=reason,
+                message=message,
+            ) from exc
+        except Exception as exc:
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason="invalid_json",
+                message=str(exc)[:200],
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason="invalid_json",
+                message="Fund JSON root is not an object",
+            )
+
+    def run_fund_analysis(
+        self,
+        user_prompt: str,
+        report_language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run a fund analysis LLM call and return the parsed JSON dict.
+
+        复用既有 LLM 调用骨架（模型 fallback、JSON 抽取与修复），只把系统
+        prompt、用户上下文和校验契约换成基金域，不复制股票分析器。
+
+        与股票分析一致，系统 prompt 由分析器自己构造（``_get_fund_system_prompt``）；
+        调用方只管组织 ``user_prompt`` 里的基金数据，不必也不应触碰私有 prompt。
+
+        失败一律抛出，不在这一层吞掉：调用方（``src/services/fund_analysis.py``）
+        需要区分「LLM 正常返回」和「LLM 整条链路挂了」，后者要降级到确定性报告，
+        而不是让模型可能给出的半截文本冒充一次成功分析。
+
+        Raises:
+            GenerationError: 所有模型都未返回可解析的 JSON 对象。
+        """
+        config = self._get_runtime_config()
+        lang = normalize_report_language(
+            report_language or getattr(config, "report_language", "zh")
+        )
+        generation_config = {
+            "temperature": config.llm_temperature,
+            "max_output_tokens": 8192,
+        }
+        response_text, _model_used, _llm_usage = self._call_litellm(
+            user_prompt,
+            generation_config,
+            system_prompt=self._get_fund_system_prompt(lang),
+            stream=True,
+            response_validator=self._validate_fund_json_response,
+        )
+        _json_str, data = self._extract_analysis_json_object(response_text)
+        return data
+
     def _parse_text_response(
         self, 
         response_text: str, 

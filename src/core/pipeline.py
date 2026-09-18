@@ -449,16 +449,27 @@ class StockAnalysisPipeline:
                 )
                 from src.services.fund_analysis import (
                     build_fund_report,
+                    enrich_fund_report_with_llm,
                     map_fund_report_to_report_result,
                 )
                 profile = FundFetcher().get_profile(strip_fund_prefix(code))
                 report = build_fund_report(profile)
+                # LLM 增强层：产出解读（集中度/综合判断/申赎倾向/风险）。
+                # 内部已保证不抛错，失败返回 None，只影响增强部分的展示，
+                # 确定性报告不受影响（AGENTS.md §7）。
+                report_language = normalize_report_language(
+                    getattr(self.config, "report_language", "zh")
+                )
+                fund_llm = enrich_fund_report_with_llm(
+                    profile,
+                    analyzer=self.analyzer,
+                    report_language=report_language,
+                )
                 fund_result = map_fund_report_to_report_result(
                     report,
                     config=self.config,
-                    report_language=normalize_report_language(
-                        getattr(self.config, "report_language", "zh")
-                    ),
+                    report_language=report_language,
+                    fund_llm=fund_llm,
                 )
                 try:
                     self.db.save_analysis_history(
@@ -3149,16 +3160,22 @@ class StockAnalysisPipeline:
         try:
             self._emit_progress(12, f"{code}：正在准备分析任务")
             # Step 1: 获取并保存数据
-            success, error = self.fetch_and_save_stock_data(
-                code, current_time=current_time
-            )
-            
-            if not success:
-                logger.warning(f"[{code}] 数据获取失败: {error}")
-                # 即使获取失败，也尝试用已有数据分析
+            # 场外基金没有行情/K 线，`analyze_stock` 的基金分支自己取净值
+            # （FundFetcher）。这一步对基金全是空转：会依次打满股票数据源的
+            # 失败路径再落库，白等几十秒并刷一屏 ERROR 日志。
+            if is_fund_code(code):
+                self._emit_progress(16, f"{code}：基金净值准备完成")
             else:
-                self._emit_progress(16, f"{code}：行情数据准备完成")
-            
+                success, error = self.fetch_and_save_stock_data(
+                    code, current_time=current_time
+                )
+
+                if not success:
+                    logger.warning(f"[{code}] 数据获取失败: {error}")
+                    # 即使获取失败，也尝试用已有数据分析
+                else:
+                    self._emit_progress(16, f"{code}：行情数据准备完成")
+
             # Step 2: AI 分析
             if skip_analysis:
                 logger.info(f"[{code}] 跳过 AI 分析（dry-run 模式）")

@@ -146,5 +146,10 @@ Portfolio 允许 JP/KR 账户、交易和持仓快照进入现有链路，但会
 - 报告：给出单位净值、近 1 月/近 3 月/近 6 月/近 1 年收益、最大回撤、年化波动率、夏普比率与风险等级，始终包含「不构成投资建议」声明；Sharpe 使用配置 `FUND_RISK_FREE_RATE`（默认 `0.02`）计算。
 - 底层数据面：基于东方财富 F10 拉取当期**十大重仓股**（`jjcc`）与**资产配置**（`zcpz`，股票/债券/现金占比 + 净资产），透传到报告、历史 Markdown 与 Web 基金指标卡（重仓股表 + 占比卡）；仅作信息展示，不做任何买卖判断。无持仓（纯债/货基）或取数失败时对应区块为空，不阻断体检主流程。
 - 历史与展示：基金记录以 `report_type="fund"` 落库，历史列表/详情与 Web 报告卡片按净值体检语义展示，不渲染股票式骨架。
+- LLM 解读层（可选增强）：在确定性事实之上，由 LLM 给出持仓集中度解读、综合判断、**申赎倾向**与风险提示，挂在 `dashboard.llm`，由同一张基金指标卡的「AI 解读」区块展示。该层**不复述**净值/收益/回撤等事实数字，只给解读，避免同一张卡片出现两个数据源。
+  - 开关即「是否配置 LLM」，无独立配置项；未配置或调用失败、返回内容违反 `FundReportSchema`、返回全空字段时，增强层整体缺席并记 warning，确定性体检报告照常产出。
+  - 契约字段：`holdings_concentration` / `analysis_summary` / `operation_advice` / `risk_warning` / `sentiment_score`（0-100）。**不含**基金经理、规模、成立日期、回撤、重仓明细——前四项无数据源，后几项事实层已有。
+  - `AnalysisResult.sentiment_score` 保持确定性取值（50），不采用 LLM 分数：该字段是下游摘要排序依据，用随调用波动的模型分数排序会让同一条记录在不同运行间跳动。LLM 分数仅作为解读展示。
+  - 报告语言（`REPORT_LANGUAGE`）对增强层生效：`zh`/`ko` 用中文基线 + 对应语言段落，`en`/`ko` 追加各自 `Output Language` 段；该段**不复用股票版**（股票版要求 `decision_type` 保持 `buy|hold|sell`，基金无买卖档）。
 
-回滚方式：移除 `fund:` 前缀识别、基金净值数据源（`data_provider/fund_fetcher.py`）、体检报告（`src/services/fund_analysis.py`）、历史/API/Web 的基金分支，并删除本文档中的能力声明。
+回滚方式：移除 `fund:` 前缀识别、基金净值数据源（`data_provider/fund_fetcher.py`）、体检报告（`src/services/fund_analysis.py`）、历史/API/Web 的基金分支，并删除本文档中的能力声明。仅回滚 LLM 解读层时，移除 `FundReportSchema`、`GeminiAnalyzer.FUND_SYSTEM_PROMPT` / `_get_fund_system_prompt` / `run_fund_analysis`、`enrich_fund_report_with_llm` 与 pipeline 中的增强调用，以及 Web 的 `dashboard.llm` 渲染分支；确定性体检链路不受影响。

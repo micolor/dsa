@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AnalysisReport } from '../../../types/analysis';
 import { ReportSummary } from '../ReportSummary';
@@ -91,6 +91,26 @@ describe('ReportSummary', () => {
     expect(screen.getByLabelText('风险等级: 高')).toBeInTheDocument();
     expect(screen.getByTestId('fund-disclaimer')).toBeInTheDocument();
     expect(screen.getByText('不构成投资建议')).toBeInTheDocument();
+  });
+
+  it('renders the LLM insight block carried in the fund dashboard', () => {
+    // 后端 dashboard.llm 用 snake_case（holdings_concentration），
+    // 经 getDetail 的 deep camel 转换后此处读到 camelCase，与 metrics 同一机制。
+    const report = fundReport();
+    (report.details!.rawResult!.dashboard as Record<string, unknown>).llm = {
+      holdingsConcentration: '集中度较高',
+      analysisSummary: '近一年回撤明显但已收复大半。',
+      operationAdvice: '可考虑分批申购',
+      riskWarning: '行业暴露集中',
+      sentimentScore: 60,
+    };
+
+    render(<ReportSummary data={report} />);
+
+    const insight = within(screen.getByTestId('fund-llm-insight'));
+    expect(insight.getByText('综合解读')).toBeInTheDocument();
+    expect(insight.getByText('近一年回撤明显但已收复大半。')).toBeInTheDocument();
+    expect(insight.getByText('情绪分 60')).toBeInTheDocument();
   });
 
   it('still renders StockPriceChart for non-fund reports (no regression)', () => {

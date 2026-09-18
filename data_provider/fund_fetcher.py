@@ -266,7 +266,13 @@ class FundFetcher:
         nav_date = _parse_nav_date(latest.date)
         return (float(latest.unit_nav), nav_date) if nav_date else None
 
-    def get_profile(self, code: str, history_len: int = 250) -> FundProfile:
+    def get_profile(self, code: str, history_len: int = TRADING_DAYS + 1) -> FundProfile:
+        """取基金档案。``history_len`` 默认比 ``TRADING_DAYS`` 多一条。
+
+        区间收益按「末尾是最新、往前数 days 条」计算，因此要算满一年（252 个
+        交易日）至少需要 253 条；默认值与 ``TRADING_DAYS`` 对齐，避免「近 1 年」
+        因为窗口差一条而恒为空。
+        """
         base = strip_fund_prefix(code)
         nav = self._fetch_nav(base, history_len)
         name = self._fetch_name(base)
@@ -306,6 +312,13 @@ class FundFetcher:
             return None
 
     def _fetch_nav(self, code: str, limit: int) -> List[NavRecord]:
+        """取最近 ``limit`` 条净值，返回**按净值日期正序（旧 → 新）**的序列。
+
+        东财 lsjz 按日期倒序返回，且接口历史上的排法不保证稳定（见
+        :meth:`get_latest_nav`）。顺序在这里归一化，消费方才能约定「末尾是最新」：
+        :func:`compute_metrics` 的区间收益与最大回撤、``build_fund_report`` 的
+        ``latest_nav``、以及基金 LLM prompt 的「最新净值」都依赖这个约定。
+        """
         recs: List[NavRecord] = []
         page_size = 60
         page = 1
@@ -319,7 +332,8 @@ class FundFetcher:
                 break
             recs.extend(batch)
             page += 1
-        return recs[:limit]
+        # 先排序再截断：分页取多了要留下**最近**的 limit 条，而不是最旧的。
+        return sorted(recs, key=lambda r: r.date)[-limit:]
 
     def _fetch_name(self, code: str) -> str:
         try:

@@ -39,6 +39,19 @@ interface FundDashboard {
     cashPct?: number | string;
     netAsset?: number | string;
   };
+  /**
+   * LLM 增强层（未配置模型或调用失败时为 null）。
+   *
+   * 只承载**解读**：净值 / 收益 / 回撤 / 持仓这些事实由后端确定性算出，
+   * 走本接口的 `metrics` / `holdings` / `assetAllocation`，两者不重叠。
+   */
+  llm?: {
+    holdingsConcentration?: string | null;
+    analysisSummary?: string | null;
+    operationAdvice?: string | null;
+    riskWarning?: string | null;
+    sentimentScore?: number | string | null;
+  } | null;
 }
 
 /** 读取成有限数值，非法值统一回退为 null，避免 NaN/Infinity 污染展示。 */
@@ -133,6 +146,18 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
 
   const shouldShowDisclaimer = raw?.notInvestmentAdvice === true;
 
+  // LLM 增强层是可选的：未配置模型或调用失败时后端给 null，此处整段不渲染。
+  // 逐字段过滤，避免只回了一半字段时留下空白行。
+  const llm = raw?.llm ?? null;
+  const llmScore = toFiniteNumber(llm?.sentimentScore);
+  const llmRows: Array<{ label: string; value: string }> = [
+    { label: text.holdingsConcentration, value: llm?.holdingsConcentration ?? '' },
+    { label: text.analysisSummary, value: llm?.analysisSummary ?? '' },
+    { label: text.operationAdvice, value: llm?.operationAdvice ?? '' },
+    { label: text.riskWarning, value: llm?.riskWarning ?? '' },
+  ].filter((row) => row.value.trim().length > 0);
+  const shouldShowLlm = llmRows.length > 0 || llmScore !== null;
+
   return (
     <div data-testid="fund-metrics-card">
       <Card variant="bordered" padding="md" className="home-panel-card">
@@ -153,6 +178,26 @@ export const FundMetricsCard: React.FC<FundMetricsCardProps> = ({ dashboard, lan
           </div>
         ))}
       </div>
+        {shouldShowLlm && (
+          <div className="mt-4" data-testid="fund-llm-insight">
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p className="label-uppercase">{text.aiInsight}</p>
+              {llmScore !== null && (
+                <Badge variant="info" className="shrink-0 shadow-none">
+                  {`${text.sentimentScore} ${llmScore}`}
+                </Badge>
+              )}
+            </div>
+            <div className="space-y-2">
+              {llmRows.map((row) => (
+                <div key={row.label} className="rounded-lg border border-subtle p-3">
+                  <p className="label-uppercase">{row.label}</p>
+                  <p className="mt-1 text-sm text-foreground">{row.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {assetAllocation && (
           <div className="mt-4" data-testid="fund-asset-allocation">
             <p className="label-uppercase mb-2">{text.assetAllocation}</p>

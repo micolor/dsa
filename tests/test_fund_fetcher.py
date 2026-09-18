@@ -1,6 +1,13 @@
 # tests/test_fund_fetcher.py
 import math
+from datetime import date, timedelta
+from unittest.mock import patch
+
+import pytest
+
 from data_provider.fund_fetcher import (
+    TRADING_DAYS,
+    FundFetcher,
     parse_lsjz, compute_metrics, parse_pingzhongdata,
     is_fund_code, strip_fund_prefix, NavRecord,
 )
@@ -91,3 +98,104 @@ def test_compute_metrics_year():
     assert m["return_1m"] is not None
     assert m["max_drawdown"] == 0.0
     assert m["annual_volatility"] is not None
+
+
+# --- 净值序列顺序契约 ---------------------------------------------------------
+#
+# 东财 lsjz 接口按净值日期倒序返回，而 compute_metrics / build_fund_report /
+# build_fund_llm_user_prompt 都按「列表末尾是最新一条」取数。顺序必须在数据源
+# 边界归一化，否则：
+#   - latest_nav 会取到窗口内最旧的一条（净值显示为一年前）；
+#   - 区间收益 / 最大回撤会在时间倒序的序列上计算，结论与事实相反。
+# 下面这组用例守的就是这个边界。
+
+
+def _lsjz_page(rows):
+    """按东财 lsjz 的响应结构包装一页净值。"""
+    return {"Data": {"LSJZList": [
+        {"FSRQ": d, "DWJZ": str(v), "LJJZ": str(round(v * 1.5, 4)), "JZZZL": "0.00"}
+        for d, v in rows
+    ]}}
+
+
+def _nav_rows(n, newest_first=False):
+    """生成 n 个连续交易日的 (date, nav)，nav 逐日递增，便于断言方向。"""
+    start = date(2025, 1, 1)
+    rows = [((start + timedelta(days=i)).isoformat(), 1.0 + i * 0.001) for i in range(n)]
+    return list(reversed(rows)) if newest_first else rows
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _fetch_nav_with_pages(fetcher, pages, limit):
+    """让 requests.get 按页返回给定 payload，最后一页之后返回空页。"""
+    calls = {"n": 0}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        idx = calls["n"]
+        calls["n"] += 1
+        if idx < len(pages):
+            return _FakeResponse(pages[idx])
+        return _FakeResponse({"Data": {"LSJZList": []}})
+
+    with patch("data_provider.fund_fetcher.requests.get", side_effect=fake_get):
+        return fetcher._fetch_nav("003095", limit)
+
+
+def test_fetch_nav_normalizes_to_chronological_order():
+    """接口倒序返回时，_fetch_nav 也必须给出「旧 → 新」的正序序列。"""
+    rows = _nav_rows(80, newest_first=True)
+    pages = [_lsjz_page(rows[:60]), _lsjz_page(rows[60:])]
+
+    recs = _fetch_nav_with_pages(FundFetcher(), pages, limit=80)
+
+    dates = [r.date for r in recs]
+    assert dates == sorted(dates), "nav_history 必须按日期正序，末尾为最新"
+    assert recs[-1].unit_nav == pytest.approx(1.079)
+    assert recs[0].unit_nav == pytest.approx(1.0)
+
+
+def test_fetch_nav_keeps_the_most_recent_records():
+    """分页超出 limit 时，截断必须保留最近的 limit 条，而不是最旧的。"""
+    rows = _nav_rows(120, newest_first=True)
+    pages = [_lsjz_page(rows[:60]), _lsjz_page(rows[60:])]
+
+    recs = _fetch_nav_with_pages(FundFetcher(), pages, limit=100)
+
+    assert len(recs) == 100
+    # 最新一条 = 全部 120 条里的最后一条
+    assert recs[-1].unit_nav == pytest.approx(1.0 + 119 * 0.001)
+    # 最旧一条 = 120 条里倒数第 100 条
+    assert recs[0].unit_nav == pytest.approx(1.0 + 20 * 0.001)
+
+
+def test_fetch_nav_tolerates_ascending_payload():
+    """接口若改为正序返回，归一化逻辑不得把序列倒过来。"""
+    rows = _nav_rows(80, newest_first=False)
+    pages = [_lsjz_page(rows[:60]), _lsjz_page(rows[60:])]
+
+    recs = _fetch_nav_with_pages(FundFetcher(), pages, limit=80)
+
+    assert [r.date for r in recs] == sorted(r.date for r in recs)
+    assert recs[-1].unit_nav == pytest.approx(1.079)
+
+
+def test_default_history_window_can_compute_one_year_return():
+    """默认窗口必须大于 TRADING_DAYS，否则「近 1 年」永远是空值。"""
+    import inspect
+
+    default_len = inspect.signature(FundFetcher.get_profile).parameters["history_len"].default
+    assert default_len > TRADING_DAYS
+
+    recs = _mk([(date(2025, 1, 1) + timedelta(days=i)).isoformat() for i in range(default_len)],
+               [1.0 + i * 0.001 for i in range(default_len)])
+    assert compute_metrics(recs)["return_1y"] is not None
