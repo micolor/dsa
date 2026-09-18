@@ -165,4 +165,40 @@ describe('PaperTradingPage', () => {
     await waitFor(() => expect(screen.getByText('测试')).toBeInTheDocument());
     expect(screen.getByText('Buy')).toBeInTheDocument();
   });
+
+  it('renders a readable label for the dispositions that mean "wanted to trade but could not"', async () => {
+    // 这几种 disposition 此前分别混在 ignored / hold 里，页面上显示成「忽略」「维持」，
+    // 而实际原因是账户侧被现金或交易单位挡住了。新增取值若漏配标签，徽章会回退成
+    // 裸英文串（`no_cash`），后端侧的 tests/test_paper_disposition_labels.py 守住了
+    // 「标签存在」，这里守住「标签真的渲染到了页面上」。
+    mockGetSignals.mockResolvedValue({
+      items: [
+        { signalId: 'sig-nc', action: 'buy', disposition: 'no_cash', stockCode: '600519', stockName: '贵州茅台', processedAt: '2026-01-05 10:00:00' },
+        { signalId: 'sig-lt', action: 'buy', disposition: 'lot_too_small', stockCode: '000001', stockName: '平安银行', processedAt: '2026-01-05 10:00:00' },
+        { signalId: 'sig-np', action: 'sell', disposition: 'no_position', stockCode: '300750', stockName: '宁德时代', processedAt: '2026-01-05 10:00:00' },
+        { signalId: 'sig-nf', action: 'buy', disposition: 'no_fill', stockCode: '601318', stockName: '中国平安', processedAt: '2026-01-05 10:00:00' },
+      ],
+      total: 4,
+    });
+
+    render(
+      <UiLanguageProvider>
+        <PaperTradingPage />
+      </UiLanguageProvider>
+    );
+
+    // 默认落在持仓页且本用例没有持仓，先切到信号页。
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Signals' })).toBeInTheDocument());
+    screen.getByRole('button', { name: 'Signals' }).click();
+
+    await waitFor(() => expect(screen.getByText('No cash')).toBeInTheDocument());
+    expect(screen.getByText('Below one lot')).toBeInTheDocument();
+    expect(screen.getByText('No position')).toBeInTheDocument();
+    expect(screen.getByText('No fill')).toBeInTheDocument();
+
+    // 取值本身不得直接透给用户。
+    for (const raw of ['no_cash', 'lot_too_small', 'no_position', 'no_fill']) {
+      expect(screen.queryByText(raw)).not.toBeInTheDocument();
+    }
+  });
 });

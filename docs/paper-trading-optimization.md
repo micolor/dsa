@@ -387,3 +387,44 @@
 
 - 分类是**展示层**信息，不影响配置读写：`.env`、注册表校验、`/api/v1/config` 响应结构与热重载行为均未变，老配置文件不需要迁移。
 - 「基础设置」是设置页的默认落地 Tab（`useSystemConfig.ts:81` 的初始 `activeCategory`），`PaperAccountCard` 挂上去后打开设置页即渲染；而 `GET /api/v1/paper/account` 走 `get_or_create_account()` 会**写库**（无账户时建账户）。这不是本次引入的新副作用——`runtime_scheduler.py` 的模拟盘日估值后台任务本就在服务启动时调 `get_or_create_account()`，任何在跑的服务都已存在账户；但若把「设置页首屏会创建账户」当成问题，需另立改动（例如卡片先只读探测、或账户获取与创建拆成两个端点）。
+## 16. 方向 K：“想做但没做成”的成交结果区分（已实施）
+
+**问题**
+
+`disposition` 是「这条信号最终怎么处理」的唯一落库字段，也是模拟盘信号列表里那颗徽章的取值。此前它把两类语义完全不同的结果混在一起：
+
+1. **信号本身无可执行动作**（hold / watch / avoid / alert）→ `ignored`，正确。
+2. **信号要求交易、但账户侧没能执行**→ 也被记成 `ignored`（无持仓时买不进）或 `hold`（有持仓时加不动）。
+
+第 2 类里，页面上会出现「维持」——这个词**主动断言系统认为无需动作**，而真实原因是买入被现金挡住了。用户看到「维持」不会去查现金，只会以为策略没给建议。真实场景：账户现金耗尽后再来一条 buy 信号，列表显示「维持」，实际系统是想买而买不了。
+
+**改动**
+
+只区分成因、**不改行为**：这三种结果照旧被消费（不重试、不触发重新估值），也与 `data_unavailable` 的「可重试」正交。
+
+- `src/services/paper_service.py`：新增三个模块级常量并替换对应返回值——
+  - `no_cash`：目标权重内仍有空间，但账户可用现金已耗尽（买入/加仓路径）；
+  - `lot_too_small`：有现金或有持仓，但按最小交易单位取整后数量为 0（买入/加仓/减仓路径）；
+  - `no_position`：收到 `sell`/`reduce`，但没有可减的持仓。
+  - 保留 `_handle_signal` 的 `ignored`（信号本身无可执行动作）与加仓路径的 `hold`（已在目标权重）——这两个是**真正的「无需动作」**，语义没变。
+- `apps/dsa-web/src/locales/featureText.ts`：`PAPER_TRADING_TEXT` 的 zh / en 各补 `dispNoCash` / `dispLotTooSmall` / `dispNoPosition`（`现金不足` / `不足一手` / `无持仓`；`No cash` / `Below one lot` / `No position`）。
+- `apps/dsa-web/src/components/paper/PaperRecordsList.tsx`：`dispositionMeta` 增加三个条目，前两个用 `warning`（「账户有约束」）而非 `default`（「无需动作」）。
+
+**兼容性**
+
+- **无 schema 变更、无数据迁移**。`disposition` 是 `String(16)` 的自由字符串，历史行保持旧值；新旧值并存。`api/v1/schemas/paper.py` 里 `disposition: str` 不设白名单，接口形状不变。
+- Web 对未知值原样回退（`PaperRecordsList` 的 `disposition?.label ?? record.disposition`），因此**旧后端配新前端**不会崩，只是看不到新标签；**新后端配旧前端**会显示裸英文串，这是本仓库既有的兼容契约（与 `no_fill` 引入时一致）。
+- `no_position` = 11 字符、`lot_too_small` = 13 字符，均在 `String(16)` 之内（`ignored_no_position` 这类带前缀的名字会超限，故未采用）。
+
+**验证**
+
+- `tests/test_paper_service.py` 新增 4 个用例：现金为 0 的 buy 记 `no_cash`、资金不足一手的 buy 记 `lot_too_small`、无持仓的 sell 记 `no_position`、加仓增量不足一手记 `lot_too_small`（非 `hold`）。反向验证：把返回改回历史取值后 4 个用例全红，`test_hold_signal_ignored` 仍绿。
+- `tests/test_paper_disposition_labels.py` 新增跨层守卫：从 `paper_service` 的三个产出方法解析可持久化的 `disposition` 集合（含 `disposition = "..."` 赋值，不只是 `return`），与 `PaperRecordsList.dispositionMeta` 做**双向**集合比对，并校验 zh / en 文案都存在。反向验证了四条：删 `dispositionMeta` 条目、删 en 文案、改后端返回字面量、改后端赋值 —— 各自都能让对应断言变红。
+- `apps/dsa-web/src/pages/__tests__/PaperTradingPage.test.tsx` 新增渲染用例：`no_cash` / `lot_too_small` / `no_position` / `no_fill` 在信号页渲染出可读标签，且裸取值不出现在页面上。反向验证：改掉 en 文案后该用例变红。
+
+**边界与已知限制**
+
+- 只解决**可见性**，不解决**可执行性**：现金不足仍然是现金不足，本次只是让它不再被显示成「维持」。
+- `_open_or_add` 加仓路径的 `spend <= 0` 分支在正常数据下不可达——`_default_position_weight` 把目标权重钳在 `(0, 1]`，`_spendable_cash` 仅在 `available_cash == 0` 时返回 0，此时目标权重守卫（`current_value >= target_value`）会先返回 `hold`。该分支作为防御保留并已注明，未删除（无法证明所有存量数据下都不可达，例如存储的 `market_value == 0` 但另有持仓）。
+- 通知侧未改动：`paper_notify._action_label` 只区分 `added` / `closed`，新增取值走既有 fallback。
+

@@ -92,6 +92,20 @@ _NO_FILL = "no_fill"
 _FILLED = "filled"
 _FILL_UNAVAILABLE = "unavailable"
 
+# 明确「想做但没做成」的三种成因，与 `ignored`（信号本身就是 hold/watch/avoid/alert，
+# 无事可做）区分开。此前这几种一律记成 `ignored`（无持仓时买不进）或 `hold`（有持仓
+# 时加不动），于是「账户没现金了」在页面上显示成「维持」——正好把话说反：用户看到
+# 「维持」会以为系统认为无需动作，实际是买入被现金挡住了。
+#
+# 只改记录值、不改行为：这三种都照旧被消费（不重试、不触发重新估值，见
+# `_PORTFOLIO_CHANGING_DISPOSITIONS`），也与 `_DATA_UNAVAILABLE` 的「可重试」正交。
+# `disposition` 是 String(16) 的自由字符串，历史行保持旧值、不迁移；Web 对未知值
+# 原样回退（`PaperRecordsList` 的 `disposition?.label ?? record.disposition`），
+# 因此新旧值可以并存。
+_NO_CASH = "no_cash"  # 目标权重内仍有空间，但账户可用现金已耗尽
+_LOT_TOO_SMALL = "lot_too_small"  # 有现金/有持仓，但按最小交易单位取整后为 0
+_NO_POSITION = "no_position"  # 收到 sell/reduce 信号，但没有可减的持仓
+
 # Per-account serialization locks. Paper writes (signal consumption, daily
 # valuation, backfill, manual refresh) mutate cash/positions/trades across
 # several independent commits. Without serialization, concurrent threads would
@@ -533,10 +547,10 @@ class PaperService:
             # Cap the buy to what cash actually covers; lot rounding never exceeds this.
             spend = min(target_value, spendable)
             if spend <= 0:
-                return "ignored"
+                return _NO_CASH
             quantity = self._buy_quantity(spend, buy_price, market=signal.market)
             if quantity <= 0:
-                return "ignored"
+                return _LOT_TOO_SMALL
             amount = buy_price * quantity
             fee = self._fee_for(amount, "buy", signal.market)
             self.paper_repo.upsert_position(
@@ -581,10 +595,14 @@ class PaperService:
             return "hold"
         spend = min(target_value - current_value, spendable)
         if spend <= 0:
-            return "hold"
+            # 防御分支：`position_weight` 被 `_default_position_weight` 夹在 (0, 1]，
+            # 且现金不会被花成负数，所以「现金耗尽」通常已经先被上面的目标权重闸门
+            # 拦成 `hold`（现金为 0 时 `target_value = weight * current_value <= current_value`）。
+            # 只有持仓行的 `market_value` 落在退化状态（本仓为 0 而净值仍来自别处）时才会走到这里。
+            return _NO_CASH
         quantity = self._buy_quantity(spend, buy_price, market=signal.market)
         if quantity <= 0:
-            return "hold"
+            return _LOT_TOO_SMALL
         prev_qty = float(position.quantity or 0)
         prev_cost = float(position.avg_cost or buy_price)
         new_qty = prev_qty + quantity
@@ -632,7 +650,7 @@ class PaperService:
         code = signal.stock_code
         position = self.paper_repo.get_open_position(account.id, code)
         if position is None:
-            return "ignored"
+            return _NO_POSITION
 
         sell_price = self._close_price(code, as_of) or position.current_price
         if not sell_price or sell_price <= 0:
@@ -643,7 +661,7 @@ class PaperService:
         quantity = float(position.quantity or 0) * fraction
         quantity = self._round_lot(quantity, market=signal.market)
         if quantity <= 0:
-            return "ignored"
+            return _LOT_TOO_SMALL
 
         remaining = float(position.quantity or 0) - quantity
         if remaining <= 0:

@@ -51,6 +51,12 @@ export const PaperRecordsList: React.FC<Props> = ({
     ignored: { label: text.dispIgnored, variant: 'default' },
     // 限价单当日区间没碰到计划买点 -> 不成交（区别于数据缺失，信号已消费）。
     no_fill: { label: text.dispNoFill, variant: 'warning' },
+    // 想做但没做成：这三种此前分别混在「忽略」和「维持」里，用户看到「维持」会以为
+    // 系统判定无需动作，实际是买入/加仓被现金或交易单位挡住了。用 warning 而非
+    // default，因为它们是「账户有约束」而不是「无需动作」。
+    no_cash: { label: text.dispNoCash, variant: 'warning' },
+    lot_too_small: { label: text.dispLotTooSmall, variant: 'warning' },
+    no_position: { label: text.dispNoPosition, variant: 'default' },
   };
   // 成交流水 reason：区分「主动跟单」与「被动风控退出」，用徽章+颜色一眼可辨。
   // 未知值回退为原样文本，避免丢信息。

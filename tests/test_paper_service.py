@@ -156,6 +156,72 @@ def test_hold_signal_ignored(isolated_db, service):
     assert service.get_positions(account_id) == []
 
 
+def test_buy_without_cash_reports_no_cash_instead_of_ignored(isolated_db, service):
+    """现金耗尽时买入被跳过：与 hold/watch 的「无事可做」不是一回事。"""
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    account_id = service.reset_account(initial_capital=50000.0)["account_id"]
+    # reset_account 只收正数，所以先把账户建出来再把现金清零。
+    service.paper_repo.update_account(account_id, {"cash": 0.0})
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+
+    result = service.process_signal(sig.id)
+
+    assert result["disposition"] == "no_cash"
+    assert service.get_positions(account_id) == []
+
+
+def test_buy_below_one_lot_reports_lot_too_small(isolated_db, service):
+    """有现金但买不起一手：成因是交易单位，不是没钱也不是无需动作。"""
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    # 2 万 × 20% 目标仓位 = 4000 元，按 100 元/股不足 100 股（A 股一手）。
+    account_id = service.reset_account(initial_capital=20000.0)["account_id"]
+    sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+
+    result = service.process_signal(sig.id)
+
+    assert result["disposition"] == "lot_too_small"
+    assert service.get_positions(account_id) == []
+
+
+def test_sell_without_position_reports_no_position(isolated_db, service):
+    """没有可减的持仓：信号本身有动作，只是账户里没有对应仓位。"""
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    sig = _make_signal(isolated_db, action="sell", created_at=datetime(2026, 1, 5))
+
+    result = service.process_signal(sig.id)
+
+    assert result["disposition"] == "no_position"
+
+
+def test_add_below_one_lot_reports_lot_too_small_instead_of_hold(isolated_db, service):
+    """加仓取整为 0 以前报 `hold`，等于把「买不动」说成「无需动作」。"""
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "600519", d2, 100, 100, 100, 100)
+    account_id = service.reset_account(initial_capital=50000.0)["account_id"]
+    open_sig = _make_signal(
+        isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5)
+    )
+    assert service.process_signal(open_sig.id)["disposition"] == "opened"
+
+    # 「加仓但买不起一手」比看起来窄：目标权重闸门在现金闸门之前，`position_weight`
+    # 又被夹在 (0, 1]，所以现金为 0 时 `current_value >= target_value` 会先返回 hold。
+    # 要走到这里必须 C > 4 × 持仓市值：持仓 1 万、现金 40010 时
+    # spend = 0.2 × (40010 - 40000) = 2 元，按 100 元/股不足一手。
+    service.paper_repo.update_account(account_id, {"cash": 40010.0})
+    add_sig = _make_signal(
+        isolated_db, action="add", entry_high=100.0, created_at=datetime(2026, 1, 6)
+    )
+
+    result = service.process_signal(add_sig.id)
+
+    assert result["disposition"] == "lot_too_small"
+
+
 def test_sell_closes_position(isolated_db, service):
     d1 = date(2026, 1, 5)
     d2 = date(2026, 1, 6)
