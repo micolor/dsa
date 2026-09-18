@@ -11,6 +11,8 @@ import {
   ApiErrorAlert,
   AppPage,
   Card,
+  Checkbox,
+  Collapsible,
   ConfirmDialog,
   Drawer,
   EmptyState,
@@ -18,6 +20,7 @@ import {
   Pagination,
   Select,
 } from '../components/common';
+import { DecisionSignalActionQueue } from '../components/decision-signals/DecisionSignalActionQueue';
 import {
   DecisionSignalCard,
   DecisionSignalDetails,
@@ -44,6 +47,7 @@ import type {
   DecisionSignalStatus,
   DecisionProfile,
   DecisionProfileDisplay,
+  SkillOpinionPerformanceBucket,
   SkillOpinionPerformanceStatsResponse,
 } from '../types/decisionSignals';
 import type { Market, StockIndexItem } from '../types/stockIndex';
@@ -56,6 +60,8 @@ import {
   getDecisionSignalMarketLabel,
   getDecisionSignalMarketPhaseLabel,
   getDecisionSignalSourceTypeLabel,
+  getSkillLabel,
+  getSkillOpinionSampleStatusLabel,
 } from '../utils/decisionSignalLabels';
 import { getDecisionProfile } from '../utils/decisionSignalProfile';
 import { parseDecisionSignalDate } from '../utils/decisionSignalTime';
@@ -63,6 +69,7 @@ import { areStockCodesEquivalent } from '../utils/stockCode';
 
 const PAGE_SIZE = 20;
 const DEDUPE_PAGE_SIZE = 100;
+const QUEUE_PAGE_SIZE = 100;
 const TIMELINE_PAGE_SIZE = 100;
 const STOCK_CANDIDATE_LIMIT = 8;
 const DAY_MS = 86400_000;
@@ -117,7 +124,7 @@ type PendingStatusChange = {
 
 type SelectedSignal = {
   item: DecisionSignalItem;
-  source: 'list' | 'latest' | 'timeline' | 'persisted';
+  source: 'list' | 'latest' | 'timeline' | 'persisted' | 'queue';
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -163,6 +170,20 @@ const DEFAULT_LIST_FILTERS: ListFilters = {
   status: 'active',
 };
 
+/**
+ * 判定列表筛选表单是否处于「有活跃筛选」状态。
+ *
+ * 必须与 DEFAULT_LIST_FILTERS 逐字段比较：DEFAULT_LIST_FILTERS.status 本身就是
+ * 'active'，按真值判断会导致恒为 true。也不能复用 buildActiveFilterChips —— 它
+ * 同样用真值判断，因此默认状态下就恒非空。
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 纯判定函数，与 DEFAULT_LIST_FILTERS 同源，就近导出便于复用与单测
+export function hasActiveListFilters(filters: ListFilters): boolean {
+  return (Object.keys(DEFAULT_LIST_FILTERS) as Array<keyof ListFilters>).some(
+    (key) => filters[key] !== DEFAULT_LIST_FILTERS[key],
+  );
+}
+
 const DEFAULT_TIMELINE_FILTERS: TimelineFilters = {
   market: '',
   range: '90d',
@@ -193,7 +214,13 @@ function getInitialFilters(search = typeof window === 'undefined' ? '' : window.
   };
 }
 
-function toListParams(filters: ListFilters, page: number, pageSize: number = PAGE_SIZE): DecisionSignalListParams {
+function toListParams(
+  filters: ListFilters,
+  page: number,
+  pageSize: number = PAGE_SIZE,
+  holdingOnly: boolean = false,
+): DecisionSignalListParams {
+  const holding = holdingOnly ? { holdingOnly: true } : {};
   const sourceReportId = parseSourceReportId(filters.sourceReportId);
   if (sourceReportId !== undefined) {
     return {
@@ -201,6 +228,7 @@ function toListParams(filters: ListFilters, page: number, pageSize: number = PAG
       sourceType: 'analysis',
       page,
       pageSize,
+      ...holding,
     };
   }
 
@@ -213,6 +241,7 @@ function toListParams(filters: ListFilters, page: number, pageSize: number = PAG
     status: filters.status || undefined,
     page,
     pageSize,
+    ...holding,
   };
 }
 
@@ -421,6 +450,30 @@ function formatStatPercent(value: number | null | undefined): string {
   return formatted === '-' ? formatted : `${formatted}%`;
 }
 
+interface SkillStatsProgress {
+  buckets: number;
+  pending: number;
+  evaluated: number;
+  observational: number;
+  unable: number;
+  maxEvaluated: number;
+}
+
+/** 汇总 Skill 表现各 bucket 的样本进展：未达标时表格不渲染，改为展示这份进度。 */
+function summarizeSkillStatsProgress(buckets: SkillOpinionPerformanceBucket[]): SkillStatsProgress {
+  return buckets.reduce<SkillStatsProgress>(
+    (progress, bucket) => ({
+      buckets: progress.buckets + 1,
+      pending: progress.pending + bucket.pending,
+      evaluated: progress.evaluated + bucket.evaluated,
+      observational: progress.observational + bucket.observational,
+      unable: progress.unable + bucket.unable,
+      maxEvaluated: Math.max(progress.maxEvaluated, bucket.evaluated),
+    }),
+    { buckets: 0, pending: 0, evaluated: 0, observational: 0, unable: 0, maxEvaluated: 0 },
+  );
+}
+
 const DecisionSignalsPage: React.FC = () => {
   const { t } = useUiLanguage();
   const actionLabels = useMemo(() => buildDecisionActionLabelMap(t), [t]);
@@ -429,6 +482,14 @@ const DecisionSignalsPage: React.FC = () => {
   const [appliedFilters, setAppliedFilters] = useState<ListFilters>(() => getInitialFilters());
   const [page, setPage] = useState(1);
   const [dedupeLatest, setDedupeLatest] = useState(false);
+  const [holdingOnly, setHoldingOnly] = useState(false);
+  // 折叠区状态：筛选表单与统计区默认收起，收起时不挂载内容（见各自的 render）。
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [statsExpanded, setStatsExpanded] = useState(false);
+  const [rawQueueItems, setRawQueueItems] = useState<DecisionSignalItem[]>([]);
+  const [rawQueueLoading, setRawQueueLoading] = useState(true);
+  const [rawQueueError, setRawQueueError] = useState<ParsedApiError | null>(null);
+  const queueRequestIdRef = useRef(0);
   const [items, setItems] = useState<DecisionSignalItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -437,10 +498,12 @@ const DecisionSignalsPage: React.FC = () => {
   const [pendingStatus, setPendingStatus] = useState<PendingStatusChange | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [outcomeStats, setOutcomeStats] = useState<DecisionSignalOutcomeStatsResponse | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
+  // 统计区默认收起且不请求：两个 loading 的初值必须是 false，否则未展开时
+  // 页面刷新按钮会被永久禁用。
+  const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<ParsedApiError | null>(null);
   const [skillStats, setSkillStats] = useState<SkillOpinionPerformanceStatsResponse | null>(null);
-  const [skillStatsLoading, setSkillStatsLoading] = useState(true);
+  const [skillStatsLoading, setSkillStatsLoading] = useState(false);
   const [skillStatsError, setSkillStatsError] = useState<ParsedApiError | null>(null);
   const [skillStatsRunning, setSkillStatsRunning] = useState(false);
   const [stockDraft, setStockDraft] = useState('');
@@ -483,6 +546,18 @@ const DecisionSignalsPage: React.FC = () => {
   const statusUpdateInFlightRef = useRef(false);
   const mountedRef = useRef(true);
   const timelineMarketSourceRef = useRef<TimelineMarketSource>(null);
+
+  // 「去重最新」打开、且列表没有任何活跃筛选时，主列表的查询（status=active、
+  // pageSize=DEDUPE_PAGE_SIZE、holdingOnly）才与待处理区自己的宽查询等价
+  // （DEDUPE_PAGE_SIZE 与 QUEUE_PAGE_SIZE 同为 100，条数上限也一致），
+  // 此时复用主列表结果以避免对同一份数据发两次请求。
+  // 只要存在活跃筛选（含 status='' 的「全部状态」与 sourceReportId 深链），主列表就会
+  // 带上这些筛选而待处理区不会，两者不再等价：待处理区必须发自己的宽查询，否则
+  // 「可以动手」会拿到被筛掉的、甚至已失效的信号。
+  const reuseListForQueue = dedupeLatest && !hasActiveListFilters(appliedFilters);
+  const queueItems = reuseListForQueue ? items : rawQueueItems;
+  const queueLoading = reuseListForQueue ? loading : rawQueueLoading;
+  const queueError = reuseListForQueue ? error : rawQueueError;
 
   const popularCandidates = useMemo(
     () => toPopularCandidates(stockIndex, STOCK_CANDIDATE_LIMIT),
@@ -535,7 +610,9 @@ const DecisionSignalsPage: React.FC = () => {
     const effectivePageSize = dedupeLatest ? DEDUPE_PAGE_SIZE : PAGE_SIZE;
     const effectivePage = dedupeLatest ? 1 : nextPage;
     try {
-      const response = await decisionSignalsApi.list(toListParams(appliedFilters, effectivePage, effectivePageSize));
+      const response = await decisionSignalsApi.list(
+        toListParams(appliedFilters, effectivePage, effectivePageSize, holdingOnly),
+      );
       if (requestIdRef.current !== requestId) return;
       const lastPage = Math.max(1, Math.ceil(response.total / effectivePageSize));
       if (response.total > 0 && effectivePage > lastPage) {
@@ -562,7 +639,7 @@ const DecisionSignalsPage: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [appliedFilters, dedupeLatest]);
+  }, [appliedFilters, dedupeLatest, holdingOnly]);
 
   const loadSignals = useCallback(async () => {
     await loadSignalsForPage(page);
@@ -608,6 +685,47 @@ const DecisionSignalsPage: React.FC = () => {
     }
   }, []);
 
+  // 待处理区要的是全貌，不能受主列表分页与筛选影响，因此单独拉最近 QUEUE_PAGE_SIZE 条
+  // 启用中的信号在前端分档。只有主列表那次查询与这里等价（reuseListForQueue）时才跳过
+  // 自己的请求去复用它；存在活跃筛选时这里必须照常发宽查询。
+  const loadQueue = useCallback(async () => {
+    if (reuseListForQueue) return;
+
+    const requestId = queueRequestIdRef.current + 1;
+    queueRequestIdRef.current = requestId;
+    setRawQueueLoading(true);
+    try {
+      const response = await decisionSignalsApi.list({
+        status: 'active',
+        page: 1,
+        pageSize: QUEUE_PAGE_SIZE,
+        ...(holdingOnly ? { holdingOnly: true } : {}),
+      });
+      if (queueRequestIdRef.current !== requestId) return;
+      setRawQueueItems(response.items);
+      setRawQueueError(null);
+    } catch (err) {
+      if (queueRequestIdRef.current !== requestId) return;
+      setRawQueueItems([]);
+      setRawQueueError(getParsedApiError(err));
+    } finally {
+      if (queueRequestIdRef.current === requestId) {
+        setRawQueueLoading(false);
+      }
+    }
+  }, [holdingOnly, reuseListForQueue]);
+
+  // 复用主列表时待处理区没有自己的请求（loadQueue 直接 return），刷新 / 重试入口必须
+  // 落到主列表上，否则按钮保持可点击却没有反馈、也没有任何请求；其余情况照常刷新
+  // 待处理区自己那次宽查询。
+  const refreshQueue = useCallback(() => {
+    if (reuseListForQueue) {
+      void loadSignals();
+      return;
+    }
+    void loadQueue();
+  }, [loadQueue, loadSignals, reuseListForQueue]);
+
   const handleRunSkillOutcomes = useCallback(async () => {
     if (skillStatsRunning) return;
     setSkillStatsRunning(true);
@@ -630,18 +748,38 @@ const DecisionSignalsPage: React.FC = () => {
   }, [loadSignals]);
 
   useEffect(() => {
+    void loadQueue();
+    return () => {
+      queueRequestIdRef.current += 1;
+    };
+  }, [loadQueue]);
+
+  // 统计区收起时不挂载也不请求，展开后才加载。
+  useEffect(() => {
+    if (!statsExpanded) return undefined;
     void loadOutcomeStats();
     return () => {
       statsRequestIdRef.current += 1;
     };
-  }, [loadOutcomeStats]);
+  }, [loadOutcomeStats, statsExpanded]);
 
   useEffect(() => {
+    if (!statsExpanded) return undefined;
     void loadSkillOutcomeStats();
     return () => {
       skillStatsRequestIdRef.current += 1;
     };
-  }, [loadSkillOutcomeStats]);
+  }, [loadSkillOutcomeStats, statsExpanded]);
+
+  // spec §4.2：存在活跃筛选时自动展开。用 effect 而不是派生值
+  // （如 `filtersExpanded || hasActiveListFilters(...)`），是因为派生值会让
+  // Collapsible 的按钮在活跃筛选下永远无法收起——标题写着「收起筛选」却点不动。
+  // 用 effect 只在活跃筛选「出现时」自动展开一次，之后用户可自由收起。
+  useEffect(() => {
+    if (hasActiveListFilters(appliedFilters)) {
+      setFiltersExpanded(true);
+    }
+  }, [appliedFilters]);
 
   useEffect(() => () => {
     latestRequestIdRef.current += 1;
@@ -1051,12 +1189,19 @@ const DecisionSignalsPage: React.FC = () => {
         if (current.source === 'persisted') {
           return { source: 'persisted', item: updated };
         }
+        if (current.source === 'queue') {
+          return { source: 'queue', item: updated };
+        }
         if (!parseSourceReportId(appliedFilters.sourceReportId) && appliedFilters.status && updated.status !== appliedFilters.status) return null;
         return { source: 'list', item: updated };
       });
       setError(null);
+      await loadQueue();
       await loadSignalsForPage(page);
-      await loadOutcomeStats();
+      // 统计区收起时不请求，与挂载、页面刷新按钮保持同一契约（spec §4.3）。
+      if (statsExpanded) {
+        await loadOutcomeStats();
+      }
     } catch (err) {
       setError(getParsedApiError(err));
       setPendingStatus(null);
@@ -1303,6 +1448,12 @@ const DecisionSignalsPage: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const visibleItems = useMemo(() => (dedupeLatest ? dedupeByLatest(items) : items), [dedupeLatest, items]);
   const activeFilterChips = buildActiveFilterChips(appliedFilters, actionLabels, t);
+  // 任何一个 bucket 达标就渲染表格；全是未达标样本时表格每行指标都是 `-`，改为展示进度。
+  const hasSufficientSkillBucket = skillStats?.buckets.some((bucket) => bucket.sampleSufficient) ?? false;
+  const skillStatsProgress = summarizeSkillStatsProgress(skillStats?.buckets ?? []);
+  // 页面刷新按钮的禁用与转圈必须同源：disabled 覆盖主列表、待处理区、统计与单股追踪的
+  // 在途状态，icon 若只看 loading，就会出现「按钮已灰却不转」的假死观感。
+  const pageRefreshing = loading || queueLoading || statsLoading || skillStatsLoading || latestLoading || timelineLoading;
 
   return (
     <AppPage>
@@ -1315,113 +1466,174 @@ const DecisionSignalsPage: React.FC = () => {
               className="btn-secondary inline-flex items-center justify-center gap-2"
               onClick={() => {
                 void loadSignals();
-                void loadOutcomeStats();
+                void loadQueue();
+                // 统计区收起时不请求，避免收起状态下的无谓请求与按钮自锁。
+                if (statsExpanded) {
+                  void loadOutcomeStats();
+                  void loadSkillOutcomeStats();
+                }
+                // 单股追踪只在用户已经应用了当前股票后才刷新，避免凭空发起
+                // latest / 时间线查询；时间线额外要求已经查询过一次，保持
+                // 「未选股不查询」的既有契约。
+                if (activeStockContext) {
+                  void loadLatestForContext(activeStockContext);
+                  if (appliedTimelineContext) {
+                    void loadTimelineForContext(
+                      {
+                        code: appliedTimelineContext.stockCode,
+                        market: appliedTimelineContext.market || undefined,
+                      },
+                      appliedTimelineContext,
+                    );
+                  }
+                }
               }}
-              disabled={loading}
+              disabled={pageRefreshing}
             >
-              <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
+              <RefreshCw className={cn('h-4 w-4', pageRefreshing ? 'animate-spin' : '')} />
               <span>{t('decisionSignals.refresh')}</span>
             </button>
           </div>
         </div>
 
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">{t('decisionSignals.sectionAll')}</p>
-
-        <Card title={t('decisionSignals.filter')} padding="md">
-          <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-7" onSubmit={handleApplyFilters}>
-            <Select
-              value={filters.market}
-              onChange={(value) => setFilters((current) => ({ ...current, market: value as ListFilters['market'] }))}
-              options={[
-                { value: '', label: t('decisionSignals.allMarkets') },
-                ...MARKET_OPTIONS.map((market) => ({ value: market, label: getDecisionSignalMarketLabel(market, t) })),
-              ]}
-              placeholder={t('decisionSignals.market')}
-              className="w-full"
+        <Card title={t('decisionSignals.queueTitle')} subtitle={t('decisionSignals.queueDescription')} padding="md">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <Checkbox
+              label={t('decisionSignals.holdingOnlyLabel')}
+              checked={holdingOnly}
+              onChange={(event) => setHoldingOnly(event.target.checked)}
             />
-            <input
-              className={SELECT_INPUT_CLASS}
-              value={filters.stockCode}
-              onChange={(event) => setFilters((current) => ({ ...current, stockCode: event.target.value }))}
-              placeholder={t('decisionSignals.stockCode')}
-              aria-label={t('decisionSignals.stockCode')}
-            />
-            <Select
-              value={filters.action}
-              onChange={(value) => setFilters((current) => ({ ...current, action: value as ListFilters['action'] }))}
-              options={[
-                { value: '', label: t('decisionSignals.allActions') },
-                ...ACTION_OPTIONS.map((action) => ({ value: action, label: actionLabels[action] })),
-              ]}
-              placeholder={t('decisionSignals.action')}
-              className="w-full"
-            />
-            <Select
-              value={filters.marketPhase}
-              onChange={(value) => setFilters((current) => ({ ...current, marketPhase: value as ListFilters['marketPhase'] }))}
-              options={[
-                { value: '', label: t('decisionSignals.allPhases') },
-                ...PHASE_OPTIONS.map((phase) => ({ value: phase, label: getDecisionSignalMarketPhaseLabel(phase, t) })),
-              ]}
-              placeholder={t('decisionSignals.marketPhase')}
-              className="w-full"
-            />
-            <Select
-              value={filters.sourceType}
-              onChange={(value) => setFilters((current) => ({ ...current, sourceType: value as ListFilters['sourceType'] }))}
-              options={[
-                { value: '', label: t('decisionSignals.allSources') },
-                ...SOURCE_OPTIONS.map((source) => ({ value: source, label: getDecisionSignalSourceTypeLabel(source, t) })),
-              ]}
-              placeholder={t('decisionSignals.source')}
-              className="w-full"
-            />
-            <input
-              className={SELECT_INPUT_CLASS}
-              value={filters.sourceReportId}
-              onChange={(event) => setFilters((current) => ({ ...current, sourceReportId: event.target.value }))}
-              placeholder={t('decisionSignals.sourceReportId')}
-              aria-label={t('decisionSignals.sourceReportId')}
-              inputMode="numeric"
-              min={1}
-              step={1}
-              type="number"
-            />
-            <Select
-              value={filters.status}
-              onChange={(value) => setFilters((current) => ({ ...current, status: value as ListFilters['status'] }))}
-              options={[
-                { value: '', label: t('decisionSignals.allStatuses') },
-                ...STATUS_OPTIONS.map((status) => ({ value: status, label: t(STATUS_LABEL_KEYS[status]) })),
-              ]}
-              placeholder={t('decisionSignals.status')}
-              className="w-full"
-            />
-            <button type="submit" className="btn-primary inline-flex h-11 items-center justify-center gap-2">
-              <Search className="h-4 w-4" />
-              {t('decisionSignals.filter')}
-            </button>
             <button
               type="button"
-              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
-              onClick={resetFilters}
+              className="btn-secondary inline-flex h-9 items-center justify-center gap-2"
+              onClick={refreshQueue}
+              disabled={queueLoading}
+              aria-label={t('decisionSignals.queueRefreshAria')}
             >
-              {t('decisionSignals.resetFilter')}
+              <RefreshCw className={cn('h-4 w-4', queueLoading ? 'animate-spin' : '')} />
+              {t('decisionSignals.queueRefresh')}
             </button>
-          </form>
-          <label className="mt-3 inline-flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={dedupeLatest}
-              onChange={(event) => {
-                setDedupeLatest(event.target.checked);
-                setPage(1);
-              }}
-              className="h-4 w-4 accent-primary"
-            />
-            <span className="text-sm text-foreground">{t('decisionSignals.dedupeLabel')}</span>
-          </label>
+          </div>
+          <DecisionSignalActionQueue
+            items={queueItems}
+            loading={queueLoading}
+            error={queueError}
+            onRetry={refreshQueue}
+            onSelect={(item) => setSelected({ source: 'queue', item })}
+            selectedId={selected?.item.id ?? null}
+          />
+          {queueItems.length >= QUEUE_PAGE_SIZE ? (
+            <p className="pt-3 text-xs text-secondary-text">
+              {t('decisionSignals.queueTruncatedNote', { fetched: QUEUE_PAGE_SIZE })}
+            </p>
+          ) : null}
         </Card>
+
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">{t('decisionSignals.sectionAll')}</p>
+
+        <Collapsible
+          title={t(filtersExpanded ? 'decisionSignals.filterToggleHide' : 'decisionSignals.filterToggleShow')}
+          open={filtersExpanded}
+          onOpenChange={setFiltersExpanded}
+        >
+          {filtersExpanded ? (
+            <Card title={t('decisionSignals.filter')} padding="md">
+              <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-7" onSubmit={handleApplyFilters}>
+                <Select
+                  value={filters.market}
+                  onChange={(value) => setFilters((current) => ({ ...current, market: value as ListFilters['market'] }))}
+                  options={[
+                    { value: '', label: t('decisionSignals.allMarkets') },
+                    ...MARKET_OPTIONS.map((market) => ({ value: market, label: getDecisionSignalMarketLabel(market, t) })),
+                  ]}
+                  placeholder={t('decisionSignals.market')}
+                  className="w-full"
+                />
+                <input
+                  className={SELECT_INPUT_CLASS}
+                  value={filters.stockCode}
+                  onChange={(event) => setFilters((current) => ({ ...current, stockCode: event.target.value }))}
+                  placeholder={t('decisionSignals.stockCode')}
+                  aria-label={t('decisionSignals.stockCode')}
+                />
+                <Select
+                  value={filters.action}
+                  onChange={(value) => setFilters((current) => ({ ...current, action: value as ListFilters['action'] }))}
+                  options={[
+                    { value: '', label: t('decisionSignals.allActions') },
+                    ...ACTION_OPTIONS.map((action) => ({ value: action, label: actionLabels[action] })),
+                  ]}
+                  placeholder={t('decisionSignals.action')}
+                  className="w-full"
+                />
+                <Select
+                  value={filters.marketPhase}
+                  onChange={(value) => setFilters((current) => ({ ...current, marketPhase: value as ListFilters['marketPhase'] }))}
+                  options={[
+                    { value: '', label: t('decisionSignals.allPhases') },
+                    ...PHASE_OPTIONS.map((phase) => ({ value: phase, label: getDecisionSignalMarketPhaseLabel(phase, t) })),
+                  ]}
+                  placeholder={t('decisionSignals.marketPhase')}
+                  className="w-full"
+                />
+                <Select
+                  value={filters.sourceType}
+                  onChange={(value) => setFilters((current) => ({ ...current, sourceType: value as ListFilters['sourceType'] }))}
+                  options={[
+                    { value: '', label: t('decisionSignals.allSources') },
+                    ...SOURCE_OPTIONS.map((source) => ({ value: source, label: getDecisionSignalSourceTypeLabel(source, t) })),
+                  ]}
+                  placeholder={t('decisionSignals.source')}
+                  className="w-full"
+                />
+                <input
+                  className={SELECT_INPUT_CLASS}
+                  value={filters.sourceReportId}
+                  onChange={(event) => setFilters((current) => ({ ...current, sourceReportId: event.target.value }))}
+                  placeholder={t('decisionSignals.sourceReportId')}
+                  aria-label={t('decisionSignals.sourceReportId')}
+                  inputMode="numeric"
+                  min={1}
+                  step={1}
+                  type="number"
+                />
+                <Select
+                  value={filters.status}
+                  onChange={(value) => setFilters((current) => ({ ...current, status: value as ListFilters['status'] }))}
+                  options={[
+                    { value: '', label: t('decisionSignals.allStatuses') },
+                    ...STATUS_OPTIONS.map((status) => ({ value: status, label: t(STATUS_LABEL_KEYS[status]) })),
+                  ]}
+                  placeholder={t('decisionSignals.status')}
+                  className="w-full"
+                />
+                <button type="submit" className="btn-primary inline-flex h-11 items-center justify-center gap-2">
+                  <Search className="h-4 w-4" />
+                  {t('decisionSignals.filter')}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+                  onClick={resetFilters}
+                >
+                  {t('decisionSignals.resetFilter')}
+                </button>
+              </form>
+              <label className="mt-3 inline-flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={dedupeLatest}
+                  onChange={(event) => {
+                    setDedupeLatest(event.target.checked);
+                    setPage(1);
+                  }}
+                  className="h-4 w-4 accent-primary"
+                />
+                <span className="text-sm text-foreground">{t('decisionSignals.dedupeLabel')}</span>
+              </label>
+            </Card>
+          ) : null}
+        </Collapsible>
 
         {!selected && appliedSourceReportId ? (
           <Card padding="md">
@@ -1491,198 +1703,6 @@ const DecisionSignalsPage: React.FC = () => {
         ) : (
           <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
         )}
-
-        <Card title={t('decisionSignals.statsTitle')} subtitle={t('decisionSignals.statsDescription')} padding="md">
-          <p className="mb-3 text-sm text-secondary-text">{t('decisionSignals.statsGlobalScope')}</p>
-          {statsError ? (
-            <ApiErrorAlert
-              error={{ ...statsError, title: t('decisionSignals.statsErrorTitle') }}
-              actionLabel={t('common.retry')}
-              onAction={() => void loadOutcomeStats()}
-            />
-          ) : statsLoading ? (
-            <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
-          ) : outcomeStats && outcomeStats.total > 0 ? (
-            <div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
-                  <p className="text-xs text-secondary-text">{t('decisionSignals.statsTotal')}</p>
-                  <p className="mt-1 text-2xl font-semibold text-foreground">{outcomeStats.total}</p>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
-                  <p className="text-xs text-secondary-text">{t('decisionSignals.statsHitRate')}</p>
-                  <p className="mt-1 text-2xl font-semibold text-success">{formatStatPercent(outcomeStats.hitRatePct)}</p>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
-                  <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.hit')}</p>
-                  <p className="mt-1 text-2xl font-semibold text-success">{outcomeStats.hit}</p>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
-                  <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.miss')}</p>
-                  <p className="mt-1 text-2xl font-semibold text-danger">{outcomeStats.miss}</p>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
-                  <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.unable')}</p>
-                  <p className="mt-1 text-2xl font-semibold text-warning">{outcomeStats.unable}</p>
-                </div>
-              </div>
-              <p className="mt-3 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
-              {outcomeStats.profileCalibration ? (
-                <DecisionSignalProfileCalibration calibration={outcomeStats.profileCalibration} />
-              ) : null}
-
-              {outcomeStats.breakdowns && Object.keys(outcomeStats.breakdowns).length > 0 ? (
-                <div className="mt-4 space-y-4">
-                  {Object.entries(outcomeStats.breakdowns).map(([dimension, buckets]) => (
-                    <div key={dimension}>
-                      <p className="mb-1.5 text-xs font-semibold text-secondary-text">
-                        {dimension === 'horizon'
-                          ? t('decisionSignals.statsByHorizon')
-                          : dimension === 'status'
-                            ? t('decisionSignals.statsByStatus')
-                            : dimension}
-                      </p>
-                      <div className="space-y-1">
-                        {buckets.map((bucket) => (
-                          <div
-                            key={`${dimension}-${bucket.value}`}
-                            className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
-                          >
-                            <span className="min-w-0 truncate font-medium text-foreground">
-                              {dimension === 'horizon'
-                                ? getDecisionSignalHorizonLabel(bucket.value as DecisionSignalHorizon, t)
-                                : dimension === 'status'
-                                  ? t(STATUS_LABEL_KEYS[bucket.value as DecisionSignalStatus])
-                                  : bucket.value}
-                            </span>
-                            <span className="text-secondary-text">{bucket.total}</span>
-                            <span className="text-success">{bucket.hit}</span>
-                            <span className="text-danger">{bucket.miss}</span>
-                            <span className="text-warning">{bucket.unable}</span>
-                            <span className="tabular-nums text-secondary-text">
-                              {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <EmptyState
-              className="border-none bg-transparent py-6 shadow-none"
-              title={t('decisionSignals.noReviewedStatsTitle')}
-              description={t('decisionSignals.noReviewedStatsDescription')}
-              icon={<BarChart3 className="h-6 w-6" />}
-            />
-          )}
-        </Card>
-
-        <Card
-          title={t('decisionSignals.skillStatsTitle')}
-          subtitle={t('decisionSignals.skillStatsDescription')}
-          padding="md"
-        >
-          <div className="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <p className="text-sm text-secondary-text">
-              {t('decisionSignals.skillStatsSampleSize')}: {skillStats?.minimumEvaluatedSampleSize ?? '-'}
-            </p>
-            <div className="flex shrink-0 gap-2">
-              <button
-                type="button"
-                className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
-                onClick={() => void loadSkillOutcomeStats()}
-                disabled={skillStatsLoading}
-                aria-label={t('decisionSignals.skillStatsRefreshAria')}
-              >
-                <RefreshCw className={cn('h-4 w-4', skillStatsLoading ? 'animate-spin' : '')} />
-                {t('decisionSignals.skillStatsRefresh')}
-              </button>
-              <button
-                type="button"
-                className="btn-primary inline-flex h-10 items-center justify-center gap-2"
-                onClick={() => void handleRunSkillOutcomes()}
-                disabled={skillStatsLoading || skillStatsRunning}
-              >
-                <Activity className={cn('h-4 w-4', skillStatsRunning ? 'animate-spin' : '')} />
-                {skillStatsRunning
-                  ? t('common.loading')
-                  : t('decisionSignals.skillStatsRun')}
-              </button>
-            </div>
-          </div>
-
-          {skillStatsError ? (
-            <ApiErrorAlert
-              error={{ ...skillStatsError, title: t('decisionSignals.skillStatsErrorTitle') }}
-              actionLabel={t('common.retry')}
-              onAction={() => void loadSkillOutcomeStats()}
-            />
-          ) : skillStatsLoading ? (
-            <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
-          ) : skillStats && skillStats.buckets.length > 0 ? (
-            <div className="space-y-1">
-              <div className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-text">
-                <span>{t('decisionSignals.skillStatsTitle')}</span>
-                <span>{t('decisionSignals.skillStatsPending')}</span>
-                <span>{t('decisionSignals.skillStatsEvaluated')}</span>
-                <span>{t('decisionSignals.statsTotal')}</span>
-                <span>{t('decisionSignals.outcome.hit')}</span>
-                <span>{t('decisionSignals.outcome.miss')}</span>
-                <span>{t('decisionSignals.skillStatsHitRate')}</span>
-                <span>{t('decisionSignals.skillStatsAvgReturn')}</span>
-                <span>{t('decisionSignals.skillStatsSampleStatus')}</span>
-              </div>
-              {skillStats.buckets.map((bucket) => (
-                <div
-                  key={`${bucket.skillId}-${bucket.horizon}`}
-                  className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
-                >
-                  <span className="min-w-0 truncate font-medium text-foreground">
-                    {bucket.skillId}
-                    <span className="ml-2 text-secondary-text">{bucket.horizon}</span>
-                  </span>
-                  {/* 单元格列含义由上方表头承载；不要给这些 span 补原生 title，
-                      `tests/ui_governance.test.ts` 禁止在 span/div 等元素上用原生 title。 */}
-                  <span className="text-secondary-text">
-                    {bucket.pending}
-                  </span>
-                  <span className="text-secondary-text">
-                    {bucket.evaluated}
-                  </span>
-                  <span className="text-secondary-text">
-                    {bucket.total}
-                  </span>
-                  <span className="text-success">{bucket.hit}</span>
-                  <span className="text-danger">{bucket.miss}</span>
-                  <span
-                    className={`tabular-nums text-secondary-text ${bucket.sampleSufficient ? '' : 'text-warning'}`}
-                  >
-                    {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
-                  </span>
-                  <span className="tabular-nums text-secondary-text">
-                    {bucket.avgDirectionalReturnPct != null ? `${bucket.avgDirectionalReturnPct.toFixed(1)}%` : '-'}
-                  </span>
-                  <span
-                    className={bucket.sampleSufficient ? 'text-secondary-text' : 'text-warning'}
-                  >
-                    {bucket.sampleStatus}
-                  </span>
-                </div>
-              ))}
-              <p className="pt-1 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
-            </div>
-          ) : (
-            <EmptyState
-              className="border-none bg-transparent py-6 shadow-none"
-              title={t('decisionSignals.skillStatsEmptyTitle')}
-              description={t('decisionSignals.skillStatsEmptyDescription')}
-              icon={<BarChart3 className="h-6 w-6" />}
-            />
-          )}
-        </Card>
 
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">{t('decisionSignals.sectionStock')}</p>
 
@@ -1876,6 +1896,230 @@ const DecisionSignalsPage: React.FC = () => {
             )}
           </div>
         </Card>
+
+        <Collapsible
+          title={t('decisionSignals.statsToggleTitle')}
+          open={statsExpanded}
+          onOpenChange={setStatsExpanded}
+          // 统计区含 skill × 窗口表，桶数多时行数会超过 Collapsible 默认的 2000px
+          // 上限（默认上限只在展开态生效，且没有滚动容器），因此这里显式改成滚动面板。
+          scrollable
+        >
+          <div className="space-y-4">
+            {statsExpanded ? (
+              <>
+                <Card title={t('decisionSignals.statsTitle')} subtitle={t('decisionSignals.statsDescription')} padding="md">
+                  <p className="mb-3 text-sm text-secondary-text">{t('decisionSignals.statsGlobalScope')}</p>
+                  {statsError ? (
+                    <ApiErrorAlert
+                      error={{ ...statsError, title: t('decisionSignals.statsErrorTitle') }}
+                      actionLabel={t('common.retry')}
+                      onAction={() => void loadOutcomeStats()}
+                    />
+                  ) : statsLoading ? (
+                    <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
+                  ) : outcomeStats && outcomeStats.total > 0 ? (
+                    <div>
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                        <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
+                          <p className="text-xs text-secondary-text">{t('decisionSignals.statsTotal')}</p>
+                          <p className="mt-1 text-2xl font-semibold text-foreground">{outcomeStats.total}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
+                          <p className="text-xs text-secondary-text">{t('decisionSignals.statsHitRate')}</p>
+                          <p className="mt-1 text-2xl font-semibold text-success">{formatStatPercent(outcomeStats.hitRatePct)}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
+                          <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.hit')}</p>
+                          <p className="mt-1 text-2xl font-semibold text-success">{outcomeStats.hit}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
+                          <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.miss')}</p>
+                          <p className="mt-1 text-2xl font-semibold text-danger">{outcomeStats.miss}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-elevated/40 px-3 py-3">
+                          <p className="text-xs text-secondary-text">{t('decisionSignals.outcome.unable')}</p>
+                          <p className="mt-1 text-2xl font-semibold text-warning">{outcomeStats.unable}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
+                      {outcomeStats.profileCalibration ? (
+                        <DecisionSignalProfileCalibration calibration={outcomeStats.profileCalibration} />
+                      ) : null}
+
+                      {outcomeStats.breakdowns && Object.keys(outcomeStats.breakdowns).length > 0 ? (
+                        <div className="mt-4 space-y-4">
+                          {Object.entries(outcomeStats.breakdowns).map(([dimension, buckets]) => (
+                            <div key={dimension}>
+                              <p className="mb-1.5 text-xs font-semibold text-secondary-text">
+                                {dimension === 'horizon'
+                                  ? t('decisionSignals.statsByHorizon')
+                                  : dimension === 'status'
+                                    ? t('decisionSignals.statsByStatus')
+                                    : dimension}
+                              </p>
+                              <div className="space-y-1">
+                                {buckets.map((bucket) => (
+                                  <div
+                                    key={`${dimension}-${bucket.value}`}
+                                    className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                                  >
+                                    <span className="min-w-0 truncate font-medium text-foreground">
+                                      {dimension === 'horizon'
+                                        ? getDecisionSignalHorizonLabel(bucket.value as DecisionSignalHorizon, t)
+                                        : dimension === 'status'
+                                          ? t(STATUS_LABEL_KEYS[bucket.value as DecisionSignalStatus])
+                                          : bucket.value}
+                                    </span>
+                                    <span className="text-secondary-text">{bucket.total}</span>
+                                    <span className="text-success">{bucket.hit}</span>
+                                    <span className="text-danger">{bucket.miss}</span>
+                                    <span className="text-warning">{bucket.unable}</span>
+                                    <span className="tabular-nums text-secondary-text">
+                                      {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      className="border-none bg-transparent py-6 shadow-none"
+                      title={t('decisionSignals.noReviewedStatsTitle')}
+                      description={t('decisionSignals.noReviewedStatsDescription')}
+                      icon={<BarChart3 className="h-6 w-6" />}
+                    />
+                  )}
+                </Card>
+
+                <Card
+                  title={t('decisionSignals.skillStatsTitle')}
+                  subtitle={t('decisionSignals.skillStatsDescription')}
+                  padding="md"
+                >
+                  <div className="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                    <p className="text-sm text-secondary-text">
+                      {t('decisionSignals.skillStatsSampleSize')}: {skillStats?.minimumEvaluatedSampleSize ?? '-'}
+                    </p>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
+                        onClick={() => void loadSkillOutcomeStats()}
+                        disabled={skillStatsLoading}
+                        aria-label={t('decisionSignals.skillStatsRefreshAria')}
+                      >
+                        <RefreshCw className={cn('h-4 w-4', skillStatsLoading ? 'animate-spin' : '')} />
+                        {t('decisionSignals.skillStatsRefresh')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-primary inline-flex h-10 items-center justify-center gap-2"
+                        onClick={() => void handleRunSkillOutcomes()}
+                        disabled={skillStatsLoading || skillStatsRunning}
+                      >
+                        <Activity className={cn('h-4 w-4', skillStatsRunning ? 'animate-spin' : '')} />
+                        {skillStatsRunning
+                          ? t('common.loading')
+                          : t('decisionSignals.skillStatsRun')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {skillStatsError ? (
+                    <ApiErrorAlert
+                      error={{ ...skillStatsError, title: t('decisionSignals.skillStatsErrorTitle') }}
+                      actionLabel={t('common.retry')}
+                      onAction={() => void loadSkillOutcomeStats()}
+                    />
+                  ) : skillStatsLoading ? (
+                    <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
+                  ) : skillStats && hasSufficientSkillBucket ? (
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-text">
+                        <span>{t('decisionSignals.skillStatsTitle')}</span>
+                        <span>{t('decisionSignals.skillStatsPending')}</span>
+                        <span>{t('decisionSignals.skillStatsEvaluated')}</span>
+                        <span>{t('decisionSignals.skillStatsTotal')}</span>
+                        <span>{t('decisionSignals.outcome.hit')}</span>
+                        <span>{t('decisionSignals.outcome.miss')}</span>
+                        <span>{t('decisionSignals.skillStatsHitRate')}</span>
+                        <span>{t('decisionSignals.skillStatsAvgReturn')}</span>
+                        <span>{t('decisionSignals.skillStatsSampleStatus')}</span>
+                      </div>
+                      {skillStats.buckets.map((bucket) => (
+                        <div
+                          key={`${bucket.skillId}-${bucket.horizon}`}
+                          className="grid grid-cols-[minmax(0,1.6fr)_auto_auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                        >
+                          <span className="min-w-0 truncate font-medium text-foreground">
+                            {getSkillLabel(bucket.skillId, t)}
+                            <span className="ml-2 text-secondary-text">{bucket.horizon}</span>
+                          </span>
+                          {/* 单元格列含义由上方表头承载；不要给这些 span 补原生 title，
+                              `tests/ui_governance.test.ts` 禁止在 span/div 等元素上用原生 title。 */}
+                          <span className="text-secondary-text">
+                            {bucket.pending}
+                          </span>
+                          <span className="text-secondary-text">
+                            {bucket.evaluated}
+                          </span>
+                          <span className="text-secondary-text">
+                            {bucket.total}
+                          </span>
+                          <span className="text-success">{bucket.hit}</span>
+                          <span className="text-danger">{bucket.miss}</span>
+                          <span
+                            className={`tabular-nums text-secondary-text ${bucket.sampleSufficient ? '' : 'text-warning'}`}
+                          >
+                            {bucket.hitRatePct != null ? `${bucket.hitRatePct.toFixed(1)}%` : '-'}
+                          </span>
+                          <span className="tabular-nums text-secondary-text">
+                            {bucket.avgDirectionalReturnPct != null ? `${bucket.avgDirectionalReturnPct.toFixed(1)}%` : '-'}
+                          </span>
+                          <span
+                            className={bucket.sampleSufficient ? 'text-secondary-text' : 'text-warning'}
+                          >
+                            {getSkillOpinionSampleStatusLabel(bucket.sampleStatus, t)}
+                          </span>
+                        </div>
+                      ))}
+                      <p className="pt-1 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
+                    </div>
+                  ) : skillStats && skillStats.buckets.length > 0 ? (
+                    // 已有后验记录但没有任何 bucket 达标：此时每一行的命中率与平均收益都是 `-`，
+                    // 表格不再承载信息，改为如实展示样本进展，并保留刷新 / 手动评估两个入口。
+                    <EmptyState
+                      className="border-none bg-transparent py-6 shadow-none"
+                      title={t('decisionSignals.skillStatsInsufficientTitle')}
+                      description={t('decisionSignals.skillStatsInsufficientDescription', {
+                        buckets: skillStatsProgress.buckets,
+                        evaluated: skillStatsProgress.evaluated,
+                        pending: skillStatsProgress.pending,
+                        observational: skillStatsProgress.observational,
+                        unable: skillStatsProgress.unable,
+                        threshold: skillStats.minimumEvaluatedSampleSize,
+                        maxEvaluated: skillStatsProgress.maxEvaluated,
+                      })}
+                      icon={<BarChart3 className="h-6 w-6" />}
+                    />
+                  ) : (
+                    <EmptyState
+                      className="border-none bg-transparent py-6 shadow-none"
+                      title={t('decisionSignals.skillStatsEmptyTitle')}
+                      description={t('decisionSignals.skillStatsEmptyDescription')}
+                      icon={<BarChart3 className="h-6 w-6" />}
+                    />
+                  )}
+                </Card>
+              </>
+            ) : null}
+          </div>
+        </Collapsible>
       </div>
 
       <Drawer
