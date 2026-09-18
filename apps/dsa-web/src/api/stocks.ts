@@ -1,5 +1,27 @@
 import apiClient from './index';
 
+// 首页 K 线历史行情的短时缓存。默认每次切换/重新选中报告都会重新拉取；
+// 用 (code|days) 作键、3 分钟 TTL 缓存成功结果，避免同一股票反复触发网络请求。
+const HISTORY_CACHE_TTL_MS = 3 * 60 * 1000;
+const stockHistoryCache = new Map<string, { expiresAt: number; promise: Promise<StockHistory> }>();
+
+function cacheGetStockHistory(code: string, days: number, fetcher: () => Promise<StockHistory>): Promise<StockHistory> {
+  const key = `${code}|${days}`;
+  const hit = stockHistoryCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) {
+    return hit.promise;
+  }
+  const promise = fetcher();
+  stockHistoryCache.set(key, { expiresAt: Date.now() + HISTORY_CACHE_TTL_MS, promise });
+  // 失败条目不缓存：立即驱逐，后续调用可重试，避免一次网络错误卡住整个 TTL
+  promise.catch(() => {
+    if (stockHistoryCache.get(key)?.promise === promise) {
+      stockHistoryCache.delete(key);
+    }
+  });
+  return promise;
+}
+
 export type ExtractItem = {
   code?: string | null;
   name?: string | null;
@@ -50,28 +72,30 @@ export const stocksApi = {
    * 获取日 K 历史行情（period=daily）。
    * @param days 获取的天数
    */
-  async getStockHistory(code: string, days = 60): Promise<StockHistory> {
-    const response = await apiClient.get<Record<string, unknown>>(
-      `/api/v1/stocks/${encodeURIComponent(code)}/history`,
-      { params: { period: 'daily', days } },
-    );
-    const d = response.data;
-    const raw = (Array.isArray(d.data) ? d.data : []) as Array<Record<string, unknown>>;
-    return {
-      stockCode: String(d.stock_code ?? code),
-      stockName: d.stock_name == null ? undefined : String(d.stock_name),
-      period: String(d.period ?? 'daily'),
-      data: raw.map((item) => ({
-        date: String(item.date ?? ''),
-        open: Number(item.open ?? 0),
-        high: Number(item.high ?? 0),
-        low: Number(item.low ?? 0),
-        close: Number(item.close ?? 0),
-        volume: item.volume == null ? undefined : Number(item.volume),
-        amount: item.amount == null ? undefined : Number(item.amount),
-        changePercent: item.change_percent == null ? undefined : Number(item.change_percent),
-      })),
-    };
+  getStockHistory(code: string, days = 60): Promise<StockHistory> {
+    return cacheGetStockHistory(code, days, async () => {
+      const response = await apiClient.get<Record<string, unknown>>(
+        `/api/v1/stocks/${encodeURIComponent(code)}/history`,
+        { params: { period: 'daily', days } },
+      );
+      const d = response.data;
+      const raw = (Array.isArray(d.data) ? d.data : []) as Array<Record<string, unknown>>;
+      return {
+        stockCode: String(d.stock_code ?? code),
+        stockName: d.stock_name == null ? undefined : String(d.stock_name),
+        period: String(d.period ?? 'daily'),
+        data: raw.map((item) => ({
+          date: String(item.date ?? ''),
+          open: Number(item.open ?? 0),
+          high: Number(item.high ?? 0),
+          low: Number(item.low ?? 0),
+          close: Number(item.close ?? 0),
+          volume: item.volume == null ? undefined : Number(item.volume),
+          amount: item.amount == null ? undefined : Number(item.amount),
+          changePercent: item.change_percent == null ? undefined : Number(item.change_percent),
+        })),
+      };
+    });
   },
 
   async getQuote(code: string): Promise<StockQuote> {

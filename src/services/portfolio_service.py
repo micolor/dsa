@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
@@ -39,10 +39,18 @@ VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
-PORTFOLIO_REALTIME_QUOTE_MAX_WORKERS = 4
+# 持仓估值实时行情缓存新鲜度：fetched_at 距今 ≤ 该秒数视为新鲜，直接返回，不再触网；
+# 超龄但不空则用旧价返回并标记 stale（不阻塞请求路径），由后台线程刷新。
+_PORTFOLIO_QUOTE_CACHE_FRESH_SECONDS = 120
+# 后台刷新触发阈值：缓存 age 超过该秒数即主动后台刷新一次，盘中价不跑偏。
+_PORTFOLIO_QUOTE_REFRESH_AGE_SECONDS = 30
 # 场外基金按最新单位净值估值（东财 lsjz）。估值来源标记，非实时行情。
 FUND_NAV_PRICE_SOURCE = "fund_nav"
 FUND_NAV_PROVIDER = "eastmoney"
+
+# 后台实时行情刷新：按 symbol 去重，避免并发快照/多账户重复打网络。
+_QUOTE_REFRESH_LOCK = threading.Lock()
+_QUOTE_REFRESH_INFLIGHT: Set[str] = set()
 FUND_LIMITATION_NOTE = "场外基金按最新单位净值估值，非实时"
 
 
@@ -1067,11 +1075,11 @@ class PortfolioService:
                     qty = float(avg_state[key].quantity)
                 if qty > EPS:
                     active_symbols.append(symbol)
-        realtime_prices = (
-            self._prefetch_realtime_position_prices(active_symbols)
-            if active_symbols
-            else None
-        )
+        # 请求路径不再同步阻塞实时行情网络：改为后台刷新写回持久缓存，
+        # _resolve_position_price 读到新鲜缓存即返回，未命中则走 stock_daily 快路径。
+        if active_symbols:
+            self._refresh_quotes_in_background(active_symbols)
+        realtime_prices = None
 
         for key in sorted(keys):
             symbol, market, currency = key
@@ -1106,7 +1114,6 @@ class PortfolioService:
             price_info = self._resolve_position_price(
                 symbol=symbol,
                 as_of_date=as_of_date,
-                realtime_prices=realtime_prices,
                 include_realtime=include_realtime,
             )
             last_price = price_info.price
@@ -1172,7 +1179,6 @@ class PortfolioService:
         *,
         symbol: str,
         as_of_date: date,
-        realtime_prices: Optional[Dict[str, Tuple[Optional[float], Optional[str]]]] = None,
         include_realtime: bool = True,
     ) -> _ResolvedPositionPrice:
         today = date.today()
@@ -1193,21 +1199,36 @@ class PortfolioService:
                     )
             # 取不到净值则落到历史收盘/缺失兜底（基金无 StockDaily 行，通常进 missing）
 
-        if include_realtime and as_of_date == today:
-            if realtime_prices is None:
-                realtime_price, provider = self._fetch_realtime_position_price(symbol)
-            else:
-                realtime_price, provider = realtime_prices.get(symbol, (None, None))
-            if realtime_price is not None and realtime_price > 0:
+        # 非阻塞实时行情：优先读持久化缓存（新鲜窗口内直接返回、不触网）；
+        # 超龄旧缓存用旧价兜底并标记 stale；无缓存则走 stock_daily 收盘快路径（0s）。
+        # 网络刷新统一由后台线程写回缓存，请求路径从不阻塞在 provider 瀑布上。
+        if include_realtime:
+            cached = self.repo.get_latest_cached_quote(symbol)
+            if cached is not None and cached.price is not None and cached.price > 0:
+                age = (
+                    datetime.now()
+                    - (cached.fetched_at or datetime.now())
+                ).total_seconds()
+                if age <= _PORTFOLIO_QUOTE_CACHE_FRESH_SECONDS:
+                    return _ResolvedPositionPrice(
+                        price=float(cached.price),
+                        source="realtime_cached",
+                        price_date=cached.quote_date or today,
+                        is_stale=False,
+                        is_available=True,
+                        provider=cached.provider,
+                    )
+                # 有旧缓存：用旧价兜底，不阻塞；后台线程会刷新
                 return _ResolvedPositionPrice(
-                    price=float(realtime_price),
-                    source="realtime_quote",
-                    price_date=today,
-                    is_stale=False,
+                    price=float(cached.price),
+                    source="realtime_cached",
+                    price_date=cached.quote_date or today,
+                    is_stale=True,
                     is_available=True,
-                    provider=provider,
+                    provider=cached.provider,
                 )
 
+        # 无缓存（或 include_realtime=False）：走 stock_daily 收盘快路径（0s），不碰网络。
         close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
         if close is not None:
             close_price, close_date = close
@@ -1228,47 +1249,48 @@ class PortfolioService:
             is_available=False,
         )
 
-    def _prefetch_realtime_position_prices(
-        self,
-        symbols: Iterable[str],
-    ) -> Dict[str, Tuple[Optional[float], Optional[str]]]:
-        # 基金走 NAV 估值，不进实时行情批量预取
-        unique_symbols = sorted({symbol for symbol in symbols if symbol and not is_fund_code(symbol)})
+    def _refresh_quotes_in_background(self, symbols: Iterable[str]) -> None:
+        """在守护线程里为给定标的拉一次实时行情并写回缓存（不阻塞请求路径）。
+
+        - 基金走 NAV 估值，不进实时行情刷新。
+        - 按 symbol 去重：并发快照/多账户只刷新一次，避免重复、避免线程堆积。
+        - 拉取与写库失败均静默，沿用 _fetch_realtime_position_price 的容错，不短路主流程。
+        """
+        unique_symbols = sorted({s for s in symbols if s and not is_fund_code(s)})
         if not unique_symbols:
-            return {}
+            return
 
-        # Bulk prefetch (when applicable) only warms the fetcher-module-level realtime cache;
-        # the manager itself is discarded so per-symbol workers cannot serialize through its
-        # per-fetcher call locks when individual reads still need a live fetch (e.g. mixed
-        # markets, cache miss, or bulk source returning fewer rows than requested).
-        if len(unique_symbols) >= 5:
+        with _QUOTE_REFRESH_LOCK:
+            pending = [s for s in unique_symbols if s not in _QUOTE_REFRESH_INFLIGHT]
+            _QUOTE_REFRESH_INFLIGHT.update(pending)
+        if not pending:
+            return
+
+        def _run() -> None:
             try:
-                from data_provider.base import DataFetcherManager
+                for symbol in pending:
+                    try:
+                        price, provider = self._fetch_realtime_position_price(symbol)
+                    except Exception as exc:  # noqa: BLE001 - 后台静默容错
+                        logger.warning("后台刷新实时行情失败 %s: %s", symbol, exc)
+                        continue
+                    if price is None or price <= 0:
+                        continue
+                    try:
+                        self.repo.upsert_cached_quote(
+                            symbol=symbol,
+                            price=float(price),
+                            provider=provider,
+                            quote_date=date.today(),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 后台静默容错
+                        logger.warning("后台写回行情缓存失败 %s: %s", symbol, exc)
+            finally:
+                with _QUOTE_REFRESH_LOCK:
+                    for s in pending:
+                        _QUOTE_REFRESH_INFLIGHT.discard(s)
 
-                DataFetcherManager().prefetch_realtime_quotes(unique_symbols)
-            except Exception as exc:
-                logger.warning("Failed to prefetch realtime portfolio quotes: %s", exc)
-
-        if len(unique_symbols) == 1:
-            symbol = unique_symbols[0]
-            return {symbol: self._fetch_realtime_position_price(symbol)}
-
-        results: Dict[str, Tuple[Optional[float], Optional[str]]] = {}
-        max_workers = min(PORTFOLIO_REALTIME_QUOTE_MAX_WORKERS, len(unique_symbols))
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="portfolio-quote") as executor:
-            futures = {
-                executor.submit(self._fetch_realtime_position_price, symbol): symbol
-                for symbol in unique_symbols
-            }
-            for future in as_completed(futures):
-                symbol = futures[future]
-                try:
-                    results[symbol] = future.result()
-                except Exception as exc:  # pragma: no cover - defensive guard for patched fetchers
-                    logger.warning("Failed to prefetch realtime portfolio price for %s: %s", symbol, exc)
-                    results[symbol] = (None, None)
-
-        return results
+        threading.Thread(target=_run, name="portfolio-quote-refresh", daemon=True).start()
 
     @staticmethod
     def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:

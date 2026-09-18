@@ -54,6 +54,65 @@ class StockRepository:
             logger.error(f"获取最新数据失败: {e}")
             return []
     
+    @staticmethod
+    def _code_variants(code: str) -> List[str]:
+        """构造给定代码的等价存储变体，用于 stock_daily 侧历史形式不一致的匹配。
+
+        stock_daily 同时存裸码（600519）与带前缀/后缀（SH601166、00700.HK）两种形式；
+        这里按常见历史形式生成候选，查询侧按日期合并后取行数最多者。
+        """
+        code = (code or "").strip()
+        if not code:
+            return []
+        candidates = [code]
+        upper = code.upper()
+        # 裸数字：可能是 A 股 6 位或港股 5 位 → 补 SH/SZ 前缀与 HK 前缀
+        if code.isdigit():
+            if len(code) == 6:
+                candidates += [f"SH{code}", f"SZ{code}"]
+            elif len(code) >= 4:
+                candidates.append(f"HK{code}")
+        if upper.endswith(".HK"):
+            digits = upper[:-3]
+            if digits.isdigit():
+                candidates.append(f"HK{digits.zfill(5)}")
+        if upper.startswith("HK") and upper[2:].isdigit():
+            candidates.append(upper)
+        # 去重保序
+        seen, out = set(), []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+        return out
+
+    def get_daily_series(self, code: str, days: int) -> List[StockDaily]:
+        """读取已缓存的最近 `days` 天日线，按日期升序返回。
+
+        为兼容 stock_daily 中裸码/前缀码混合的历史存储，用 _code_variants 生成候选，
+        以「最新一行日期最新」优先、再按「行数最多」择优，
+        避免仅凭单一代码形式 MISS 掉已落库数据。返回最符合条件的变体结果。
+        """
+        best: List[StockDaily] = []
+        best_latest: Optional[date] = None
+        best_rows = -1
+        for cand in self._code_variants(code):
+            try:
+                rows = self.db.get_latest_data(cand, days)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("读取日线缓存失败 %s: %s", cand, e)
+                continue
+            if not rows:
+                continue
+            latest = max((r.date for r in rows if r.date is not None), default=None)
+            # 以最新日期为准；若相同再按行数多者优先
+            if best_rows < 0 or (latest is not None and (best_latest is None or latest > best_latest)) \
+                    or (latest == best_latest and len(rows) > best_rows):
+                best = rows
+                best_latest = latest
+                best_rows = len(rows)
+        return list(reversed(best))
+
     def get_range(
         self,
         code: str,

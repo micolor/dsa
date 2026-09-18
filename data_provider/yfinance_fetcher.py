@@ -31,6 +31,17 @@ from tenacity import (
     before_sleep_log,
 )
 
+try:
+    # Yahoo 限流异常（Too Many Requests）。按来源 import es.exceptions 以跨库版本稳定。
+    from yfinance.exceptions import YFRateLimitError as _YF_RATE_LIMIT_ERROR
+except Exception:  # noqa: BLE001
+    # 兜底：旧版 yfinance 无此异常类。定义一个永不抛出的子类，兼容而不误触发。
+    class _YF_RATE_LIMIT_ERROR(Exception):  # type: ignore[no-redef]
+        pass
+
+# 日线重试：除了连接/读超时，也把 Yahoo 限流纳入重试（指数退避，3 次）
+_RETRY_ON_TYPES = (ConnectionError, TimeoutError, _YF_RATE_LIMIT_ERROR)
+
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import get_us_index_yf_symbol, is_us_stock_code
@@ -184,7 +195,7 @@ class YfinanceFetcher(BaseFetcher):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(_RETRY_ON_TYPES),
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:

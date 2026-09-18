@@ -35,6 +35,7 @@ from typing import Optional, Dict, Any, List, Tuple
 
 import pandas as pd
 import requests
+from urllib.error import HTTPError
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -459,7 +460,11 @@ class AkshareFetcher(BaseFetcher):
     @retry(
         stop=stop_after_attempt(3),  # 最多重试3次
         wait=wait_exponential(multiplier=1, min=2, max=30),  # 指数退避：2, 4, 8... 最大30秒
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        # 网络/限流错误尽量都重试：requests.exceptions.RequestException 覆盖连接/超时/代理/429，
+        # HTTPError 兜底（akshare 底层个别路径可能抛 urllib/urllib3 异常）。
+        retry=retry_if_exception_type(
+            (ConnectionError, TimeoutError, requests.exceptions.RequestException, HTTPError),
+        ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:

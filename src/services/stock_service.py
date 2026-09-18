@@ -15,6 +15,10 @@ from typing import Optional, Dict, Any, List
 
 from src.repositories.stock_repo import StockRepository
 
+# DB 快路径新鲜度窗口：取到的最新一条日线距今超过 N 个日历日则视为陈旧，
+# 不直接返回（避免 K 线长时间停在旧数据），回退到网络路径再取一次。
+_DAILY_CACHE_FRESH_DAYS = 4
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +89,42 @@ class StockService:
             logger.error(f"获取实时行情失败: {e}", exc_info=True)
             return None
     
+    @staticmethod
+    def _daily_rows_to_kline_data(rows) -> List[Dict[str, Any]]:
+        """把 StockDaily 行列表组装成 KLineData 结构（date/open/high/low/close/volume/amount/change_percent）。"""
+        data = []
+        for r in rows:
+            pct = getattr(r, "pct_chg", None)
+            data.append({
+                "date": r.date.isoformat() if hasattr(r.date, "isoformat") else str(r.date),
+                "open": float(r.open) if r.open is not None else 0.0,
+                "high": float(r.high) if r.high is not None else 0.0,
+                "low": float(r.low) if r.low is not None else 0.0,
+                "close": float(r.close) if r.close is not None else 0.0,
+                "volume": float(r.volume) if r.volume is not None else None,
+                "amount": float(r.amount) if r.amount is not None else None,
+                "change_percent": float(pct) if pct is not None else None,
+            })
+        return data
+
+    @staticmethod
+    def _cached_series_fresh(rows, today: Optional[datetime] = None) -> bool:
+        """判断缓存日线是否足够新鲜：最新一条日期落在最近 _DAILY_CACHE_FRESH_DAYS 内。"""
+        if not rows:
+            return False
+        latest = max((r.date for r in rows if getattr(r, "date", None) is not None), default=None)
+        if latest is None:
+            return False
+        ref = (today or datetime.today()).date()
+        return (ref - latest).days <= _DAILY_CACHE_FRESH_DAYS
+
+    def _persist_daily_cache(self, df, stock_code: str, data_source: str) -> None:
+        """把网络取到的日线落库（按 (code,date) UPSERT，幂等），失败不影响主流程。"""
+        try:
+            self.repo.save_dataframe(df, stock_code, data_source)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("落库日线缓存失败 %s: %s", stock_code, e)
+
     def get_history_data(
         self,
         stock_code: str,
@@ -113,21 +153,38 @@ class StockService:
             )
         
         try:
+            # DB 快路径：若 stock_daily 已有足够新鲜的历史日线，直接返回，不再走网络，
+            # 解决首页 K 线重复网络取数导致的加载慢。
+            cached = self.repo.get_daily_series(stock_code, days)
+            if self._cached_series_fresh(cached):
+                logger.info(
+                    f"[K线缓存命中] {stock_code} 使用本地日线缓存 rows={len(cached)} (days={days})"
+                )
+                return {
+                    "stock_code": stock_code,
+                    "stock_name": None,
+                    "period": period,
+                    "data": self._daily_rows_to_kline_data(cached),
+                }
+
             # 调用数据获取器获取历史数据
             from data_provider.base import DataFetcherManager
-            
+
             manager = DataFetcherManager()
             # 交互式历史请求（K 线图）不做跨源一致性对账：
             # 对账只记录告警、不改变返回数据，同步执行会二次取数阻塞加载，故关闭
             df, source = manager.get_daily_data(stock_code, days=days, reconcile=False)
-            
+
             if df is None or df.empty:
                 logger.warning(f"获取 {stock_code} 历史数据失败")
                 return {"stock_code": stock_code, "period": period, "data": []}
-            
+
+            # 取到后落库（UPSERT 幂等），下次请求走 DB 快路径，港股同理可被缓存
+            self._persist_daily_cache(df, stock_code, source)
+
             # 获取股票名称
             stock_name = manager.get_stock_name(stock_code)
-            
+
             # 转换为响应格式
             data = []
             for _, row in df.iterrows():

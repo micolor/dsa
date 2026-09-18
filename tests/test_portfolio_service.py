@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,7 +21,14 @@ from sqlalchemy import select
 
 from src.config import Config
 from src.repositories.portfolio_repo import PortfolioBusyError, PortfolioRepository
-from src.services.portfolio_service import _AvgState, PortfolioConflictError, PortfolioOversellError, PortfolioService
+from src.services import portfolio_cache
+from src.services.portfolio_service import (
+    _AvgState,
+    _QUOTE_REFRESH_INFLIGHT,
+    PortfolioConflictError,
+    PortfolioOversellError,
+    PortfolioService,
+)
 from src.storage import DatabaseManager, PortfolioDailySnapshot, PortfolioPosition, PortfolioPositionLot, PortfolioTrade
 
 
@@ -51,6 +59,8 @@ class PortfolioServiceTestCase(unittest.TestCase):
 
         self.db = DatabaseManager.get_instance()
         self.service = PortfolioService()
+        # 后台刷新线程是 daemon，模块级 in-flight 标记可能跨测试残留，避免误跳过取数
+        _QUOTE_REFRESH_INFLIGHT.clear()
 
     def tearDown(self) -> None:
         DatabaseManager.reset_instance()
@@ -75,6 +85,21 @@ class PortfolioServiceTestCase(unittest.TestCase):
             ]
         )
         self.db.save_daily_data(df, code=symbol, data_source="unit-test")
+
+    def _cache_quote(
+        self,
+        symbol: str,
+        price: float,
+        provider: str = "unit-test",
+        quote_date: Optional[date] = None,
+    ) -> None:
+        """种子 position_quote_cache：给 _resolve_position_price 提供新鲜实时缓存。"""
+        self.service.repo.upsert_cached_quote(
+            symbol=symbol,
+            price=price,
+            provider=provider,
+            quote_date=quote_date or date.today(),
+        )
 
     def _create_account_with_position(
         self,
@@ -110,7 +135,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             self._save_close(self.service._normalize_symbol(symbol), close_date or date(2026, 1, 3), close)
         return aid
 
-    def test_current_snapshot_uses_realtime_price_when_close_missing(self) -> None:
+    def test_current_snapshot_uses_cached_quote_when_close_missing(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
@@ -124,19 +149,22 @@ class PortfolioServiceTestCase(unittest.TestCase):
             market="cn",
             currency="CNY",
         )
+        self._cache_quote("600519", 125.0, "unit-test", today)
 
-        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(None, None)):
             snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
 
         pos = snapshot["accounts"][0]["positions"][0]
         self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
         self.assertAlmostEqual(pos["market_value_base"], 1250.0, places=6)
         self.assertAlmostEqual(pos["unrealized_pnl_base"], 250.0, places=6)
-        self.assertEqual(pos["price_source"], "realtime_quote")
+        self.assertEqual(pos["price_source"], "realtime_cached")
         self.assertEqual(pos["price_provider"], "unit-test")
+        self.assertFalse(pos["price_stale"])
+        self.assertEqual(pos["price_date"], today.isoformat())
         self.assertTrue(pos["price_available"])
 
-    def test_current_snapshot_prefers_realtime_price_over_stale_close(self) -> None:
+    def test_current_snapshot_prefers_cached_quote_over_stale_close(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
@@ -151,21 +179,22 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="CNY",
         )
         self._save_close("600519", today - timedelta(days=1), 110.0)
+        self._cache_quote("600519", 125.0, "unit-test", today)
 
-        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(None, None)):
             snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
 
         pos = snapshot["accounts"][0]["positions"][0]
         self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
         self.assertAlmostEqual(pos["market_value_base"], 1250.0, places=6)
         self.assertAlmostEqual(pos["unrealized_pnl_base"], 250.0, places=6)
-        self.assertEqual(pos["price_source"], "realtime_quote")
+        self.assertEqual(pos["price_source"], "realtime_cached")
         self.assertEqual(pos["price_provider"], "unit-test")
         self.assertEqual(pos["price_date"], today.isoformat())
         self.assertFalse(pos["price_stale"])
         self.assertTrue(pos["price_available"])
 
-    def test_current_snapshot_prefers_realtime_price_over_same_day_close(self) -> None:
+    def test_current_snapshot_prefers_cached_quote_over_same_day_close(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
@@ -180,15 +209,16 @@ class PortfolioServiceTestCase(unittest.TestCase):
             currency="CNY",
         )
         self._save_close("600519", today, 118.0)
+        self._cache_quote("600519", 125.0, "unit-test", today)
 
-        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(None, None)):
             snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
 
         pos = snapshot["accounts"][0]["positions"][0]
         self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
         self.assertAlmostEqual(pos["market_value_base"], 1250.0, places=6)
         self.assertAlmostEqual(pos["unrealized_pnl_base"], 250.0, places=6)
-        self.assertEqual(pos["price_source"], "realtime_quote")
+        self.assertEqual(pos["price_source"], "realtime_cached")
         self.assertEqual(pos["price_provider"], "unit-test")
         self.assertEqual(pos["price_date"], today.isoformat())
         self.assertFalse(pos["price_stale"])
@@ -259,11 +289,13 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertTrue(pos["price_stale"])
         self.assertTrue(pos["price_available"])
 
-    def test_current_snapshot_does_not_serialize_non_bulk_realtime_prefetch(self) -> None:
+    def test_current_snapshot_background_refresh_populates_cache_and_second_view_uses_it(self) -> None:
+        """请求路径不阻塞实时行情：首次无缓存回到 missing，后台刷新写回缓存，二次视图命中新鲜缓存。"""
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
-        for symbol in ["600519", "000001", "300750"]:
+        symbols = ["600519", "000001", "300750"]
+        for symbol in symbols:
             self.service.record_trade(
                 account_id=aid,
                 symbol=symbol,
@@ -275,51 +307,45 @@ class PortfolioServiceTestCase(unittest.TestCase):
                 currency="CNY",
             )
 
-        fetch_state = {"active": 0, "max_active": 0}
-        lock = threading.Lock()
-        release = threading.Event()
-        called_symbols: list[str] = []
-        manager_instances: list[object] = []
+        fetched: list[str] = []
 
-        class FakeDataFetcherManager:
-            def __init__(self) -> None:
-                self._fetcher_call_lock = threading.Lock()
-                manager_instances.append(self)
+        def fake_fetch(symbol: str) -> tuple[Optional[float], Optional[str]]:
+            fetched.append(symbol)
+            return (125.0, "unit-test")
 
-            def get_realtime_quote(self, symbol: str, log_final_failure: bool = True) -> SimpleNamespace:
-                del log_final_failure
-                with self._fetcher_call_lock:
-                    with lock:
-                        called_symbols.append(symbol)
-                        fetch_state["active"] += 1
-                        fetch_state["max_active"] = max(fetch_state["max_active"], fetch_state["active"])
-                        if fetch_state["active"] >= 2:
-                            release.set()
-                    release.wait(timeout=1.0)
-                    with lock:
-                        fetch_state["active"] -= 1
-                    return SimpleNamespace(price=125.0, source="unit-test")
-
-        with patch("data_provider.base.DataFetcherManager", new=FakeDataFetcherManager):
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", side_effect=fake_fetch):
+            # 首次请求路径不得内联取实时价（非阻塞）
             snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
 
         positions = snapshot["accounts"][0]["positions"]
         self.assertEqual(len(positions), 3)
-        self.assertEqual(set(called_symbols), {position["symbol"] for position in positions})
-        self.assertGreaterEqual(len(manager_instances), 2)
-        self.assertGreaterEqual(fetch_state["max_active"], 2)
-        self.assertTrue(all(position["price_source"] == "realtime_quote" for position in positions))
-        self.assertTrue(all(position["price_provider"] == "unit-test" for position in positions))
+        for p in positions:
+            self.assertNotEqual(p["price_source"], "realtime_quote")
 
-    def test_current_snapshot_does_not_serialize_when_bulk_prefetch_cache_misses(self) -> None:
-        """Bulk-prefetch path must not share a fetcher manager across workers.
+        # 等后台线程写回全部缓存
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if len(fetched) >= 3 and all(
+                self.service.repo.get_latest_cached_quote(s) is not None for s in symbols
+            ):
+                break
+            time.sleep(0.02)
 
-        Reproduces the #1803 regression where ``prefetch_realtime_quotes`` reports a
-        full-count result but per-symbol ``get_realtime_quote`` still issues a live
-        fetch (mixed markets / cache miss). Each worker must create its own manager
-        so manager-owned per-fetcher locks do not re-serialize the requests.
-        """
+        self.assertEqual(set(fetched), set(symbols))
+        for s in symbols:
+            cached = self.service.repo.get_latest_cached_quote(s)
+            self.assertIsNotNone(cached)
+            self.assertAlmostEqual(cached.price, 125.0, places=6)
 
+        # 强制快照缓存过期，二次视图应命中新鲜持久化缓存
+        portfolio_cache.clear()
+        snapshot2 = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
+        for p in snapshot2["accounts"][0]["positions"]:
+            self.assertEqual(p["price_source"], "realtime_cached")
+            self.assertAlmostEqual(p["last_price"], 125.0, places=6)
+
+    def test_current_snapshot_background_refresh_batches_all_symbols_without_blocking(self) -> None:
+        """大持仓集合：后台一次性刷新全部标的，请求路径不阻塞（不内联实时取数）。"""
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
@@ -336,53 +362,34 @@ class PortfolioServiceTestCase(unittest.TestCase):
                 currency="CNY",
             )
 
-        fetch_state = {"active": 0, "max_active": 0}
-        lock = threading.Lock()
-        release = threading.Event()
-        manager_instances: list[object] = []
-        prefetch_calls: list[list[str]] = []
+        fetched: list[str] = []
 
-        class FakeDataFetcherManager:
-            def __init__(self) -> None:
-                # Per-instance lock mirrors DataFetcherManager._call_fetcher_method,
-                # which serializes per-fetcher access through manager-owned locks.
-                self._fetcher_call_lock = threading.Lock()
-                manager_instances.append(self)
+        def fake_fetch(symbol: str) -> tuple[Optional[float], Optional[str]]:
+            fetched.append(symbol)
+            return (125.0, "unit-test")
 
-            def prefetch_realtime_quotes(self, stock_codes: list) -> int:
-                prefetch_calls.append(list(stock_codes))
-                # Report a full-count bulk prefetch, simulating the optimistic
-                # "cache fully filled" signal the previous implementation trusted.
-                return len(stock_codes)
-
-            def get_realtime_quote(self, symbol: str, log_final_failure: bool = True) -> SimpleNamespace:
-                del log_final_failure
-                with self._fetcher_call_lock:
-                    with lock:
-                        fetch_state["active"] += 1
-                        fetch_state["max_active"] = max(fetch_state["max_active"], fetch_state["active"])
-                        if fetch_state["active"] >= 2:
-                            release.set()
-                    release.wait(timeout=2.0)
-                    with lock:
-                        fetch_state["active"] -= 1
-                    return SimpleNamespace(price=125.0, source="unit-test")
-
-        with patch("data_provider.base.DataFetcherManager", new=FakeDataFetcherManager):
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", side_effect=fake_fetch):
             snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
 
         positions = snapshot["accounts"][0]["positions"]
         self.assertEqual(len(positions), len(symbols))
-        # Bulk prefetch path must still be exercised for large batches.
-        self.assertEqual(len(prefetch_calls), 1)
-        self.assertEqual(len(prefetch_calls[0]), len(symbols))
-        # One manager warmed the cache; each per-symbol worker created its own.
-        self.assertGreaterEqual(len(manager_instances), len(symbols) + 1)
-        # Per-worker independent managers must allow real concurrency even when
-        # the bulk prefetch claims a full cache fill.
-        self.assertGreaterEqual(fetch_state["max_active"], 2)
-        self.assertTrue(all(position["price_source"] == "realtime_quote" for position in positions))
-        self.assertTrue(all(position["price_provider"] == "unit-test" for position in positions))
+        for p in positions:
+            self.assertNotEqual(p["price_source"], "realtime_quote")
+
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if len(fetched) >= len(symbols) and all(
+                self.service.repo.get_latest_cached_quote(s) is not None for s in symbols
+            ):
+                break
+            time.sleep(0.02)
+
+        self.assertEqual(set(fetched), set(symbols))
+        portfolio_cache.clear()
+        snapshot2 = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
+        self.assertTrue(
+            all(p["price_source"] == "realtime_cached" for p in snapshot2["accounts"][0]["positions"])
+        )
 
     def test_historical_snapshot_marks_missing_price_without_cost_fallback(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

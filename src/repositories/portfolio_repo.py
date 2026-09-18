@@ -24,6 +24,7 @@ from src.storage import (
     PortfolioPosition,
     PortfolioPositionLot,
     PortfolioTrade,
+    PositionQuoteCache,
     StockDaily,
 )
 
@@ -787,6 +788,44 @@ class PortfolioRepository:
                 .limit(1)
             ).scalar_one_or_none()
             return row
+
+    def get_latest_cached_quote(self, symbol: str) -> Optional[PositionQuoteCache]:
+        """读取标的最近一次持久化的实时行情（无则返回 None）。用于持仓估值秒读快路径。"""
+        with self.db.get_session() as session:
+            return session.execute(
+                select(PositionQuoteCache).where(PositionQuoteCache.symbol == symbol)
+            ).scalar_one_or_none()
+
+    def upsert_cached_quote(
+        self,
+        *,
+        symbol: str,
+        price: float,
+        provider: Optional[str] = None,
+        quote_date: Optional[date] = None,
+    ) -> None:
+        """按 symbol 幂等 upsert 标的最近一次实时行情（写入 fetched_at=now）。"""
+        with self.db.get_session() as session:
+            existing = session.execute(
+                select(PositionQuoteCache).where(PositionQuoteCache.symbol == symbol).limit(1)
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(
+                    PositionQuoteCache(
+                        symbol=symbol,
+                        price=price,
+                        provider=provider,
+                        quote_date=quote_date,
+                        fetched_at=datetime.now(),
+                    )
+                )
+            else:
+                existing.price = price
+                existing.provider = provider
+                existing.quote_date = quote_date
+                existing.fetched_at = datetime.now()
+                existing.updated_at = datetime.now()
+            session.commit()
 
     def list_daily_snapshots_for_risk(
         self,

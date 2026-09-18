@@ -15,7 +15,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional, Tuple
 
-TTL_SECONDS = 5.0
+# 行情已由持久化 position_quote_cache + 后台刷新供数，TTL 提高到 15s 以降低重算频率，仍不显著拖旧。
+TTL_SECONDS = 15.0
 
 _SNAPSHOT: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
 _DIRTY = False

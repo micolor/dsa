@@ -168,6 +168,32 @@ class StockDaily(Base):
         }
 
 
+class PositionQuoteCache(Base):
+    """
+    持仓估值用的「每标的最新行情」缓存。
+    供 PortfolioService._resolve_position_price 秒读，避免每次快照重算都同步走实时 provider 瀑布。
+    请求路径只读本表（命中新鲜窗口即返回）；网络刷新由后台线程写回。
+    """
+    __tablename__ = 'position_quote_cache'
+
+    # 主键：标的代码（如 600519 / SH601318 / HK00700）
+    symbol = Column(String(20), primary_key=True)
+
+    price = Column(Float, nullable=False)
+    provider = Column(String(50))  # 实时行情来源，如 eastmoney / yfinance
+    quote_date = Column(Date)  # 行情归属交易日（一般为获取当日）
+    fetched_at = Column(DateTime, default=datetime.now)  # 本次取到的时间戳，用于新鲜度判定
+
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return (
+            f"<PositionQuoteCache(symbol={self.symbol}, price={self.price}, "
+            f"fetched_at={self.fetched_at})>"
+        )
+
+
 class NewsIntel(Base):
     """
     新闻情报数据模型
