@@ -21,6 +21,8 @@ DECISION_SIGNAL_PATHS = (
     "/api/v1/decision-signals/outcomes/run",
     "/api/v1/decision-signals/outcomes",
     "/api/v1/decision-signals/outcomes/stats",
+    "/api/v1/decision-signals/skill-outcomes/run",
+    "/api/v1/decision-signals/skill-outcomes/stats",
     "/api/v1/decision-signals/latest/{stock_code}",
     "/api/v1/decision-signals/{signal_id}/outcomes",
     "/api/v1/decision-signals/{signal_id}/feedback",
@@ -49,6 +51,11 @@ DECISION_SIGNAL_SCHEMAS = (
     "DecisionSignalReassessResponse",
     "DecisionSignalStatusUpdateRequest",
     "DecisionSignalWarning",
+    "SkillOpinionOutcomeItem",
+    "SkillOpinionOutcomeRunRequest",
+    "SkillOpinionOutcomeRunResponse",
+    "SkillOpinionPerformanceBucket",
+    "SkillOpinionPerformanceStatsResponse",
 )
 P6_SIGNAL_LINKED_PATHS = (
     "/api/v1/alerts/triggers",
@@ -219,7 +226,22 @@ def test_decision_signal_static_api_spec_matches_runtime_paths() -> None:
     assert "暂无认证要求" not in static_spec["info"]["description"]
     assert "ADMIN_AUTH_ENABLED=true" in static_spec["info"]["description"]
     for path in DECISION_SIGNAL_PATHS:
+        assert path in static_spec["paths"], f"{path} is missing from the static API spec"
         assert static_spec["paths"][path] == runtime_spec["paths"][path]
+        for operation in static_spec["paths"][path].values():
+            assert "401" in operation["responses"]
+            assert operation["security"] == [{"AdminSessionCookie": []}]
+    # The tuples above are a hand-maintained allowlist, so a newly added route
+    # escapes them entirely. /skill-outcomes/run and /skill-outcomes/stats did
+    # exactly that: they shipped in the router while the static spec kept only
+    # the ten paths named above. Assert the admin-auth contract over every route
+    # the router actually mounts, so the next one cannot slip through.
+    mounted_paths = sorted(
+        path for path in runtime_spec["paths"] if path.startswith("/api/v1/decision-signals")
+    )
+    assert mounted_paths, "the decision-signal routes are not mounted"
+    for path in mounted_paths:
+        assert path in static_spec["paths"], f"{path} is missing from the static API spec"
         for operation in static_spec["paths"][path].values():
             assert "401" in operation["responses"]
             assert operation["security"] == [{"AdminSessionCookie": []}]
@@ -237,6 +259,50 @@ def test_decision_signal_static_api_spec_matches_runtime_paths() -> None:
 
     status_schema = static_spec["components"]["schemas"]["DecisionSignalStatusUpdateRequest"]["properties"]["status"]
     assert status_schema["enum"] == ["active", "expired", "invalidated", "closed", "archived"]
+
+
+def test_static_api_spec_is_a_faithful_dump_of_the_runtime_contract() -> None:
+    """`docs/architecture/api_spec.json` is a generated artifact and must not drift.
+
+    It is produced from the live app and is never hand-edited. Regenerate with:
+
+        python - <<'PY'
+        import json
+        from api.app import create_app
+        spec = create_app().openapi()
+        open("docs/architecture/api_spec.json", "w", encoding="utf-8").write(
+            json.dumps(spec, ensure_ascii=False, indent=2) + "\\n"
+        )
+        PY
+
+    The spec drifted once before (the CHANGELOG records a regeneration that fixed
+    90 missing paths and 127 missing schemas). What remained was only guarded by
+    per-module hand-written allowlists, so /skill-outcomes/run,
+    /skill-outcomes/stats, /api/v1/paper/reset, /api/v1/notifications/deliveries,
+    /api/v1/data-quality/discrepancies and
+    /api/v1/portfolio/positions/{symbol}/price-history all stayed undocumented
+    indefinitely. Comparing the whole artifact fails on any new or re-signatured
+    route and names it.
+    """
+    static_spec_path = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "api_spec.json"
+    static_spec = json.loads(static_spec_path.read_text(encoding="utf-8"))
+    runtime_spec = create_app().openapi()
+
+    assert sorted(static_spec["paths"]) == sorted(runtime_spec["paths"])
+    assert sorted(static_spec["components"]["schemas"]) == sorted(
+        runtime_spec["components"]["schemas"]
+    )
+
+    path_drift = sorted(
+        path for path in runtime_spec["paths"] if static_spec["paths"][path] != runtime_spec["paths"][path]
+    )
+    schema_drift = sorted(
+        name
+        for name in runtime_spec["components"]["schemas"]
+        if static_spec["components"]["schemas"][name] != runtime_spec["components"]["schemas"][name]
+    )
+    assert path_drift == []
+    assert schema_drift == []
 
 
 def test_v1_prefix_is_applied_at_app_mount_level() -> None:

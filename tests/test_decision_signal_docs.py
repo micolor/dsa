@@ -32,6 +32,8 @@ def test_decision_signal_topic_references_live_api_schema_and_docs() -> None:
         "/api/v1/decision-signals/latest/{stock_code}",
         "/api/v1/decision-signals/outcomes/run",
         "/api/v1/decision-signals/outcomes/stats",
+        "/api/v1/decision-signals/skill-outcomes/run",
+        "/api/v1/decision-signals/skill-outcomes/stats",
         "/api/v1/decision-signals/{signal_id}/feedback",
     ):
         assert path in topic

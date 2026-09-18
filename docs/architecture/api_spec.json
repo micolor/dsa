@@ -1834,6 +1834,24 @@
         "summary": "获取自选队列",
         "description": "返回当前 STOCK_LIST 配置中的所有股票代码。",
         "operationId": "get_watchlist_api_v1_stocks_watchlist_get",
+        "parameters": [
+          {
+            "name": "list_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "List Name"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "当前自选队列",
@@ -1851,6 +1869,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1872,26 +1900,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "lists": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "key": {
-                            "type": "string"
-                          },
-                          "count": {
-                            "type": "integer"
-                          }
-                        }
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/WatchlistListsResponse"
                 }
               }
             }
@@ -2120,12 +2129,12 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(daily|weekly|monthly)$",
-              "description": "K 线周期",
+              "pattern": "^(daily)$",
+              "description": "K 线周期（当前仅支持 daily）",
               "default": "daily",
               "title": "Period"
             },
-            "description": "K 线周期"
+            "description": "K 线周期（当前仅支持 daily）"
           },
           {
             "name": "days",
@@ -5036,6 +5045,82 @@
         }
       }
     },
+    "/api/v1/portfolio/positions/{symbol}/price-history": {
+      "get": {
+        "tags": [
+          "Portfolio"
+        ],
+        "summary": "Get recent daily close history for a held position",
+        "operationId": "get_position_price_history_api_v1_portfolio_positions__symbol__price_history_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 250,
+              "minimum": 1,
+              "default": 20,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Position Price History Api V1 Portfolio Positions  Symbol  Price History Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/portfolio/imports/csv/parse": {
       "post": {
         "tags": [
@@ -5896,6 +5981,74 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BackfillResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/reset": {
+      "post": {
+        "tags": [
+          "Paper"
+        ],
+        "summary": "重置模拟盘账户",
+        "operationId": "reset_account_api_v1_paper_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PaperResetRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperAccountResponse"
                 }
               }
             }
@@ -8231,6 +8384,206 @@
         }
       }
     },
+    "/api/v1/decision-signals/skill-outcomes/run": {
+      "post": {
+        "tags": [
+          "DecisionSignals"
+        ],
+        "summary": "触发 skill 意见后验评估",
+        "description": "显式触发 skill-level outcome 计算；默认只处理缺失/待评估 outcome key，limit 控制单次最多评估的 key 数。",
+        "operationId": "runSkillOpinionOutcomes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillOpinionOutcomeRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillOpinionOutcomeRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求字段非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "后验计算失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/decision-signals/skill-outcomes/stats": {
+      "get": {
+        "tags": [
+          "DecisionSignals"
+        ],
+        "summary": "查询 skill 意见后验统计",
+        "description": "按 skill / horizon 聚合命中率统计；低于最小评估样本数（5）的 bucket 标记为 observational（sample_sufficient=false），hit_rate_pct 为 null。pending_reasons / unable_reasons 给出非终态与终态的原因分布，用于区分「还在等数据」和「等不到数据」。",
+        "operationId": "getSkillOpinionOutcomeStats",
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Id"
+            }
+          },
+          {
+            "name": "skill_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill Ids"
+            }
+          },
+          {
+            "name": "horizons",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizons"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillOpinionPerformanceStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "查询参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "查询参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "统计失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/screening/status": {
       "get": {
         "tags": [
@@ -9417,6 +9770,246 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntelligenceItemListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/deliveries": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "List notification delivery receipts",
+        "operationId": "list_deliveries_api_v1_notifications_deliveries_get",
+        "parameters": [
+          {
+            "name": "route_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional route type filter",
+              "title": "Route Type"
+            },
+            "description": "Optional route type filter"
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional channel filter",
+              "title": "Channel"
+            },
+            "description": "Optional channel filter"
+          },
+          {
+            "name": "success",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional success filter",
+              "title": "Success"
+            },
+            "description": "Optional success filter"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDeliveryListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-quality/discrepancies": {
+      "get": {
+        "tags": [
+          "DataQuality"
+        ],
+        "summary": "List cross-source data-quality discrepancies",
+        "operationId": "list_discrepancies_api_v1_data_quality_discrepancies_get",
+        "parameters": [
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional market filter",
+              "title": "Market"
+            },
+            "description": "Optional market filter"
+          },
+          {
+            "name": "stock_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional stock code filter",
+              "title": "Stock Code"
+            },
+            "description": "Optional stock code filter"
+          },
+          {
+            "name": "issue_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional issue type filter",
+              "title": "Issue Type"
+            },
+            "description": "Optional issue type filter"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataQualityDiscrepancyListResponse"
                 }
               }
             }
@@ -12229,6 +12822,159 @@
         ],
         "title": "ConfigValidationIssue",
         "description": "Validation issue details."
+      },
+      "DataQualityDiscrepancyItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "market": {
+            "type": "string",
+            "title": "Market"
+          },
+          "stockCode": {
+            "type": "string",
+            "title": "Stockcode"
+          },
+          "issueType": {
+            "type": "string",
+            "title": "Issuetype"
+          },
+          "primarySource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarysource"
+          },
+          "secondarySource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondarysource"
+          },
+          "primaryPrice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primaryprice"
+          },
+          "secondaryPrice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondaryprice"
+          },
+          "priceDiffPct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricediffpct"
+          },
+          "primaryTs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primaryts"
+          },
+          "secondaryTs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondaryts"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "market",
+          "stockCode",
+          "issueType",
+          "createdAt"
+        ],
+        "title": "DataQualityDiscrepancyItem"
+      },
+      "DataQualityDiscrepancyListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataQualityDiscrepancyItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "DataQualityDiscrepancyListResponse"
       },
       "DecisionSignalCreateRequest": {
         "properties": {
@@ -16576,6 +17322,114 @@
           "total": 2
         }
       },
+      "NotificationDeliveryItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "route_type": {
+            "type": "string",
+            "title": "Route Type"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "route_type",
+          "channel",
+          "attempt",
+          "success",
+          "retryable",
+          "created_at"
+        ],
+        "title": "NotificationDeliveryItem"
+      },
+      "NotificationDeliveryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationDeliveryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "NotificationDeliveryListResponse"
+      },
       "NotificationTestAttempt": {
         "properties": {
           "channel": {
@@ -16818,6 +17672,25 @@
         ],
         "title": "PaperPositionItem"
       },
+      "PaperResetRequest": {
+        "properties": {
+          "initial_capital": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Capital",
+            "description": "新账户初始资金，省略则用 PAPER_INITIAL_CAPITAL 配置值"
+          }
+        },
+        "type": "object",
+        "title": "PaperResetRequest"
+      },
       "PaperSignalItem": {
         "properties": {
           "signal_id": {
@@ -16976,6 +17849,11 @@
               }
             ],
             "title": "Amount"
+          },
+          "fee": {
+            "type": "number",
+            "title": "Fee",
+            "default": 0.0
           },
           "trade_date": {
             "type": "string",
@@ -20417,6 +21295,486 @@
         ],
         "title": "SkillInfo"
       },
+      "SkillOpinionOutcomeItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "skill_opinion_sample_id": {
+            "type": "integer",
+            "title": "Skill Opinion Sample Id"
+          },
+          "analysis_history_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis History Id"
+          },
+          "stock_code": {
+            "type": "string",
+            "title": "Stock Code"
+          },
+          "skill_id": {
+            "type": "string",
+            "title": "Skill Id"
+          },
+          "signal": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal"
+          },
+          "horizon": {
+            "type": "string",
+            "title": "Horizon"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "eval_status": {
+            "type": "string",
+            "title": "Eval Status"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "direction_correct": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction Correct"
+          },
+          "unable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable Reason"
+          },
+          "analysis_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Date"
+          },
+          "start_trade_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Trade Date"
+          },
+          "end_trade_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Trade Date"
+          },
+          "start_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price"
+          },
+          "end_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Close"
+          },
+          "stock_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Return Pct"
+          },
+          "directional_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directional Return Pct"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "skill_opinion_sample_id",
+          "stock_code",
+          "skill_id",
+          "horizon",
+          "engine_version",
+          "eval_status"
+        ],
+        "title": "SkillOpinionOutcomeItem"
+      },
+      "SkillOpinionOutcomeRunRequest": {
+        "properties": {
+          "sample_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Id"
+          },
+          "analysis_history_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis History Id"
+          },
+          "skill_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxLength": 64,
+            "title": "Skill Id"
+          },
+          "stock_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxLength": 32,
+            "title": "Stock Code"
+          },
+          "horizons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizons"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SkillOpinionOutcomeRunRequest"
+      },
+      "SkillOpinionOutcomeRunResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillOpinionOutcomeItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "processed_keys": {
+            "type": "integer",
+            "title": "Processed Keys"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "limit_unit": {
+            "type": "string",
+            "title": "Limit Unit"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "processed_keys",
+          "created",
+          "updated",
+          "skipped",
+          "failed",
+          "limit_unit",
+          "engine_version"
+        ],
+        "title": "SkillOpinionOutcomeRunResponse"
+      },
+      "SkillOpinionPerformanceBucket": {
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "title": "Skill Id"
+          },
+          "horizon": {
+            "type": "string",
+            "title": "Horizon"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "evaluated": {
+            "type": "integer",
+            "title": "Evaluated"
+          },
+          "observational": {
+            "type": "integer",
+            "title": "Observational"
+          },
+          "unable": {
+            "type": "integer",
+            "title": "Unable"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "miss": {
+            "type": "integer",
+            "title": "Miss"
+          },
+          "pending_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Pending Reasons"
+          },
+          "unable_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unable Reasons"
+          },
+          "sample_sufficient": {
+            "type": "boolean",
+            "title": "Sample Sufficient"
+          },
+          "sample_status": {
+            "type": "string",
+            "title": "Sample Status"
+          },
+          "hit_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate Pct"
+          },
+          "miss_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Miss Rate Pct"
+          },
+          "avg_directional_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Directional Return Pct"
+          },
+          "unable_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable Rate Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skill_id",
+          "horizon",
+          "engine_version",
+          "total",
+          "pending",
+          "evaluated",
+          "observational",
+          "unable",
+          "hit",
+          "miss",
+          "sample_sufficient",
+          "sample_status"
+        ],
+        "title": "SkillOpinionPerformanceBucket"
+      },
+      "SkillOpinionPerformanceStatsResponse": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "minimum_evaluated_sample_size": {
+            "type": "integer",
+            "title": "Minimum Evaluated Sample Size"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/SkillOpinionPerformanceBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine_version",
+          "minimum_evaluated_sample_size"
+        ],
+        "title": "SkillOpinionPerformanceStatsResponse"
+      },
       "SkillsResponse": {
         "properties": {
           "skills": {
@@ -22496,6 +23854,48 @@
         ],
         "title": "ValidationError"
       },
+      "WatchlistListInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "列表名"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "配置项键名"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "列表内股票数量",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "key"
+        ],
+        "title": "WatchlistListInfo",
+        "description": "单个命名自选列表的摘要。"
+      },
+      "WatchlistListsResponse": {
+        "properties": {
+          "lists": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistListInfo"
+            },
+            "type": "array",
+            "title": "Lists",
+            "description": "已配置的命名列表"
+          }
+        },
+        "type": "object",
+        "title": "WatchlistListsResponse",
+        "description": "命名自选列表明细。"
+      },
       "WatchlistRequest": {
         "properties": {
           "stock_code": {
@@ -22503,6 +23903,18 @@
             "minLength": 1,
             "title": "Stock Code",
             "description": "股票代码"
+          },
+          "list_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "List Name",
+            "description": "目标自选列表名；为空时作用于默认 STOCK_LIST"
           }
         },
         "type": "object",
@@ -22526,6 +23938,18 @@
             "type": "string",
             "title": "Message",
             "description": "操作结果描述"
+          },
+          "list_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "List Name",
+            "description": "本次操作作用的列表名；为空表示默认 STOCK_LIST"
           }
         },
         "type": "object",
