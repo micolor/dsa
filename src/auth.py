@@ -67,15 +67,28 @@ def _get_credential_path() -> Path:
 
 
 def _is_auth_enabled_from_env() -> bool:
-    """Read ADMIN_AUTH_ENABLED from .env file."""
+    """
+    Read ADMIN_AUTH_ENABLED, preferring the process environment over the .env file.
+
+    The process environment must win for the same reason every other Config field
+    works that way (setup_env uses load_dotenv(override=False)), and because the
+    official Docker image ships no .env: docker-compose injects it via env_file,
+    so the container has the variable in its environment and no file to read.
+    Reading only the file made is_auth_enabled() a constant False there — every
+    /api/v1/* request was let through even with ADMIN_AUTH_ENABLED=true, and
+    login answered auth_disabled, so the missing boundary looked like a system
+    that simply has auth turned off.
+    """
     _ensure_env_loaded()
-    env_file = os.getenv("ENV_FILE")
-    env_path = Path(env_file) if env_file else Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        return False
-    values = dotenv_values(env_path)
-    val = (values.get("ADMIN_AUTH_ENABLED") or "").strip().lower()
-    return val in ("true", "1", "yes")
+    val = (os.getenv("ADMIN_AUTH_ENABLED") or "").strip()
+    if not val:
+        env_file = os.getenv("ENV_FILE")
+        env_path = Path(env_file) if env_file else Path(__file__).resolve().parent.parent / ".env"
+        if not env_path.exists():
+            return False
+        values = dotenv_values(env_path)
+        val = (values.get("ADMIN_AUTH_ENABLED") or "").strip()
+    return val.lower() in ("true", "1", "yes")
 
 
 def rotate_session_secret() -> bool:

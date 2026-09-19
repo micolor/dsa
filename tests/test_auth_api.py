@@ -814,6 +814,9 @@ class AuthDisableViaRealASGITestCase(unittest.TestCase):
         )
         os.environ["ENV_FILE"] = str(cls.env_path)
         os.environ["DATABASE_PATH"] = str(cls.data_dir / "test.db")
+        # ADMIN_AUTH_ENABLED 以进程环境优先，与 .env 里的值保持一致，避免开发机
+        # 真实 .env 泄漏进来的值把这条前置条件顶掉。
+        os.environ["ADMIN_AUTH_ENABLED"] = "true"
         Config.reset_instance()
 
         cls._data_dir_patcher = patch.object(
@@ -837,13 +840,16 @@ class AuthDisableViaRealASGITestCase(unittest.TestCase):
         Config.reset_instance()
         os.environ.pop("ENV_FILE", None)
         os.environ.pop("DATABASE_PATH", None)
+        os.environ.pop("ADMIN_AUTH_ENABLED", None)
         _reset_auth_globals()
         cls._temp_dir.cleanup()
 
     def setUp(self) -> None:
         # Each test starts from auth-enabled + a stored password; the disable
-        # path mutates the .env so we restore it before every test.
+        # path mutates the .env (and syncs the process env) so we restore both
+        # before every test.
         _reset_auth_globals()
+        os.environ["ADMIN_AUTH_ENABLED"] = "true"
         self.env_path.write_text(
             "STOCK_LIST=600519\nGEMINI_API_KEY=test\nADMIN_AUTH_ENABLED=true\n",
             encoding="utf-8",
@@ -973,6 +979,9 @@ class AuthChangePasswordViaRealASGITestCase(unittest.TestCase):
         )
         os.environ["ENV_FILE"] = str(cls.env_path)
         os.environ["DATABASE_PATH"] = str(cls.data_dir / "test.db")
+        # ADMIN_AUTH_ENABLED 以进程环境优先，与 .env 里的值保持一致，避免开发机
+        # 真实 .env 泄漏进来的值把这条前置条件顶掉。
+        os.environ["ADMIN_AUTH_ENABLED"] = "true"
         Config.reset_instance()
 
         cls._data_dir_patcher = patch.object(
@@ -995,6 +1004,7 @@ class AuthChangePasswordViaRealASGITestCase(unittest.TestCase):
         Config.reset_instance()
         os.environ.pop("ENV_FILE", None)
         os.environ.pop("DATABASE_PATH", None)
+        os.environ.pop("ADMIN_AUTH_ENABLED", None)
         _reset_auth_globals()
         cls._temp_dir.cleanup()
 

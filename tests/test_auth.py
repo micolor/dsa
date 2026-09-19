@@ -232,12 +232,39 @@ class AuthSetPasswordTestCase(unittest.TestCase):
         self._run_with_patch(run)
 
     def test_is_auth_enabled_from_env_respects_env_file(self) -> None:
+        # 进程环境里没有该键时，仍回落到 .env 文件（本地 python main.py 的默认路径）。
         custom_env = self.data_dir / "custom.env"
         custom_env.write_text("ADMIN_AUTH_ENABLED=true\n", encoding="utf-8")
+        saved = os.environ.pop("ADMIN_AUTH_ENABLED", None)
+        try:
+            with patch.dict(os.environ, {"ENV_FILE": str(custom_env)}):
+                auth._auth_enabled = None
+                self.assertTrue(auth._is_auth_enabled_from_env())
+        finally:
+            if saved is not None:
+                os.environ["ADMIN_AUTH_ENABLED"] = saved
 
-        with patch.dict(os.environ, {"ENV_FILE": str(custom_env)}):
+    def test_is_auth_enabled_from_env_reads_process_env_without_env_file(self) -> None:
+        # 官方 Docker 镜像里没有 .env：docker-compose 用 env_file 把变量注进进程环境。
+        # 只读文件的实现会让开关恒为 False，/api/v1/* 全部放行。
+        missing_env = self.data_dir / "absent.env"
+        with patch.dict(
+            os.environ,
+            {"ENV_FILE": str(missing_env), "ADMIN_AUTH_ENABLED": "true"},
+        ):
             auth._auth_enabled = None
             self.assertTrue(auth._is_auth_enabled_from_env())
+
+    def test_is_auth_enabled_from_env_process_env_overrides_env_file(self) -> None:
+        enabled_env = self.data_dir / "enabled.env"
+        enabled_env.write_text("ADMIN_AUTH_ENABLED=true\n", encoding="utf-8")
+
+        with patch.dict(
+            os.environ,
+            {"ENV_FILE": str(enabled_env), "ADMIN_AUTH_ENABLED": "false"},
+        ):
+            auth._auth_enabled = None
+            self.assertFalse(auth._is_auth_enabled_from_env())
 
     def test_refresh_auth_state_clears_session_secret_cache(self) -> None:
         def run():
