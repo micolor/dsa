@@ -294,6 +294,83 @@ describe('AlertRuleList', () => {
     expect(onAlertTypeFilterChange).toHaveBeenCalledWith('market_light_score_drop');
   });
 
+  it('renders event alert rules with their own labels and thresholds', async () => {
+    renderList({
+      rules: [
+        {
+          id: 8,
+          name: '主力净流入',
+          targetScope: 'single_symbol',
+          target: '600519',
+          alertType: 'event_capital_flow',
+          parameters: { minAbsInflow: 500_000_000 },
+          severity: 'warning',
+          enabled: false,
+          source: 'api',
+          cooldownActive: false,
+        },
+        {
+          id: 9,
+          name: '龙虎榜上榜',
+          targetScope: 'single_symbol',
+          target: '600519',
+          alertType: 'event_dragon_tiger',
+          parameters: { minRecentCount: 2 },
+          severity: 'info',
+          enabled: false,
+          source: 'api',
+          cooldownActive: false,
+        },
+        {
+          id: 10,
+          name: '重要公告',
+          targetScope: 'single_symbol',
+          target: '600519',
+          alertType: 'event_announcement',
+          parameters: { minCount: 3 },
+          severity: 'info',
+          enabled: false,
+          source: 'api',
+          cooldownActive: false,
+        },
+      ],
+    });
+
+    expect(screen.getAllByText('主力资金流').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('龙虎榜上榜').length).toBeGreaterThan(0);
+    expect(screen.getByText('主力净流入 >= 500,000,000 元')).toBeInTheDocument();
+    expect(screen.getByText('上榜 >= 2 次')).toBeInTheDocument();
+    expect(screen.getByText('重要公告 >= 3 条')).toBeInTheDocument();
+    // 参数列的兜底曾无条件返回 CCI 那一串，事件类规则因此显示成「CCI-- 上穿 --」
+    expect(screen.queryByText('CCI-- 上穿 --')).not.toBeInTheDocument();
+
+    await selectByValue('规则类型', 'event_capital_flow');
+
+    expect(onAlertTypeFilterChange).toHaveBeenCalledWith('event_capital_flow');
+  });
+
+  it('renders event alert labels in English UI mode', () => {
+    renderEnglishList({
+      rules: [
+        {
+          id: 8,
+          name: 'capital flow',
+          targetScope: 'single_symbol',
+          target: '600519',
+          alertType: 'event_capital_flow',
+          parameters: { minAbsInflow: 500_000_000 },
+          severity: 'warning',
+          enabled: false,
+          source: 'api',
+          cooldownActive: false,
+        },
+      ],
+    });
+
+    expect(screen.getAllByText('Main capital flow').length).toBeGreaterThan(0);
+    expect(screen.getByText('Net inflow >= CNY 500,000,000')).toBeInTheDocument();
+  });
+
   it('runs the test action', () => {
     renderList();
 

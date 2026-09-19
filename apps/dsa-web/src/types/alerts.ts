@@ -15,7 +15,12 @@ export type AlertType =
   | 'portfolio_drawdown'
   | 'portfolio_price_stale'
   | 'market_light_status'
-  | 'market_light_score_drop';
+  | 'market_light_score_drop'
+  // 事件类告警由 API / agent 创建，Web 表单不提供新建入口，但 /alerts/rules
+  // 会把它们一并列出来，编辑表单必须认得这几个类型。
+  | 'event_dragon_tiger'
+  | 'event_capital_flow'
+  | 'event_announcement';
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 export type AlertTargetScope = 'single_symbol' | 'watchlist' | 'portfolio_holdings' | 'portfolio_account' | 'market';
 export type AlertDirection = 'above' | 'below' | 'up' | 'down' | 'bullish_cross' | 'bearish_cross';
@@ -43,6 +48,10 @@ export interface AlertRuleParameters {
   maxDrawdownPct?: number;
   statuses?: MarketLightStatus[];
   minDrop?: number;
+  /** 事件类告警阈值，只在 event_* 类型上出现，Web 表单不做编辑、原样透传。 */
+  minRecentCount?: number;
+  minAbsInflow?: number;
+  minCount?: number;
 }
 
 export interface AlertRuleItem {

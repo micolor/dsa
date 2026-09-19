@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { alertsApi } from '../alerts';
 
-const { get, post, deleteRequest } = vi.hoisted(() => ({
+const { get, post, patch, deleteRequest } = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  patch: vi.fn(),
   deleteRequest: vi.fn(),
 }));
 
@@ -11,6 +12,7 @@ vi.mock('../index', () => ({
   default: {
     get,
     post,
+    patch,
     delete: deleteRequest,
   },
 }));
@@ -19,6 +21,7 @@ describe('alertsApi', () => {
   beforeEach(() => {
     get.mockReset();
     post.mockReset();
+    patch.mockReset();
     deleteRequest.mockReset();
   });
 
@@ -231,6 +234,44 @@ describe('alertsApi', () => {
     expect(statusRule.targetScope).toBe('market');
     expect(statusRule.parameters.statuses).toEqual(['red', 'yellow']);
     expect(scoreDropRule.parameters.minDrop).toBe(12);
+  });
+
+  it('passes event-alert thresholds through when updating a rule', async () => {
+    // 事件类规则的阈值由 API / agent 创建时写入，Web 表单原样回传；
+    // toSnakeRulePayload 是白名单映射，漏一个键就等于把用户阈值改回默认值。
+    patch.mockResolvedValueOnce({
+      data: {
+        id: 8,
+        name: 'capital flow',
+        target_scope: 'single_symbol',
+        target: '600519',
+        alert_type: 'event_capital_flow',
+        parameters: { min_abs_inflow: 500000000 },
+        severity: 'warning',
+        enabled: true,
+        source: 'api',
+      },
+    });
+
+    await alertsApi.updateRule(8, {
+      name: 'capital flow',
+      targetScope: 'single_symbol',
+      target: '600519',
+      alertType: 'event_capital_flow',
+      parameters: { minAbsInflow: 500_000_000 },
+      severity: 'warning',
+      enabled: true,
+    });
+
+    expect(patch).toHaveBeenCalledWith('/api/v1/alerts/rules/8', {
+      name: 'capital flow',
+      target_scope: 'single_symbol',
+      target: '600519',
+      alert_type: 'event_capital_flow',
+      parameters: { min_abs_inflow: 500_000_000 },
+      severity: 'warning',
+      enabled: true,
+    });
   });
 
   it('creates portfolio alert rules and maps batch dry-run fields', async () => {

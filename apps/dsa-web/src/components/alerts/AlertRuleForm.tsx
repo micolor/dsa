@@ -28,10 +28,14 @@ import {
   ALERT_SYMBOL_TYPE_OPTIONS,
   ALERT_TARGET_SCOPE_OPTIONS,
   ALERT_THRESHOLD_DIRECTION_OPTIONS,
+  ALERT_TYPE_LABELS,
 } from '../../locales/featureText';
 import { validateStockCode } from '../../utils/validation';
 import { Button, Checkbox, Input, Select } from '../common';
 import { DashboardPanelHeader } from '../dashboard';
+
+/** 事件类告警由 API / agent 创建，表单不提供新建入口，但编辑已有规则时会遇到它们。 */
+const EVENT_ALERT_TYPES: readonly AlertType[] = ['event_dragon_tiger', 'event_capital_flow', 'event_announcement'];
 
 const SYMBOL_ALERT_TYPE_OPTIONS = [
   { value: 'price_cross', label: '价格突破' },
@@ -226,7 +230,15 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
     };
   }, [targetScope, text.accountLoadFailed]);
 
-  const alertTypeOptions = useMemo(() => optionsForScope(targetScope, language), [language, targetScope]);
+  const alertTypeOptions = useMemo(() => {
+    const options = optionsForScope(targetScope, language);
+    if (alertType && !options.some((option) => option.value === alertType)) {
+      // 编辑由 API / agent 创建的事件类规则时，当前类型不在表单的可选项里；
+      // 补一条进去，否则「规则类型」只剩占位符，用户看不出自己在编辑什么。
+      return [{ value: alertType, label: ALERT_TYPE_LABELS[language][alertType] }, ...options];
+    }
+    return options;
+  }, [alertType, language, targetScope]);
   const portfolioTargetOptions = useMemo(() => [
     { value: 'all', label: text.allAccounts },
     ...accounts.map((account) => ({
@@ -403,6 +415,12 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       const parsedMinDrop = parsePositiveNumber(minDrop, text.scoreDropThreshold);
       if (parsedMinDrop == null) return null;
       return { minDrop: parsedMinDrop };
+    }
+    if (EVENT_ALERT_TYPES.includes(alertType)) {
+      // 事件类规则没有对应的表单字段（表单不提供这些类型的建入口，只有编辑已有
+      // 规则时才会走到这里）。原样回传后端已归一化的参数——返回空对象会让后端
+      // normalize_event_alert_parameters 静默套用默认阈值，把用户设的阈值改掉。
+      return editingRule ? editingRule.parameters : {};
     }
     return {};
   };

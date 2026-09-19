@@ -80,7 +80,24 @@ function formatParameters(rule: AlertRuleItem, language: UiLanguage): string {
   if (rule.alertType === 'portfolio_price_stale') {
     return ALERT_TYPE_LABELS[language].portfolio_price_stale;
   }
-  return `CCI${rule.parameters.period ?? '--'} ${rule.parameters.direction === 'below' ? directionLabels.belowThreshold : directionLabels.aboveThreshold} ${rule.parameters.threshold ?? '--'}`;
+  if (rule.alertType === 'event_dragon_tiger') {
+    return formatUiText(ALERT_LIST_TEXT[language].dragonTigerAtLeast, { value: rule.parameters.minRecentCount ?? '--' });
+  }
+  if (rule.alertType === 'event_capital_flow') {
+    // 阈值以元为单位，默认 1 亿；不分组会显示成一串难以读数的数字。
+    const inflow = rule.parameters.minAbsInflow;
+    const value = typeof inflow === 'number' ? inflow.toLocaleString('en-US') : '--';
+    return formatUiText(ALERT_LIST_TEXT[language].capitalFlowAtLeast, { value });
+  }
+  if (rule.alertType === 'event_announcement') {
+    return formatUiText(ALERT_LIST_TEXT[language].announcementAtLeast, { value: rule.parameters.minCount ?? '--' });
+  }
+  if (rule.alertType === 'cci_threshold') {
+    return `CCI${rule.parameters.period ?? '--'} ${rule.parameters.direction === 'below' ? directionLabels.belowThreshold : directionLabels.aboveThreshold} ${rule.parameters.threshold ?? '--'}`;
+  }
+  // 兜底不再套用某个具体类型的文案：这段曾经无条件返回 CCI 那一串，于是事件类规则
+  // 在列表里显示成「CCI-- 上穿 --」，看起来像规则本身配错了。
+  return ALERT_TYPE_LABELS[language][rule.alertType] ?? rule.alertType;
 }
 
 function isCoolingDown(rule: AlertRuleItem): boolean {

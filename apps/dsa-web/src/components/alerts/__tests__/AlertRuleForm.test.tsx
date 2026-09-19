@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '../../../contexts/UiLanguageContext';
+import type { AlertRuleItem } from '../../../types/alerts';
 import { UI_LANGUAGE_STORAGE_KEY } from '../../../utils/uiLanguage';
 import { AlertRuleForm } from '../AlertRuleForm';
 
@@ -362,5 +363,50 @@ describe('AlertRuleForm', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(screen.getByLabelText('标的代码')).toHaveValue('aapl');
     expect(screen.getByLabelText('价格阈值')).toHaveValue(200);
+  });
+
+  it('keeps event alert types out of the creatable market options', async () => {
+    // 事件类规则只由 API / agent 创建，表单不给新建入口；市场范围的可选类型曾用
+    // 「取到数组末尾」的方式派生，事件类追加进类型清单后就会漏进这个下拉。
+    renderEnglishForm();
+
+    await selectByValue('Target scope', 'market');
+    fireEvent.click(screen.getByLabelText('Rule type'));
+
+    expect(await screen.findByRole('option', { name: 'Market traffic light status' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Main capital flow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Dragon-tiger listing' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Important announcement' })).not.toBeInTheDocument();
+  });
+
+  it('preserves event-alert parameters when editing a rule the form cannot rebuild', async () => {
+    // 事件类规则由 API / agent 创建，表单的 buildParameters() 没有对应分支，
+    // 落到末尾的 `return {}` 时会把用户设的阈值提交成空对象，后端
+    // normalize_event_alert_parameters 再静默套用默认值（1 亿）。
+    const eventRule: AlertRuleItem = {
+      id: 7,
+      name: '主力净流入',
+      targetScope: 'single_symbol',
+      target: '600519',
+      alertType: 'event_capital_flow',
+      parameters: { minAbsInflow: 500_000_000 },
+      severity: 'warning',
+      enabled: true,
+      source: 'api',
+    };
+    render(<AlertRuleForm onSubmit={onSubmit} editingRule={eventRule} />);
+
+    // 当前类型不在表单的可选项里，也要能显示出来而不是留一个占位符
+    expectSelectValue('规则类型', 'event_capital_flow');
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        targetScope: 'single_symbol',
+        target: '600519',
+        alertType: 'event_capital_flow',
+        parameters: { minAbsInflow: 500_000_000 },
+      }));
+    });
   });
 });
