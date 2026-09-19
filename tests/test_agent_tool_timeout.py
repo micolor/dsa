@@ -11,10 +11,17 @@ exit, so a stuck tool call keeps the whole process from shutting down.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import threading
+import time
 import unittest
+from pathlib import Path
 
 from src.agent.tools.registry import ToolDefinition, ToolRegistry
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _FakeToolCall:
@@ -130,6 +137,92 @@ class ExecuteToolsTimeoutThreadTestCase(unittest.TestCase):
         payload = json.loads(results[0]["result_str"])
         self.assertEqual(payload.get("value"), 42)
         self.assertNotIn("timeout", tool_calls_log[0])
+
+
+_CHILD_SCRIPT = """
+import json
+import threading
+
+from src.agent.runner import _execute_tools
+from src.agent.tools.registry import ToolDefinition, ToolRegistry
+
+# The stuck call outlives the timeout by two orders of magnitude: if the
+# interpreter waits for it, this child cannot finish in time.
+release = threading.Event()
+
+
+def _hang(**_kwargs):
+    release.wait(120)
+    return json.dumps({"ok": True})
+
+
+class _Call:
+    name = "hang_tool"
+    arguments = {}
+    id = "call_1"
+
+
+registry = ToolRegistry()
+registry.register(
+    ToolDefinition(name="hang_tool", description="hang", parameters=[], handler=_hang)
+)
+tool_calls_log = []
+print("runner-start", flush=True)
+results = _execute_tools(
+    tool_calls=[_Call()],
+    tool_registry=registry,
+    step=1,
+    progress_callback=None,
+    tool_calls_log=tool_calls_log,
+    tool_wait_timeout_seconds=0.2,
+)
+print(json.dumps({
+    "result": json.loads(results[0]["result_str"]),
+    "logged_timeout": tool_calls_log[0].get("timeout"),
+}), flush=True)
+print("runner-done", flush=True)
+"""
+
+
+class AbandonedToolCallProcessExitTestCase(unittest.TestCase):
+    """End-to-end: a stuck tool call must not keep the process from exiting.
+
+    The in-process tests above pin the thread's ``daemon`` flag, which is the
+    mechanism; this test pins the consequence the fix exists for — with a tool
+    blocked for 120s and a 0.2s timeout, the interpreter still exits promptly.
+    """
+
+    def test_process_exits_promptly_while_a_tool_call_is_still_stuck(self) -> None:
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [_REPO_ROOT.as_posix(), env.get("PYTHONPATH", "")]
+        ).strip(os.pathsep)
+
+        started = time.monotonic()
+        completed = subprocess.run(
+            [sys.executable, "-c", _CHILD_SCRIPT],
+            cwd=str(_REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+        self.assertIn("runner-done", completed.stdout)
+        json_lines = [
+            line for line in completed.stdout.splitlines() if line.startswith("{")
+        ]
+        self.assertTrue(json_lines, completed.stdout[-2000:])
+        payload = json.loads(json_lines[-1])
+        self.assertEqual(payload["result"]["timeout"], True)
+        self.assertEqual(payload["logged_timeout"], True)
+        self.assertLess(
+            elapsed,
+            30.0,
+            f"the stuck tool call held the process for {elapsed:.1f}s",
+        )
 
 
 if __name__ == "__main__":

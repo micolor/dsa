@@ -729,7 +729,13 @@ def _execute_tools(
                 _, result_str, success, dur, cached, guard_result = call.result()
             else:
                 timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
-                logger.warning("Tool '%s' timed out after %s at step %d", tc.name, timeout_label, step)
+                logger.warning(
+                    "Tool '%s' timed out after %s at step %d; abandoning the call — "
+                    "it keeps running on a daemon thread and its result is discarded",
+                    tc.name,
+                    timeout_label,
+                    step,
+                )
                 result_str = json.dumps({
                     "error": f"Tool execution timed out after {timeout_label}",
                     "timeout": True,
@@ -806,7 +812,13 @@ def _execute_tools(
 
         if pending:
             timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
-            logger.warning("Tool batch timed out after %s at step %d", timeout_label, step)
+            logger.warning(
+                "Tool batch timed out after %s at step %d; abandoning %d call(s) — "
+                "they keep running on daemon threads and their results are discarded",
+                timeout_label,
+                step,
+                len(pending),
+            )
             for call in pending:
                 tc_item = call.tool_call
                 result_str = json.dumps({
