@@ -224,6 +224,40 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertFalse(pos["price_stale"])
         self.assertTrue(pos["price_available"])
 
+    def test_historical_snapshot_ignores_realtime_quote_cache(self) -> None:
+        """历史日期的快照必须用当日收盘价，而不是实时缓存里的「当前价」。
+
+        缓存每 symbol 只有一行、取的是最近一次抓取，没有日期维度；只要当天
+        打开过持仓页（后台刷新会写缓存），回撤回填的过去日期就会拿今天的价格
+        去估值，并连同 positions / lots / daily snapshot 一起落库。
+        """
+        today = date.today()
+        as_of = today - timedelta(days=5)
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="600519",
+            trade_date=as_of - timedelta(days=2),
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+        )
+        self._save_close("600519", as_of, 110.0)
+        # 缓存里是今天的 125.0，与 as_of 当天的真实收盘价 110.0 相差很大
+        self._cache_quote("600519", 125.0, "unit-test", today)
+
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(None, None)):
+            snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=as_of, cost_method="fifo")
+
+        pos = snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(pos["price_source"], "history_close")
+        self.assertEqual(pos["price_date"], as_of.isoformat())
+        self.assertAlmostEqual(pos["last_price"], 110.0, places=6)
+        self.assertAlmostEqual(pos["market_value_base"], 1100.0, places=6)
+
     def test_current_snapshot_falls_back_to_close_when_realtime_unavailable(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

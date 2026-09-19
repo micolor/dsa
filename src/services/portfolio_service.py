@@ -1202,7 +1202,12 @@ class PortfolioService:
         # 非阻塞实时行情：优先读持久化缓存（新鲜窗口内直接返回、不触网）；
         # 超龄旧缓存用旧价兜底并标记 stale；无缓存则走 stock_daily 收盘快路径（0s）。
         # 网络刷新统一由后台线程写回缓存，请求路径从不阻塞在 provider 瀑布上。
-        if include_realtime:
+        # 实时缓存只对「今天」的快照有意义：缓存每 symbol 只有一行（取最近一次抓取），
+        # 没有日期维度，因此拿它给历史日期估值等于用今天的价格重算过去——回撤回填会
+        # 把这个错误市值连同 positions / lots / daily snapshot 一起落库，之后的请求再
+        # 按「该日已存在」跳过，净值曲线与最大回撤就此失真。历史日期一律走收盘价。
+        # 与 _build_positions 里 `active_symbols` 的当天判据保持一致。
+        if include_realtime and as_of_date == today:
             cached = self.repo.get_latest_cached_quote(symbol)
             if cached is not None and cached.price is not None and cached.price > 0:
                 age = (
