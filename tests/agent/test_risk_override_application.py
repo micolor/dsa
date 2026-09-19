@@ -71,3 +71,45 @@ def test_downgrade_application_records_actual_transition():
     assert application.post_risk_signal == DashboardDecisionSignal.SELL
     assert application.from_signal == DashboardDecisionSignal.HOLD
     assert application.to_signal == DashboardDecisionSignal.SELL
+
+
+@pytest.mark.parametrize("raw_value", ["false", "False", "no", "off", "0"])
+def test_string_false_veto_does_not_apply_the_veto(raw_value):
+    """模型按 prompt 的 `true|false` 槽位输出字符串 "false" 很常见。
+
+    原实现用 `bool(risk_raw.get("veto_buy"))` 取真值，非空字符串恒为真，
+    于是一份「低风险、显式不 veto」的报告会把 buy 降级成 hold，并向用户
+    展示「风险否决」理由。
+    """
+    application = _application(current_signal="buy", risk_raw={
+        "risk_level": "low",
+        "risk_score": 20,
+        "flags": [],
+        "signal_adjustment": "none",
+        "veto_buy": raw_value,
+    })
+
+    assert application.applied is False
+    assert application.trigger == "none"
+    assert application.post_risk_signal == "buy"
+
+
+@pytest.mark.parametrize("raw_value", ["true", "True", "yes", "on", "1", True])
+def test_truthy_veto_still_applies(raw_value):
+    application = _application(current_signal="buy", risk_raw={"veto_buy": raw_value})
+
+    assert application.applied is True
+    assert application.trigger == "risk_veto"
+    assert application.post_risk_signal == "hold"
+
+
+@pytest.mark.parametrize("raw_value", ["unsure", "maybe"])
+def test_unrecognized_veto_value_keeps_the_conservative_veto(raw_value):
+    """无法识别的取值按「有否决」处理：风险控制宁可少买，不可漏判。
+
+    只把明确表达「不否决」的写法（"false"/"no"/"off"/"0"）判为不否决。
+    """
+    application = _application(current_signal="buy", risk_raw={"veto_buy": raw_value})
+
+    assert application.applied is True
+    assert application.trigger == "risk_veto"

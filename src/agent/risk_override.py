@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from src.agent.protocols import AgentContext, normalize_decision_signal
+from src.agent.skills.base import _coerce_bool
 
 
 _DOWNGRADE_STEPS = {
@@ -258,7 +259,12 @@ def build_risk_override_plan(
         if isinstance(flag, dict)
     )
     risk_level_high = str(risk_raw.get("risk_level") or "").strip().lower() == "high"
-    veto_buy = bool(risk_raw.get("veto_buy")) or adjustment == "veto" or has_high_flag
+    # `risk_raw` 是模型原始 JSON，未经归一化：prompt 里 `veto_buy` 是 `true|false`
+    # 槽位，模型输出字符串 "false"/"no"/"0" 很常见，而 `bool("false")` 为真——
+    # 一份「低风险、显式不否决」的报告会被当成否决，把 buy 降级成 hold 并展示
+    # 「风险否决」理由。用既有的布尔归一化助手；无法识别的取值仍按「有否决」处理，
+    # 风险控制宁可少买也不漏判。
+    veto_buy = _coerce_bool(risk_raw.get("veto_buy")) or adjustment == "veto" or has_high_flag
     has_downgrade = adjustment in _DOWNGRADE_STEPS
     override_trigger_present = veto_buy or has_downgrade
     evidence_present = override_trigger_present or risk_level_high
