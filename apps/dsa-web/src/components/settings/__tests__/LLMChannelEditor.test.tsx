@@ -47,6 +47,25 @@ describe('LLMChannelEditor', () => {
     { key: 'LITELLM_MODEL', value: 'openai/gpt-4o-mini' },
   ];
 
+  const threeChannelItems = [
+    { key: 'LLM_CHANNELS', value: 'alpha,middle,omega' },
+    { key: 'LLM_ALPHA_PROTOCOL', value: 'openai' },
+    { key: 'LLM_ALPHA_BASE_URL', value: 'https://alpha.example.com/v1' },
+    { key: 'LLM_ALPHA_ENABLED', value: 'true' },
+    { key: 'LLM_ALPHA_API_KEY', value: 'sk-alpha' },
+    { key: 'LLM_ALPHA_MODELS', value: 'alpha-model' },
+    { key: 'LLM_MIDDLE_PROTOCOL', value: 'openai' },
+    { key: 'LLM_MIDDLE_BASE_URL', value: 'https://middle.example.com/v1' },
+    { key: 'LLM_MIDDLE_ENABLED', value: 'true' },
+    { key: 'LLM_MIDDLE_API_KEY', value: 'sk-middle' },
+    { key: 'LLM_MIDDLE_MODELS', value: 'middle-model' },
+    { key: 'LLM_OMEGA_PROTOCOL', value: 'openai' },
+    { key: 'LLM_OMEGA_BASE_URL', value: 'https://omega.example.com/v1' },
+    { key: 'LLM_OMEGA_ENABLED', value: 'true' },
+    { key: 'LLM_OMEGA_API_KEY', value: 'sk-omega' },
+    { key: 'LLM_OMEGA_MODELS', value: 'omega-model' },
+  ];
+
   function lastDraftCall(onDraftItemsChange: ReturnType<typeof vi.fn>) {
     const calls = onDraftItemsChange.mock.calls;
     return calls[calls.length - 1]?.[0] || [];
@@ -497,6 +516,23 @@ describe('LLMChannelEditor', () => {
     expect(discoverLLMChannelModels).not.toHaveBeenCalled();
   });
 
+  it('does not show a testing badge on a channel that was never tested', async () => {
+    render(
+      <LLMChannelEditor
+        items={threeChannelItems}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    // 没有任何测试在途时，未测试的渠道不应该显示「测试中」徽标
+    // （testState 为 undefined 时 `testState?.status !== 'idle'` 恒为真）。
+    expect(await screen.findByText('omega')).toBeInTheDocument();
+    expect(screen.getByText('omega').closest('[role="button"]')).not.toHaveTextContent('测试中');
+    expect(screen.getByText('middle').closest('[role="button"]')).not.toHaveTextContent('测试中');
+  });
+
   it('does not attach an in-flight test result to the channel that shifts into its row', async () => {
     let resolveTest: (value: unknown) => void = () => {};
     testLLMChannel.mockReturnValueOnce(new Promise((resolve) => {
@@ -505,24 +541,7 @@ describe('LLMChannelEditor', () => {
 
     render(
       <LLMChannelEditor
-        items={[
-          { key: 'LLM_CHANNELS', value: 'alpha,middle,omega' },
-          { key: 'LLM_ALPHA_PROTOCOL', value: 'openai' },
-          { key: 'LLM_ALPHA_BASE_URL', value: 'https://alpha.example.com/v1' },
-          { key: 'LLM_ALPHA_ENABLED', value: 'true' },
-          { key: 'LLM_ALPHA_API_KEY', value: 'sk-alpha' },
-          { key: 'LLM_ALPHA_MODELS', value: 'alpha-model' },
-          { key: 'LLM_MIDDLE_PROTOCOL', value: 'openai' },
-          { key: 'LLM_MIDDLE_BASE_URL', value: 'https://middle.example.com/v1' },
-          { key: 'LLM_MIDDLE_ENABLED', value: 'true' },
-          { key: 'LLM_MIDDLE_API_KEY', value: 'sk-middle' },
-          { key: 'LLM_MIDDLE_MODELS', value: 'middle-model' },
-          { key: 'LLM_OMEGA_PROTOCOL', value: 'openai' },
-          { key: 'LLM_OMEGA_BASE_URL', value: 'https://omega.example.com/v1' },
-          { key: 'LLM_OMEGA_ENABLED', value: 'true' },
-          { key: 'LLM_OMEGA_API_KEY', value: 'sk-omega' },
-          { key: 'LLM_OMEGA_MODELS', value: 'omega-model' },
-        ]}
+        items={threeChannelItems}
         configVersion="v1"
         maskToken="******"
         onSaved={() => {}}

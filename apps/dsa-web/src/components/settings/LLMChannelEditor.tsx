@@ -506,9 +506,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             </Tooltip>
           ) : null}
           {!hasKey && channel.protocol !== 'ollama' ? <Badge variant="warning">未填 Key</Badge> : null}
-          {testState?.status !== 'idle' ? (
+          {/* testState 为 undefined 时 `testState?.status !== 'idle'` 恒为真，
+              会让每个没测过的渠道都挂一个「测试中」徽标，所以先判存在。 */}
+          {testState && testState.status !== 'idle' ? (
             <Badge variant={statusVariant}>
-              {testState?.status === 'success' ? '连接正常' : testState?.status === 'error' ? '连接失败' : '测试中'}
+              {testState.status === 'success' ? '连接正常' : testState.status === 'error' ? '连接失败' : '测试中'}
             </Badge>
           ) : null}
         </span>
