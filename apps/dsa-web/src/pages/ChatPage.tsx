@@ -354,7 +354,8 @@ const ChatPage: React.FC = () => {
         }
       }
     },
-    [isWatchlistActioning, watchlistCodes],
+    // t 必须进依赖：回调里三处提示文案都走 t()，漏掉它会让切换语言后仍弹上一个语言的提示。
+    [isWatchlistActioning, watchlistCodes, t],
   );
 
   const handleCreateAlertProposal = useCallback(
