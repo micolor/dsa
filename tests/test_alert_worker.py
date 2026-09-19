@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
+from sqlalchemy.exc import OperationalError
 
 from src.config import Config
 from src.notification import ChannelAttemptResult, NotificationDispatchResult
@@ -1511,6 +1512,42 @@ class AlertWorkerTestCase(unittest.TestCase):
             severity="warning",
         )
         self.assertIsNone(cooldown)
+
+    def test_failed_cooldown_write_is_logged_as_an_error(self) -> None:
+        """A cooldown that never landed must be loud, not a quiet warning.
+
+        The notification has already gone out by this point, so a dropped
+        cooldown means the next cycle re-triggers and re-notifies the same
+        alert — the opposite of what the cooldown is for. `upsert_cooldown`
+        retries locked writes internally, so reaching this handler is a real
+        durability failure and belongs at ERROR.
+        """
+        self._create_rule(target="600519", cooldown_policy={"cooldown_seconds": 60})
+
+        def _boom(**_kwargs):
+            raise OperationalError(
+                "INSERT INTO alert_cooldown", {}, Exception("database is locked")
+            )
+
+        worker = AlertWorker(
+            config_provider=lambda: self._config(), service=self.service, notifier=self._notifier()
+        )
+        with patch.object(self.service.repo, "upsert_cooldown", side_effect=_boom), patch(
+            "src.agent.events.EventMonitor._get_realtime_quote",
+            new=AsyncMock(return_value=SimpleNamespace(price=1810.0)),
+        ):
+            with self.assertLogs("src.services.alert_worker", level="ERROR") as captured:
+                stats = worker.run_once()
+
+        # The alert still fired and was recorded; only the cooldown is missing.
+        self.assertEqual(stats["notified"], 1)
+        self.assertTrue(
+            any(
+                "may re-notify this alert" in line and "600519" in line
+                for line in captured.output
+            ),
+            captured.output,
+        )
 
     def test_trigger_record_failure_does_not_block_other_rules(self) -> None:
         self._create_rule(target="600519")

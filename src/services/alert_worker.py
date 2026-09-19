@@ -940,8 +940,13 @@ class AlertWorker:
                 reason=self.service._sanitize_text(result.get("reason") or result.get("message")),
             )
         except Exception as exc:
-            logger.warning(
-                "[AlertWorker] Failed to update alert cooldown for %s: %s",
+            # Not a routine warning: the notification already went out, so a
+            # cooldown that never landed means the next cycle re-triggers and
+            # re-notifies the same alert. `upsert_cooldown` retries locked
+            # writes; reaching here is a real durability failure.
+            logger.error(
+                "[AlertWorker] Failed to update alert cooldown for %s, "
+                "the next cycle may re-notify this alert: %s",
                 self._display_target(runtime_rule),
                 self.service._sanitize_text(str(exc) or "cooldown write failed"),
             )

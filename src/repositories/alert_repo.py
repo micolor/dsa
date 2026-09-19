@@ -216,13 +216,23 @@ class AlertRepository:
     ) -> AlertCooldownRecord:
         """Upsert an alert cooldown row.
 
-        ``(rule_id, target, severity)`` is unique (``uix_alert_cooldown_rule_target_severity``),
-        so under concurrent workers a SELECT-then-INSERT can race: both processes may miss an
-        existing row and both try to INSERT, hitting ``IntegrityError``. Catch that and re-read
-        the survivor row so the cooldown is still written instead of silently dropped (which
-        would otherwise re-trigger + re-notify on the next cycle).
+        Runs on the shared write path (``DatabaseManager._run_write_transaction``)
+        like the other repository writes. On file SQLite that takes the writer
+        lock before the existence check and retries ``database is locked`` with
+        backoff. Writing on a plain session meant a transient lock contention
+        (the alert worker and the web process both write this database) silently
+        lost the cooldown row — and a lost cooldown makes the next cycle
+        re-trigger and re-notify the same alert, which is exactly what the
+        cooldown exists to prevent.
+
+        ``(rule_id, target, severity)`` is unique
+        (``uix_alert_cooldown_rule_target_severity``) and engines without the
+        writer lock can still race: both writers may miss an existing row and
+        both try to INSERT, hitting ``IntegrityError``. Catch that and re-read
+        the survivor row so the cooldown is still written instead of dropped.
         """
-        with self.db.get_session() as session:
+
+        def _write(session) -> AlertCooldownRecord:
             row = self._select_cooldown(session, rule_id, target, severity)
             if row is None:
                 row = AlertCooldownRecord(
@@ -232,30 +242,45 @@ class AlertRepository:
                     severity=severity,
                 )
                 session.add(row)
-            row.rule_key = rule_key
-            row.last_triggered_at = last_triggered_at
-            row.cooldown_until = cooldown_until
-            row.reason = reason
-            row.state = state
-            row.updated_at = datetime.now()
+            self._apply_cooldown_fields(
+                row, rule_key, last_triggered_at, cooldown_until, reason, state
+            )
             try:
-                session.commit()
+                session.flush()
             except IntegrityError:
-                # Another process inserted the row between our SELECT and INSERT. Roll back this
-                # session's pending INSERT and update the surviving row instead.
+                # Another writer inserted the row between our SELECT and INSERT.
+                # Discard this transaction's pending INSERT and update the
+                # surviving row instead.
                 session.rollback()
                 row = self._select_cooldown(session, rule_id, target, severity)
                 if row is None:
                     raise
-                row.rule_key = rule_key
-                row.last_triggered_at = last_triggered_at
-                row.cooldown_until = cooldown_until
-                row.reason = reason
-                row.state = state
-                row.updated_at = datetime.now()
-                session.commit()
-            session.refresh(row)
+                self._apply_cooldown_fields(
+                    row, rule_key, last_triggered_at, cooldown_until, reason, state
+                )
+                session.flush()
+            # Detach while the attributes are still loaded: the caller gets a
+            # readable row instead of one expired by the commit that follows.
+            session.expunge(row)
             return row
+
+        return self.db._run_write_transaction("upsert alert cooldown", _write)
+
+    @staticmethod
+    def _apply_cooldown_fields(
+        row: AlertCooldownRecord,
+        rule_key: Optional[str],
+        last_triggered_at: datetime,
+        cooldown_until: datetime,
+        reason: Optional[str],
+        state: str,
+    ) -> None:
+        row.rule_key = rule_key
+        row.last_triggered_at = last_triggered_at
+        row.cooldown_until = cooldown_until
+        row.reason = reason
+        row.state = state
+        row.updated_at = datetime.now()
 
     @staticmethod
     def _select_cooldown(

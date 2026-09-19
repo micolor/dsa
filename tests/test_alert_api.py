@@ -957,6 +957,67 @@ class AlertApiTestCase(unittest.TestCase):
         self.assertEqual(rows[0].reason, "updated trigger")
         self.assertEqual(rows[0].cooldown_until, datetime(2026, 5, 18, 11, 30, 0))
 
+    def test_cooldown_write_uses_the_shared_retrying_write_path(self) -> None:
+        """The cooldown must be written through `_run_write_transaction`.
 
-if __name__ == "__main__":
-    unittest.main()
+        Writing it on a plain session meant a transient `database is locked`
+        (the alert worker and the web process share this database) silently
+        dropped the cooldown, and a dropped cooldown re-notifies next cycle.
+        """
+        repo = AlertRepository(self.db)
+        calls = []
+        real_transaction = self.db._run_write_transaction
+
+        def _spy(operation_name, write_operation):
+            calls.append(operation_name)
+            return real_transaction(operation_name, write_operation)
+
+        with patch.object(self.db, "_run_write_transaction", side_effect=_spy):
+            repo.upsert_cooldown(
+                rule_id=1,
+                rule_key="single_symbol:600519:price_cross:{}",
+                target="600519",
+                severity="warning",
+                last_triggered_at=datetime(2026, 5, 18, 10, 0, 0),
+                cooldown_until=datetime(2026, 5, 18, 11, 0, 0),
+                reason="first trigger",
+            )
+
+        self.assertEqual(calls, ["upsert alert cooldown"])
+
+    def test_locked_write_is_retried_instead_of_losing_the_cooldown(self) -> None:
+        """A `database is locked` failure on the first attempt must not lose the row.
+
+        The locked error is injected at the write operation, which is where
+        SQLite surfaces it (flush inside the transaction); the retry, the
+        rollback and the backoff all run for real.
+        """
+        from sqlalchemy.exc import OperationalError
+
+        repo = AlertRepository(self.db)
+        attempts = []
+        real_apply = AlertRepository._apply_cooldown_fields
+
+        def _apply(row, rule_key, last_triggered_at, cooldown_until, reason, state):
+            attempts.append(row.rule_id)
+            if len(attempts) == 1:
+                raise OperationalError("UPDATE alert_cooldown", {}, Exception("database is locked"))
+            return real_apply(row, rule_key, last_triggered_at, cooldown_until, reason, state)
+
+        with patch.object(AlertRepository, "_apply_cooldown_fields", side_effect=_apply):
+            row = repo.upsert_cooldown(
+                rule_id=1,
+                rule_key="single_symbol:600519:price_cross:{}",
+                target="600519",
+                severity="warning",
+                last_triggered_at=datetime(2026, 5, 18, 10, 0, 0),
+                cooldown_until=datetime(2026, 5, 18, 11, 0, 0),
+                reason="contended trigger",
+            )
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(row.reason, "contended trigger")
+        with self.db.get_session() as session:
+            rows = session.query(AlertCooldownRecord).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].reason, "contended trigger")
