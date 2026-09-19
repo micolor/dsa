@@ -133,7 +133,11 @@ def _account_lock(account_id: int) -> threading.RLock:
 # module-level (not per-instance) for the same reason as _account_locks: callers
 # create fresh PaperService() instances. Freshness is guarded by a window check
 # (start <= as_of <= cached_end): a request past the loaded window (e.g. a new
-# trading day) reloads, so bars never go stale across days. An LRU cap bounds
+# trading day) reloads, so bars never go stale across days. The cached upper
+# bound is the *latest bar actually loaded*, not the ``date.today()`` used to
+# query: the two differ whenever the newest session's bar has not landed yet,
+# and a calendar-only bound would then mark that session as already covered and
+# serve ``None`` for it for the rest of the process' life. An LRU cap bounds
 # memory in a long-lived process.
 _BAR_CACHE: Dict[str, Tuple[date, date, Dict[date, Dict[str, float]]]] = {}
 _BAR_CACHE_LOCK = threading.Lock()
@@ -1027,12 +1031,13 @@ class PaperService:
         """Load (and cache) daily bars for a stock, covering as_of through today.
 
         The shared cache keys by stock and stores the loaded window
-        ``(start, cached_end, bars)``. A request inside the window is served from
-        cache; one asking earlier (a deep backfill replay) or later (a new trading
-        day) reloads a wider window. LRU eviction bounds memory. The window check
-        guards against stale bars: bars are loaded through ``today`` at fetch time,
-        so a request for a date past ``cached_end`` must reload to pick up newer data.
+        ``(start, latest_bar, bars)``, where ``latest_bar`` is the newest date
+        actually present in ``bars``. A request inside the window is served from
+        cache; one asking earlier (a deep backfill replay) or later (a session
+        whose bar has not been loaded yet) reloads a wider window. LRU eviction
+        bounds memory.
         """
+
         end = date.today()
         with _BAR_CACHE_LOCK:
             entry = _BAR_CACHE.pop(code, None)
@@ -1061,7 +1066,12 @@ class PaperService:
             # be cached: a retryable signal waits for bars that may arrive later (e.g.
             # after a data fetch), and a fresh instance re-querying must see them.
             if bars:
-                _BAR_CACHE[code] = (start, end, bars)
+                # 上界记 bars 里真实存在的最新日期，而不是查询用的 ``end``（今天）：
+                # 盘中当天 bar 还没入库时，用 ``end`` 会把「没取到当天」缓存成
+                # 「已覆盖当天」，之后同一进程里每次请求当天 bar 都命中并返回 None
+                # ——当天止损/止盈不判定、快照按上一交易日市值落库且调度器视为
+                # 「该日已算」不再重试，用户点刷新（force=True）也救不回来。
+                _BAR_CACHE[code] = (start, max(bars), bars)
                 # Bound memory: evict the least-recently-used entry on overflow.
                 while len(_BAR_CACHE) > _BAR_CACHE_MAX_ENTRIES:
                     _BAR_CACHE.pop(next(iter(_BAR_CACHE)))

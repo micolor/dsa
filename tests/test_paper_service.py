@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 import pandas as pd
@@ -513,6 +513,31 @@ def test_resolve_valuation_date_no_positions_returns_today(isolated_db, service)
     account_id = service.get_or_create_account()["account_id"]
     account = service.paper_repo.get_account(account_id)
     assert service.resolve_valuation_date(account) == date.today()
+
+
+def test_bar_cache_reloads_when_the_latest_session_bar_lands_later(isolated_db, service):
+    """缓存窗口的上界必须是 bars 里真实存在的最大日期，而不是查询时用的今天。
+
+    `_load_bars` 用 `end = date.today()` 查询并把 `(start, today, bars)` 写进
+    模块级缓存，命中判据却是纯日历的 `start <= as_of <= cached_end`。于是「盘中
+    先读了一次（当天 bar 还没入库）」会把窗口记成「已覆盖当天」，此后同一进程内
+    每次请求当天 bar 都命中缓存拿到 None：当天估值按上一交易日市值落库且不再重算，
+    当天的止损/止盈不判定，按提示做的历史回填也补不上这笔成交。
+    """
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    _seed_daily(isolated_db, "600519", yesterday, 100, 100, 100, 100)
+
+    # 盘中第一次读到：只有昨天为止的 bar
+    assert service._bar_for("600519", yesterday)["close"] == 100.0
+
+    # 收盘后当天 bar 落库
+    _seed_daily(isolated_db, "600519", today, 200, 200, 200, 200)
+
+    # 同一进程内再请求当天：必须重新加载而不是被缓存当成「没有当天 bar」
+    bar = service._bar_for("600519", today)
+    assert bar is not None, "当天 bar 已入库，缓存不得再返回 None"
+    assert bar["close"] == 200.0
 
 
 def test_latest_snapshot_date_after_valuation(isolated_db, service):
