@@ -37,7 +37,9 @@
 | 东方财富（akshare `stock_zh_a_hist` / `fund_etf_hist_em` / `stock_zh_a_spot_em` / `fund_etf_spot_em`） | 手 | `data_provider/akshare_fetcher.py`，仅在东财专用入口换算 |
 | 新浪、腾讯（akshare `stock_zh_a_daily` / `stock_zh_a_hist_tx`、腾讯实时） | 股 | 无需换算；实时侧由 `_normalize_tencent_volume` 归一为股 |
 | Baostock | 股 | 无需换算 |
-| Tushare（日线 / Pro 实时） | 手 | 各自 ×100 换算 |
+| Tushare 日线 | 手 | `tushare_fetcher.py` `_normalize_data` ×100 换算 |
+| Tushare 旧版实时（`ts.get_realtime_quotes`，直连新浪 hq 源） | 股 | 无需换算（此前误做 `// 100` 已移除） |
+| Tushare Pro 实时（`quotation`） | 待联网确认 | 未做换算 |
 | TickFlow | 手 | `_cn_lots_to_shares` ×100 |
 | Pytdx | 待联网确认 | 未做换算 |
 

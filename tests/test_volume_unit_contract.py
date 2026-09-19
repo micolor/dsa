@@ -206,6 +206,55 @@ class TestAkshareEastmoneyVolumeUnit(unittest.TestCase):
         self.assertEqual(quote.volume, 49156 * 100)
 
 
+class TestTushareLegacyRealtimeVolumeUnit(unittest.TestCase):
+    """Tushare 旧版实时接口（``ts.get_realtime_quotes``）的成交量本就是「股」。
+
+    该接口直连新浪 hq 行情源，vendored tushare 自己的字段说明写着
+    ``8：volumn，成交量 maybe you need do volumn/100``——也就是原始值是「股」，
+    除以 100 才得到「手」。此前代码写的是 ``// 100``，于是这条降级分支吐出的
+    成交量比契约小 100 倍，与同文件的日线口径（``vol`` 手 → ×100 → 股）也互相矛盾。
+    """
+
+    @staticmethod
+    def _fetcher():
+        """构造一个只走旧版降级分支的 fetcher（Pro 接口按积分不足失败）。"""
+        from unittest.mock import MagicMock
+
+        from data_provider.tushare_fetcher import TushareFetcher
+
+        with patch.object(TushareFetcher, "_init_api", return_value=None):
+            fetcher = TushareFetcher()
+        fetcher._api = MagicMock()
+        fetcher._api.quotation.side_effect = Exception("quota")
+        return fetcher
+
+    def test_legacy_realtime_volume_is_not_divided(self):
+        fake_df = pd.DataFrame(
+            [
+                {
+                    "name": "平安银行",
+                    "price": "10.94",
+                    "pre_close": "10.88",
+                    "volume": "100000",
+                    "amount": "2000",
+                    "high": "11.00",
+                    "low": "10.80",
+                    "open": "10.90",
+                }
+            ]
+        )
+        fake_tushare = types.SimpleNamespace(
+            get_realtime_quotes=lambda symbols: fake_df
+        )
+        fetcher = self._fetcher()
+        with patch.dict(sys.modules, {"tushare": fake_tushare}):
+            quote = fetcher.get_realtime_quote("SZ000001")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote.volume, 100000)
+        self.assertNotEqual(quote.volume, 1000)
+
+
 class TestDailyAndRealtimeShareOneUnit(unittest.TestCase):
     """契约本身：同一天的日线与实时行情必须是同一个单位，比值才有意义。
 

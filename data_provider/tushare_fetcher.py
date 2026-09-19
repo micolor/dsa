@@ -794,7 +794,10 @@ class TushareFetcher(BaseFetcher):
                 price=price,
                 change_pct=round(change_pct, 2),
                 change_amount=round(change_amount, 2),
-                volume=safe_int(row['volume']) // 100,  # 转换为手
+                # 旧版接口直连新浪 hq 行情源，成交量本就是「股」
+                # （tushare/stock/trading.py 的字段说明：8：volumn，成交量 maybe you need do volumn/100，
+                #   即原始值即股，除以 100 才是手），与统一契约一致，不能再除
+                volume=safe_int(row['volume']),
                 amount=safe_float(row['amount']),
                 high=safe_float(row['high']),
                 low=safe_float(row['low']),
