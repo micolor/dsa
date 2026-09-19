@@ -620,15 +620,15 @@ def get_task_list(
         TaskListResponse: 任务列表响应
     """
     task_queue = get_task_queue()
-    
-    # 获取所有任务
-    all_tasks = task_queue.list_all_tasks(limit=limit)
-    
-    # 状态筛选
-    if status:
-        status_list = [s.strip().lower() for s in status.split(",")]
-        all_tasks = [t for t in all_tasks if t.status.value in status_list]
-    
+
+    # 状态筛选交给队列在分页之前执行：先按 limit 截断再筛选，会把匹配任务
+    # 切在窗口之外（最近 N 条都不匹配时直接返回空列表）。`total`/`pending`/
+    # `processing` 仍是全量统计，与筛选无关。
+    status_filter = (
+        [s.strip().lower() for s in status.split(",") if s.strip()] if status else None
+    )
+    all_tasks = task_queue.list_all_tasks(limit=limit, status=status_filter)
+
     # 统计信息
     stats = task_queue.get_task_stats()
     

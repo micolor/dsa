@@ -3,7 +3,7 @@
 
 import asyncio
 from concurrent.futures import Future
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 import tempfile
@@ -3669,6 +3669,78 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         self.assertEqual(response.tasks[0].analysis_phase, "postmarket")
         self.assertEqual(response.tasks[0].skills, ["growth_quality"])
+
+
+class TaskListStatusFilterContractTestCase(unittest.TestCase):
+    """Regression: status filtering must be applied before ``limit`` truncation.
+
+    Filtering in the endpoint *after* ``list_all_tasks(limit=limit)`` only ever
+    saw the newest ``limit`` tasks, so a status whose tasks sat outside that
+    window returned an empty list even though matching tasks existed.
+    """
+
+    def setUp(self) -> None:
+        self._original_instance = AnalysisTaskQueue._instance
+        AnalysisTaskQueue._instance = None
+        self._queue = AnalysisTaskQueue(max_workers=1)
+
+    def tearDown(self) -> None:
+        executor = getattr(self._queue, "_executor", None)
+        if executor is not None and hasattr(executor, "shutdown"):
+            executor.shutdown(wait=False, cancel_futures=True)
+        AnalysisTaskQueue._instance = self._original_instance
+
+    def _seed(self, statuses) -> None:
+        """Seed the task table directly; the public submit path also runs tasks.
+
+        ``created_at`` increases with the index, so the last entry is the newest.
+        """
+        base = datetime(2026, 9, 1, 9, 30, 0)
+        for index, status in enumerate(statuses):
+            task = QueueTaskInfo(
+                task_id=f"task-{index}",
+                stock_code="600519",
+                status=status,
+                created_at=base + timedelta(minutes=index),
+            )
+            self._queue._tasks[task.task_id] = task
+
+    def test_status_filter_applies_before_the_limit_is_taken(self) -> None:
+        self._seed([TaskStatus.COMPLETED, TaskStatus.PENDING, TaskStatus.PENDING])
+
+        # The newest two are pending; the completed task sits outside a limit=2
+        # window and used to be cut off before the filter could see it.
+        tasks = self._queue.list_all_tasks(limit=2, status=["completed"])
+
+        self.assertEqual([t.task_id for t in tasks], ["task-0"])
+
+    def test_unfiltered_listing_keeps_newest_first(self) -> None:
+        self._seed([TaskStatus.COMPLETED, TaskStatus.PENDING])
+
+        self.assertEqual(
+            [t.task_id for t in self._queue.list_all_tasks(limit=2)],
+            ["task-1", "task-0"],
+        )
+
+    def test_status_matching_tolerates_case_and_whitespace(self) -> None:
+        self._seed([TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.PENDING])
+
+        tasks = self._queue.list_all_tasks(limit=10, status=[" Failed ", "cancelled"])
+
+        self.assertEqual({t.task_id for t in tasks}, {"task-0", "task-1"})
+
+    def test_endpoint_filters_before_truncating(self) -> None:
+        if get_task_list is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        self._seed([TaskStatus.COMPLETED, TaskStatus.PENDING, TaskStatus.PENDING])
+
+        with patch(
+            "api.v1.endpoints.analysis.get_task_queue", return_value=self._queue
+        ):
+            response = get_task_list(status="completed", limit=2)
+
+        self.assertEqual([t.task_id for t in response.tasks], ["task-0"])
 
 
 class BatchTaskQueueContractTestCase(unittest.TestCase):

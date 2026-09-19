@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, List, Any, TYPE_CHECKING, Tuple, Literal, Callable
+from typing import Optional, Dict, List, Any, Sequence, TYPE_CHECKING, Tuple, Literal, Callable
 
 if TYPE_CHECKING:
     from asyncio import Queue as AsyncQueue
@@ -37,6 +37,11 @@ from src.utils.analysis_metadata import SELECTION_SOURCES
 from src.services.stock_code_utils import resolve_index_stock_code_for_analysis
 
 logger = logging.getLogger(__name__)
+
+
+def _task_status_value(status: Any) -> str:
+    """Return the lowercase status value, whether given an enum or a string."""
+    return str(getattr(status, "value", status) or "").strip().lower()
 
 
 def _dedupe_stock_code_key(stock_code: str) -> str:
@@ -590,22 +595,35 @@ class AnalysisTaskQueue:
                 if task.status in (TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.CANCEL_REQUESTED)
             ]
     
-    def list_all_tasks(self, limit: int = 50) -> List[TaskInfo]:
+    def list_all_tasks(
+        self,
+        limit: int = 50,
+        status: Optional[Sequence[str]] = None,
+    ) -> List[TaskInfo]:
         """
         获取所有任务（按创建时间倒序）
-        
+
         Args:
             limit: 返回数量限制
-            
+            status: 状态筛选（可选）。在 ``limit`` 截断之前生效，否则「先截断再
+                筛选」会把匹配任务切在窗口之外：例如库里有 500 条任务、最近 20
+                条都是 pending，按 ``completed`` 查询会返回空列表，而实际有
+                completed 任务存在。
+
         Returns:
             任务列表（副本）
         """
+        wanted = {
+            str(item).strip().lower() for item in (status or ()) if str(item).strip()
+        }
         with self._data_lock:
             tasks = sorted(
                 self._tasks.values(),
                 key=lambda t: t.created_at,
                 reverse=True
             )
+            if wanted:
+                tasks = [t for t in tasks if _task_status_value(t.status) in wanted]
             return [t.copy() for t in tasks[:limit]]
     
     def get_task_stats(self) -> Dict[str, int]:
