@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { FloatingTaskPanel } from './FloatingTaskPanel';
 import { screeningApi } from '../../api/screening';
+import { isUnrecoverableScreenTaskError } from '../../api/error';
 import { useTaskStream } from '../../hooks/useTaskStream';
 import { useStockPoolStore } from '../../stores/stockPoolStore';
 import {
@@ -15,6 +16,14 @@ import type { TaskInfo } from '../../types/analysis';
 const ACTIVE_TASK_POLL_INTERVAL_MS = 30_000;
 /** 选股任务轮询：页面卸载后仍保持图标进度准确，完成/失败时清除。 */
 const SCREEN_TASK_POLL_INTERVAL_MS = 3_000;
+/**
+ * 连续失败多少次后放弃镜像这条选股任务（40 × 3s = 2 分钟）。
+ *
+ * 面板没有单条任务的清除入口，进度条一旦僵在某个数值上就只能靠刷新页面摆脱；
+ * 既然已经连续两分钟读不到真实进度，继续挂着一个假进度比丢掉这条本地提示更糟。
+ * 选股页只要还挂着并轮询成功，下一次就会把它写回来。
+ */
+const SCREEN_TASK_POLL_MAX_FAILURES = 40;
 
 /**
  * 全局任务中心（常驻 Shell）。
@@ -39,12 +48,14 @@ export const GlobalTaskCenter: React.FC = () => {
     }
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let consecutiveFailures = 0;
     const poll = async () => {
       try {
         const task = await screeningApi.getScreenTask(screenTaskId);
         if (!active) {
           return;
         }
+        consecutiveFailures = 0;
         if (task.status === 'completed' || task.status === 'failed') {
           useScreeningTaskStore.getState().clearScreenTask();
           return;
@@ -60,8 +71,21 @@ export const GlobalTaskCenter: React.FC = () => {
             status: task.status,
           });
         }
-      } catch {
-        // 轮询暂时不可达：保持当前进度，稍后重试。
+      } catch (err) {
+        if (!active) {
+          return;
+        }
+        // 服务端已经没有这条任务（后端重启、记录被清理）：重试多少次都是同一个 404，
+        // 此前无条件重排会让面板永远停在旧进度上。
+        if (isUnrecoverableScreenTaskError(err)) {
+          useScreeningTaskStore.getState().clearScreenTask();
+          return;
+        }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= SCREEN_TASK_POLL_MAX_FAILURES) {
+          useScreeningTaskStore.getState().clearScreenTask();
+          return;
+        }
       } finally {
         if (active) {
           timer = window.setTimeout(poll, SCREEN_TASK_POLL_INTERVAL_MS);

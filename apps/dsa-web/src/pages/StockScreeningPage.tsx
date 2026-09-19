@@ -35,7 +35,7 @@ import {
   type ScreeningScreenTaskStatus,
   type ScreeningStrategy,
 } from '../api/screening';
-import { formatParsedApiError, getParsedApiError, toApiErrorMessage, type ParsedApiError } from '../api/error';
+import { formatParsedApiError, getParsedApiError, isUnrecoverableScreenTaskError, toApiErrorMessage, type ParsedApiError } from '../api/error';
 import { AppPage, Badge, Button, EmptyState, InlineAlert, Select } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard/DashboardPanelHeader';
 import { CandidateListItem } from '../components/screening/CandidateListItem';
@@ -172,9 +172,6 @@ const clearPersistedScreenTask = () => {
     // Ignore storage cleanup failures.
   }
 };
-
-const isUnrecoverableScreenTaskError = (error: ParsedApiError) =>
-  error.title === '选股任务不可恢复';
 
 const formatRecoverableScreenTaskPollingError = (error: ParsedApiError) => {
   if (error.category === 'upstream_timeout') {

@@ -352,6 +352,16 @@ export function isLocalConnectionFailure(error: unknown): boolean {
   return parseApiError(error).category === 'local_connection_failed';
 }
 
+/**
+ * 选股任务是否已不可恢复（服务端没有这条记录：后端重启或任务记录被清理）。
+ *
+ * 轮询方必须凭它停止重试：选股页会提示「请重新提交」，全局任务中心会清掉面板条目；
+ * 只看 category / status 是认不出来的——它被归到通用的 `http_error`。
+ */
+export function isUnrecoverableScreenTaskError(error: unknown): boolean {
+  return getParsedApiError(error).title === '选股任务不可恢复';
+}
+
 export function parseApiError(error: unknown): ParsedApiError {
   const response = getResponse(error);
   const status = response?.status;

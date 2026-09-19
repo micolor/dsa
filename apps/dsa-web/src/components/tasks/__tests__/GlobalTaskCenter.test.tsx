@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GlobalTaskCenter } from '../GlobalTaskCenter';
@@ -126,6 +126,53 @@ describe('GlobalTaskCenter', () => {
 
     await waitFor(() => expect(getTasks).toHaveBeenCalled());
     expect(screen.queryByTestId('floating-task-panel-button')).not.toBeInTheDocument();
+  });
+
+  // 后端重启后任务记录被清掉，轮询会一直拿到 404 `screening_screen_task_not_found`。
+  // 这里此前是裸 `catch {}` + 无条件每 3s 重排：面板会永远停在旧进度上，
+  // 而 FloatingTaskPanel 没有单条任务的清除入口，用户只能刷新页面才可能摆脱它。
+  it('clears a screening task the server no longer knows about', async () => {
+    vi.useFakeTimers();
+    try {
+      getTasks.mockResolvedValue({ total: 0, pending: 0, processing: 0, tasks: [] });
+      useScreeningTaskStore.getState().setScreenTask({
+        taskId: 'screen-1',
+        title: '双低 选股',
+        progress: 40,
+        message: '正在执行因子评分',
+        status: 'processing',
+      });
+      const notFound = {
+        response: {
+          status: 404,
+          data: {
+            error: 'screening_screen_task_not_found',
+            message: '选股任务 screen-1 不存在或已过期',
+          },
+        },
+      };
+      getScreenTask.mockRejectedValue(notFound);
+
+      render(<MemoryRouter><GlobalTaskCenter /></MemoryRouter>);
+
+      // 首次轮询立即发出：等它落地。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(useScreeningTaskStore.getState().activeScreenTask).toBeNull();
+      expect(screen.queryByTestId('floating-task-panel-button')).not.toBeInTheDocument();
+
+      // 不可恢复：不得再继续重排轮询（原本每 3s 重试一次，永远停不下来）。
+      const callsAfterClear = getScreenTask.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(getScreenTask.mock.calls.length).toBe(callsAfterClear);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
   });
 
   it('clears a screening task from the icon once its poll reports completion', async () => {
