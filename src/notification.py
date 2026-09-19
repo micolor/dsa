@@ -505,11 +505,45 @@ class NotificationService(
                 if nav_text:
                     lines.append(f"*{nav_text}*")
                     lines.append("")
+            # LLM 增强层（可选）：未配置模型或调用失败时 dashboard 里没有这一块，
+            # 确定性报告照常输出。与 Web 卡片同源同字段，不在这里重新解读净值。
+            llm_lines = self._fund_llm_lines(dashboard.get("llm"))
+            if llm_lines:
+                lines.extend(llm_lines)
             lines.append("---")
             lines.append("")
 
         lines.append("*基于净值,非股票式信号,不构成投资建议*")
         return "\n".join(lines)
+
+    @staticmethod
+    def _fund_llm_lines(llm: Any) -> List[str]:
+        """把基金 LLM 解读渲染成通知正文行；无内容时返回空列表。
+
+        字段与 Web 的 ``FundMetricsCard`` 一致：只展示解读（集中度 / 综合解读 /
+        申赎建议 / 风险提示）与情绪分，不重复确定性层已给出的净值事实。
+        """
+        if not isinstance(llm, dict):
+            return []
+        rows = [
+            ("持仓集中度", llm.get("holdings_concentration")),
+            ("综合解读", llm.get("analysis_summary")),
+            ("申赎建议", llm.get("operation_advice")),
+            ("风险提示", llm.get("risk_warning")),
+        ]
+        score = llm.get("sentiment_score")
+        content = [
+            (label, value.strip())
+            for label, raw in rows
+            if raw is not None and (value := str(raw).strip())
+        ]
+        if not content and score is None:
+            return []
+        lines = ["**AI 解读**" + (f"（情绪分 {score}）" if score is not None else ""), ""]
+        for label, value in content:
+            lines.append(f"- **{label}**：{value}")
+        lines.append("")
+        return lines
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
         if not self._should_show_llm_model():

@@ -57,14 +57,32 @@ class CrossProcessAnalysisLock:
     def acquire(self) -> bool:
         try:
             import fcntl
-        except ImportError:  # pragma: no cover - non-POSIX; fall back to in-process lock
+        except ImportError:  # pragma: no cover - non-POSIX (Windows)
+            # 没有 fcntl 时这里确实拿不到任何锁：本类不做进程内兜底，调用方
+            # （``_run_scheduled_analysis_with_lock`` / ``_run_analysis_locked``）
+            # 也没有额外持有 ``_RUNTIME_ANALYSIS_LOCK``。所以只能如实降级并留痕，
+            # 不能假装互斥已生效——返回 False 会让 Windows 上排程整体停摆，代价更大。
+            logger.warning(
+                "fcntl unavailable on this platform; cross-process analysis lock "
+                "is NOT enforced (%s)",
+                self._lock_path,
+            )
             return True
         parent = os.path.dirname(self._lock_path) or "."
+        fd: Optional[int] = None
         try:
             os.makedirs(parent, exist_ok=True)
             fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
+            # flock 失败（锁被别人持有）时 fd 已经打开；不关掉就会随每次
+            # 抢锁失败泄漏一个文件描述符。self._fd 只在成功时才赋值，
+            # release() 兜不住这个分支。
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:  # pragma: no cover - best-effort close
+                    pass
             return False
         self._fd = fd
         return True

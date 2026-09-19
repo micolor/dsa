@@ -847,6 +847,53 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             self.assertIsNotNone(status["last_skipped_at"])
             self.assertIsNone(status["last_run_at"])
 
+    def test_contended_acquire_closes_the_descriptor_it_opened(self) -> None:
+        """抢锁失败的分支必须关掉自己打开的 fd。
+
+        `self._fd` 只在成功时赋值，`release()` 关不到这个分支；不关的话每次
+        抢锁失败都会泄漏一个文件描述符。
+        """
+        lock_path = os.path.join(tempfile.mkdtemp(), "contended.analysis.lock")
+        opened: list = []
+        closed: list = []
+        real_open = os.open
+        real_close = os.close
+
+        def _recording_open(*args, **kwargs):
+            fd = real_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        def _recording_close(fd):
+            closed.append(fd)
+            return real_close(fd)
+
+        with patch.object(runtime_scheduler.os, "open", _recording_open), patch.object(
+            runtime_scheduler.os, "close", _recording_close
+        ), patch("fcntl.flock", side_effect=OSError("resource temporarily unavailable")):
+            lock = runtime_scheduler.CrossProcessAnalysisLock(lock_path)
+            self.assertFalse(lock.acquire())
+
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened, closed)
+
+    def test_missing_fcntl_degrades_loudly_instead_of_claiming_the_lock(self) -> None:
+        """没有 fcntl 时（Windows）必须留痕，不能静默假装互斥已生效。
+
+        返回 True 是为了不让 Windows 上的排程整体停摆，但跨进程互斥此刻确实
+        不存在，所以必须有一条 warning 让运维看得见，而不是无声无息地放行。
+        """
+        lock = runtime_scheduler.CrossProcessAnalysisLock(
+            os.path.join(tempfile.mkdtemp(), "no-fcntl.analysis.lock")
+        )
+        # sys.modules 里把 fcntl 置为 None，`import fcntl` 就会抛 ImportError，
+        # 从而在 POSIX 机器上也能走到非 POSIX 分支。
+        with patch.dict(sys.modules, {"fcntl": None}):
+            with self.assertLogs("src.services.runtime_scheduler", level="WARNING") as logs:
+                self.assertTrue(lock.acquire())
+
+        self.assertIn("cross-process analysis lock", "\n".join(logs.output))
+
     def test_failed_run_records_failure_and_schedules_retry(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config = SimpleNamespace(

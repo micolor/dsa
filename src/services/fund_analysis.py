@@ -67,18 +67,28 @@ def build_fund_report(fund: FundProfile, risk_free: float = 0.02) -> dict:
         "sharpe": fund.sharpe,
     }
     risk = _risk_grade(fund.max_drawdown, fund.annual_volatility)
-    trend = "上行" if (fund.return_3m or 0) > 0 and (fund.return_1y or 0) > 0 else "震荡"
-    if (fund.return_1y or 0) < -0.1:
-        trend = "下行"
-    # 净值体检：只描述风险/走势，不下任何持有/加减仓等仓位判断（基金无买卖点）。
-    if risk == "高":
-        advice = "风险偏高,注意波动"
-    elif trend == "下行":
-        advice = "近期走势偏弱,注意回撤"
-    elif risk == "中":
-        advice = "风险中等,涨跌波动较明显"
+    # 净值序列不足以算回撤/波动时，`_risk_grade` 给「数据不足」。此时既不能判
+    # 走势也不能给风险判断：原来的 `(x or 0)` 会把缺失值当成 0，于是走势假称
+    # 「震荡」、建议假称「风险较低,走势相对平稳」，与同一份报告里 summary 的
+    # 「风险等级:数据不足」自相矛盾，而且这句矛盾文案会一路进通知和 Web 报告。
+    # 所以这里单独成支，如实说明数据不足——既没有编造结论，也没有把缺失
+    # 静默降级成一个看起来正常的取值。
+    if risk == "数据不足":
+        trend = "数据不足"
+        advice = "净值数据不足,暂无法给出风险与走势判断"
     else:
-        advice = "风险较低,走势相对平稳"
+        trend = "上行" if (fund.return_3m or 0) > 0 and (fund.return_1y or 0) > 0 else "震荡"
+        if (fund.return_1y or 0) < -0.1:
+            trend = "下行"
+        # 净值体检：只描述风险/走势，不下任何持有/加减仓等仓位判断（基金无买卖点）。
+        if risk == "高":
+            advice = "风险偏高,注意波动"
+        elif trend == "下行":
+            advice = "近期走势偏弱,注意回撤"
+        elif risk == "中":
+            advice = "风险中等,涨跌波动较明显"
+        else:
+            advice = "风险较低,走势相对平稳"
     summary = (
         f"{fund.name}({fund.code}) 近1年收益 {fmt(fund.return_1y)}、最大回撤 {fmt(fund.max_drawdown)};"
         f"风险等级:{risk}。基于净值序列,非股票式信号,不构成投资建议。"

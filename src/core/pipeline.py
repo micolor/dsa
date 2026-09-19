@@ -3694,7 +3694,14 @@ class StockAnalysisPipeline:
                 wechat_success = False
                 if NotificationChannel.WECHAT in channels:
                     def _send_wechat_report() -> bool:
-                        if report_type == ReportType.BRIEF:
+                        # 基金结果在股票仪表盘里没有对应键（core_conclusion /
+                        # battle_plan / intelligence…），直接喂给精简渲染器只会
+                        # 得到一个空壳：净值指标、持仓、资产配置和 LLM 解读整块
+                        # 消失。基金批次走基金渲染器，与邮件/本地正文
+                        # （generate_aggregate_report 的基金短路）保持一致口径。
+                        if report_type == ReportType.FUND or self.notifier._all_fund_results(results):
+                            dashboard_content = self.notifier.generate_fund_aggregate(results)
+                        elif report_type == ReportType.BRIEF:
                             dashboard_content = self.notifier.generate_brief_report(results)
                         else:
                             dashboard_content = self.notifier.generate_wechat_dashboard(results)

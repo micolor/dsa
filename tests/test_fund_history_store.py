@@ -76,6 +76,21 @@ def _build_fund_result_full_dashboard() -> AnalysisResult:
     )
 
 
+def _build_fund_result_with_llm() -> AnalysisResult:
+    """在完整 dashboard 上再挂 LLM 增强块，覆盖历史 Markdown 的基金解读出口。"""
+    result = _build_fund_result_full_dashboard()
+    dashboard = dict(result.dashboard or {})
+    dashboard["llm"] = {
+        "holdings_concentration": "集中度较高,前十大占净值 68%",
+        "analysis_summary": "以医药主题为主,回撤控制一般",
+        "operation_advice": "可考虑分批申购",
+        "risk_warning": "行业暴露集中,注意单一赛道风险",
+        "sentiment_score": 60,
+    }
+    result.dashboard = dashboard
+    return result
+
+
 def _build_full_stock_result() -> AnalysisResult:
     """构造 A 股全量报告结果（report_type="full"），用于股票 markdown 不回归校验。"""
     return AnalysisResult(
@@ -233,6 +248,31 @@ class FundHistoryStoreTestCase(unittest.TestCase):
         # 不允许出现股票式买卖点 / 作战计划关键词
         for kw in ("策略点位", "狙击点位", "止损", "止盈"):
             self.assertNotIn(kw, md)
+
+    def test_fund_markdown_renders_the_llm_block(self) -> None:
+        """历史 Markdown 是基金报告的另一个用户可见出口，必须带上 LLM 解读。
+
+        增强层只挂 ``dashboard["llm"]``；出口不渲染就等于这份分析在 Web 卡片上
+        看得到解读、在历史报告里看不到，同一份结果两种面貌。
+        """
+        history_id = self._save(_build_fund_result_with_llm(), "fund")
+        md = HistoryService(self.db).get_markdown_report(str(history_id))
+        self.assertIsNotNone(md)
+        assert md is not None
+        self.assertIn("AI 解读", md)
+        self.assertIn("情绪分 60", md)
+        self.assertIn("前十大占净值 68%", md)
+        self.assertIn("回撤控制一般", md)
+        self.assertIn("可考虑分批申购", md)
+        self.assertIn("注意单一赛道风险", md)
+
+    def test_fund_markdown_omits_the_llm_block_when_absent(self) -> None:
+        """LLM 未产出（未配置/调用失败）时，历史报告不出现空的「AI 解读」壳子。"""
+        history_id = self._save(_build_fund_result_full_dashboard(), "fund")
+        md = HistoryService(self.db).get_markdown_report(str(history_id))
+        self.assertIsNotNone(md)
+        assert md is not None
+        self.assertNotIn("AI 解读", md)
 
     def test_full_stock_markdown_not_regressed(self) -> None:
         """非 fund（report_type="full"）记录仍走股票 markdown（不作弊、不回归）。"""

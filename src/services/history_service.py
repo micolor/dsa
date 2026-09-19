@@ -999,6 +999,35 @@ class HistoryService:
         except (TypeError, ValueError):
             return str(value)
 
+    @staticmethod
+    def _fund_llm_section(llm: Any) -> list:
+        """渲染基金 LLM 解读段落；无内容时返回空列表（整段不出现）。
+
+        字段与 Web 的 ``FundMetricsCard`` 一致：只搬运解读（集中度 / 综合解读 /
+        申赎建议 / 风险提示）与情绪分，不复述确定性层已有的净值事实。
+        """
+        if not isinstance(llm, dict):
+            return []
+        rows = [
+            ("持仓集中度", llm.get("holdings_concentration")),
+            ("综合解读", llm.get("analysis_summary")),
+            ("申赎建议", llm.get("operation_advice")),
+            ("风险提示", llm.get("risk_warning")),
+        ]
+        score = llm.get("sentiment_score")
+        content = [
+            (label, text.strip())
+            for label, raw in rows
+            if raw is not None and (text := str(raw).strip())
+        ]
+        if not content and score is None:
+            return []
+        lines = ["### 🤖 AI 解读" + (f"（情绪分 {score}）" if score is not None else ""), ""]
+        for label, value in content:
+            lines.append(f"- **{label}**：{value}")
+        lines.extend(["", "---", ""])
+        return lines
+
     def _generate_fund_markdown(
         self,
         result: AnalysisResult,
@@ -1057,6 +1086,10 @@ class HistoryService:
             "---",
             "",
         ]
+
+        # LLM 增强层（可选）：未配置模型或调用失败时 dashboard 里没有这一块，
+        # 确定性报告照常输出。与 Web 卡片同源同字段，这里只做搬运，不重新解读。
+        lines.extend(self._fund_llm_section(dashboard.get("llm")))
 
         # 十大重仓股 + 资产配置：来自东财 F10，仅做信息展示，不作任何买卖判断。
         holdings = dashboard.get("holdings") or []

@@ -66,6 +66,31 @@ def test_build_fund_report_shape():
     assert "风险" in r["summary"] or "净值" in r["summary"]
 
 
+def test_insufficient_data_does_not_claim_a_low_risk_stable_trend():
+    """净值序列不足时，结论三件套不得与 summary 的「风险等级:数据不足」互相矛盾。
+
+    回撤/波动为 None 时 ``_risk_grade`` 给「数据不足」，但原来的分支把缺失值
+    当成 0 参与判断：走势落到「震荡」（上行需要 ``return_1y > 0``）、建议落到
+    兜底文案「风险较低,走势相对平稳」。这两句会一路进通知和 Web 报告，跟同一
+    份报告里的「风险等级:数据不足」直接打架——既不对，也不诚实。
+    """
+    from data_provider.fund_fetcher import FundProfile, NavRecord as NR
+
+    navs = [
+        NR(date="2026-09-17", unit_nav=1.0, acc_nav=1.0, change_pct=0.0),
+        NR(date="2026-09-18", unit_nav=1.0, acc_nav=1.0, change_pct=0.0),
+    ]
+    profile = FundProfile(code="003095", name="测试基金", nav_history=navs)
+
+    r = build_fund_report(profile)
+
+    assert "风险等级:数据不足" in r["summary"]
+    assert r["trend_prediction"] == "数据不足"
+    assert "风险较低" not in r["operation_advice"]
+    assert "走势相对平稳" not in r["operation_advice"]
+    assert "数据不足" in r["operation_advice"]
+
+
 def test_latest_nav_comes_from_the_newest_record():
     """``latest_nav`` 必须取序列末尾（最新）那条，不是最旧那条。
 

@@ -17,6 +17,7 @@ from tests.litellm_stub import ensure_litellm_stub
 ensure_litellm_stub()
 
 from src.core.pipeline import StockAnalysisPipeline, NotificationChannel
+from src.notification import NotificationService
 from src.services.run_diagnostics import (
     activate_run_diagnostic_context,
     build_run_diagnostic_summary,
@@ -150,6 +151,9 @@ class TestPipelineEmailGroupImageRouting(unittest.TestCase):
 
 class _FakeWechatNotifier:
     def __init__(self):
+        # 基金短路判据直接复用真实实现，避免 fake 自己造一套与生产不一致的规则。
+        self._all_fund_results = NotificationService._all_fund_results
+        self.generate_fund_aggregate = MagicMock(return_value="fund-report")
         self._markdown_to_image_channels = {"wechat"}
         self._markdown_to_image_max_chars = 15000
         self.generate_dashboard_report = MagicMock(return_value="dashboard-report")
@@ -207,12 +211,81 @@ class TestPipelineWechatOnlyImageRouting(unittest.TestCase):
         )
 
 
+class TestPipelineWechatFundRouting(unittest.TestCase):
+    """企业微信分支此前绕过基金渲染器，把基金结果喂给股票仪表盘。
+
+    基金 dashboard 里没有 ``core_conclusion`` / ``battle_plan`` / ``intelligence``
+    这些键，股票渲染器只会吐出一个空壳：净值指标、持仓、资产配置和 LLM 解读整块
+    消失，而同一批结果的邮件正文（``generate_aggregate_report`` 有基金短路）是
+    完整的。同一次分析在邮件里看得到、在企业微信里看不到。
+    """
+
+    def _pipeline(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.notifier = _FakeWechatNotifier()
+        pipeline.config = SimpleNamespace(stock_email_groups=[])
+        return pipeline
+
+    def _run(self, results, report_type=ReportType.SIMPLE):
+        pipeline = self._pipeline()
+        with patch("src.md2img.markdown_to_image", return_value=b"wechat-image"):
+            pipeline._send_notifications(results, report_type)
+        return pipeline.notifier
+
+    def _wechat_payloads(self, results, report_type=ReportType.SIMPLE) -> list:
+        """跑一次推送，返回交给转图/发送的企业微信正文列表。
+
+        企业微信那一份的实际内容就是这里的入参——比「某个渲染方法被调用过」
+        更贴近用户看到的东西。
+        """
+        pipeline = self._pipeline()
+        with patch("src.md2img.markdown_to_image", return_value=b"wechat-image") as md2img:
+            pipeline._send_notifications(results, report_type)
+        payloads = [call.args[0] for call in md2img.call_args_list]
+        payloads.extend(call.args[0] for call in pipeline.notifier.send_to_wechat.call_args_list)
+        return payloads
+
+    @staticmethod
+    def _fund_result(code="003095"):
+        return SimpleNamespace(
+            code=code,
+            dashboard={"report_type": "fund", "metrics": {"return_1m": 0.01}},
+        )
+
+    def test_fund_batch_uses_the_fund_renderer_on_wechat(self):
+        self.assertIn("fund-report", self._wechat_payloads([self._fund_result()]))
+
+    def test_fund_batch_uses_the_fund_renderer_even_in_brief_mode(self):
+        """BRIEF 模式下企业微信那一份同样走基金渲染器，不落到 brief 骨架。
+
+        断言落在**企业微信实际拿到的正文**上：``report_type`` 为 BRIEF 时邮件
+        正文本来就走 brief（``_generate_aggregate_report`` 的兜底分支），只看
+        ``generate_brief_report`` 是否被调用分不清是哪条路径。
+        """
+        payloads = self._wechat_payloads([self._fund_result()], ReportType.BRIEF)
+
+        self.assertIn("fund-report", payloads)
+        self.assertNotIn("brief-report", payloads)
+
+    def test_mixed_batch_keeps_the_stock_dashboard(self):
+        """批次里混有股票时不得误走基金渲染器（基金渲染器只渲染基金，股票会消失）。"""
+        results = [self._fund_result(), SimpleNamespace(code="600519", dashboard={"report_type": "full"})]
+
+        payloads = self._wechat_payloads(results)
+
+        self.assertNotIn("fund-report", payloads)
+        self.assertIn("dashboard-report", payloads)
+
+
 class _FakeRoutedNotifier:
     def __init__(self, routed_channels, image_channels=None, noise_should_send=True):
         self._markdown_to_image_channels = set(image_channels or [])
         self._markdown_to_image_max_chars = 15000
         self.generate_dashboard_report = MagicMock(side_effect=self._generate_dashboard_report)
         self.generate_wechat_dashboard = MagicMock(side_effect=self._generate_dashboard_report)
+        # 与真实 NotificationService 同接口：企业微信分支会先问这里是不是纯基金批次。
+        self._all_fund_results = NotificationService._all_fund_results
+        self.generate_fund_aggregate = MagicMock(return_value="fund-report")
         self.save_report_to_file = MagicMock(return_value="/tmp/report.md")
         self.is_available = MagicMock(return_value=True)
         self.get_available_channels = MagicMock(

@@ -158,3 +158,59 @@ def test_process_stock_skips_the_stock_data_step_for_funds():
 def test_process_stock_still_fetches_stock_data_for_equities():
     """股票链路零行为变化：数据获取步骤照旧执行。"""
     assert _process_single_stock_fetch_mock("600519").call_count == 1
+
+
+# ------------------------------------------------------------ 下游文本出口
+#
+# 增强层挂在 ``dashboard["llm"]`` 上，只有真正被出口渲染出来才算交付。通知正文
+# 与历史 Markdown 是基金报告除 Web 卡片之外的两个用户可见出口；两处都必须渲染
+# 同一组字段，否则同一份分析在 Web 上看得到解读、在邮件/历史里看不到。
+
+
+_LLM_PAYLOAD = {
+    "holdings_concentration": "集中度较高,前十大占净值 68%",
+    "analysis_summary": "以医药主题为主,回撤控制一般",
+    "operation_advice": "可考虑分批申购",
+    "risk_warning": "行业暴露集中,注意单一赛道风险",
+    "sentiment_score": 60,
+}
+
+
+def _fund_result_with_llm(llm: dict | None):
+    """构造一份带（或不带）LLM 增强块的基金 AnalysisResult，不走网络。"""
+    from src.services.fund_analysis import (
+        build_fund_report,
+        enrich_fund_report_with_llm,
+        map_fund_report_to_report_result,
+    )
+
+    profile = _profile()
+    analyzer = MagicMock()
+    analyzer.run_fund_analysis.return_value = llm or {}
+    return map_fund_report_to_report_result(
+        build_fund_report(profile),
+        fund_llm=enrich_fund_report_with_llm(profile, analyzer=analyzer),
+    )
+
+
+def test_fund_notification_renders_the_llm_block():
+    """通知正文（邮件/飞书/本地文件）必须带上 LLM 解读，而不是只发确定性指标。"""
+    from src.notification import NotificationService
+
+    body = NotificationService().generate_fund_aggregate([_fund_result_with_llm(_LLM_PAYLOAD)])
+
+    assert "前十大占净值 68%" in body
+    assert "回撤控制一般" in body
+    assert "可考虑分批申购" in body
+    assert "注意单一赛道风险" in body
+    assert "情绪分 60" in body
+
+
+def test_fund_notification_omits_the_llm_block_when_absent():
+    """确定性降级路径不出现空的「AI 解读」壳子。"""
+    from src.notification import NotificationService
+
+    body = NotificationService().generate_fund_aggregate([_fund_result_with_llm(None)])
+
+    assert "AI 解读" not in body
+    assert "003095" in body

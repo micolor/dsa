@@ -22,6 +22,36 @@ import starlette.testclient
 from anyio._backends import _asyncio
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_default_database(tmp_path_factory):
+    """Point the *default* database at a throwaway file for the whole session.
+
+    ``DatabaseManager.get_instance()`` falls back to the configured
+    ``DATABASE_PATH`` (``data/stock_analysis.db``) when a test resets the
+    singleton and never supplies a URL. Several tests do exactly that to
+    exercise paths that deliberately swallow DB errors — e.g.
+    ``persist_llm_usage`` is documented as "fire-and-forget, never raises", so
+    ``test_persist_usage_never_raises`` resets the singleton and calls it with
+    no DB configured. The write then lands in the developer's **real** database:
+    a single run of ``tests/test_agent_executor.py`` added 81 stub rows
+    (``model='openai'``, ``total_tokens=10``) to ``llm_usage``, and those rows
+    are what ``/usage`` rendered as real call statistics.
+
+    Tests that configure their own database (their own ``DATABASE_PATH`` in
+    ``setUp``, ``patch.dict(os.environ, ...)``, or an explicit ``db_url``) are
+    unaffected — this only replaces the *default* that unconfigured instances
+    would otherwise resolve to the repo tree.
+    """
+    db_path = tmp_path_factory.mktemp("default-db") / "stock_analysis.db"
+    saved = os.environ.get("DATABASE_PATH")
+    os.environ["DATABASE_PATH"] = str(db_path)
+    yield
+    if saved is None:
+        os.environ.pop("DATABASE_PATH", None)
+    else:
+        os.environ["DATABASE_PATH"] = saved
+
+
 @pytest.fixture(autouse=True)
 def _isolate_os_environ():
     """Snapshot and restore ``os.environ`` around every test.
