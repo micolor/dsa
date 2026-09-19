@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional
 from src.agent.llm_adapter import LLMToolAdapter
 from src.agent.dashboard_payload import sanitize_agent_dashboard_payload
 from src.agent.protocols import StageFailureReason
+from src.agent.stage_labels import stage_done_message, stage_start_message
 from src.agent.stream_events import stream_event
 from src.agent.tools.registry import ToolRegistry
 from src.agent.tools.execution import (
@@ -385,6 +386,9 @@ def run_agent_loop(
                     "stage_done",
                     stage="agent_loop",
                     status="completed" if result.success else "failed",
+                    message=stage_done_message(
+                        "agent_loop", "completed" if result.success else "failed"
+                    ),
                     duration=round(time.time() - start_time, 2),
                 )
             )
@@ -395,7 +399,7 @@ def run_agent_loop(
             stream_event(
                 "stage_start",
                 stage="agent_loop",
-                message="Starting agent analysis...",
+                message=stage_start_message("agent_loop"),
             )
         )
 

@@ -783,12 +783,12 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findAllByText('risk failed')).toHaveLength(1);
+    expect(await screen.findAllByText('阶段未完成')).toHaveLength(1);
 
     const thinkingToggle = container.querySelector('button[class*="mb-2"][class*="w-full"]') as HTMLButtonElement;
     fireEvent.click(thinkingToggle);
 
-    const failedStage = screen.getAllByText('risk failed').find((node) =>
+    const failedStage = screen.getAllByText('阶段未完成').find((node) =>
       node.closest('.chat-progress-item'),
     );
     expect(failedStage).toBeDefined();
@@ -818,13 +818,13 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findAllByText('decision skipped: insufficient budget')).toHaveLength(1);
-    expect(screen.queryByText('decision timed out')).not.toBeInTheDocument();
+    expect(await screen.findAllByText('阶段因剩余预算不足被跳过')).toHaveLength(1);
+    expect(screen.queryByText('阶段超时')).not.toBeInTheDocument();
 
     const thinkingToggle = container.querySelector('button[class*="mb-2"][class*="w-full"]') as HTMLButtonElement;
     fireEvent.click(thinkingToggle);
 
-    const budgetSkipped = screen.getAllByText('decision skipped: insufficient budget').find((node) =>
+    const budgetSkipped = screen.getAllByText('阶段因剩余预算不足被跳过').find((node) =>
       node.closest('.chat-progress-item'),
     );
     expect(budgetSkipped).toBeDefined();

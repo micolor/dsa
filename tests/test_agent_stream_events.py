@@ -112,7 +112,7 @@ def test_run_agent_loop_emits_paired_stage_and_legacy_progress_events() -> None:
     assert events[0] == {
         "type": "stage_start",
         "stage": "agent_loop",
-        "message": "Starting agent analysis...",
+        "message": "整体分析进行中...",
     }
     assert events[-1]["type"] == "stage_done"
     assert events[-1]["stage"] == "agent_loop"
@@ -221,23 +221,25 @@ def test_orchestrator_emits_stage_start_and_done_events() -> None:
         {
             "type": "stage_start",
             "stage": "technical",
-            "message": "Starting technical analysis...",
+            "message": "技术面进行中...",
         },
         {
             "type": "stage_done",
             "stage": "technical",
             "status": "completed",
+            "message": "技术面完成",
             "duration": 0.25,
         },
         {
             "type": "stage_start",
             "stage": "decision",
-            "message": "Starting decision analysis...",
+            "message": "决策进行中...",
         },
         {
             "type": "stage_done",
             "stage": "decision",
             "status": "completed",
+            "message": "决策完成",
             "duration": 0.25,
         },
     ]
@@ -284,17 +286,19 @@ def test_orchestrator_emits_stage_done_before_timeout_after_stage() -> None:
         {
             "type": "stage_start",
             "stage": "technical",
-            "message": "Starting technical analysis...",
+            "message": "技术面进行中...",
         },
         {
             "type": "stage_done",
             "stage": "technical",
             "status": "completed",
+            "message": "技术面完成",
             "duration": 0.25,
         },
         {
             "type": "pipeline_timeout",
             "stage": "technical",
+            "message": "技术面超时",
             "elapsed": 1.1,
             "timeout": 1,
         },
@@ -351,12 +355,13 @@ def test_orchestrator_emits_budget_skipped_before_unstarted_stage() -> None:
         {
             "type": "stage_start",
             "stage": "technical",
-            "message": "Starting technical analysis...",
+            "message": "技术面进行中...",
         },
         {
             "type": "stage_done",
             "stage": "technical",
             "status": "completed",
+            "message": "技术面完成",
             "duration": 0.25,
         },
         {
@@ -367,7 +372,7 @@ def test_orchestrator_emits_budget_skipped_before_unstarted_stage() -> None:
             "remaining": 14.0,
             "minimum": 15,
             "reason": "insufficient_budget",
-            "message": "Skipped decision analysis due to insufficient remaining budget",
+            "message": "决策因剩余预算不足被跳过",
         },
     ]
     assert "pipeline_timeout" not in {event["type"] for event in events}

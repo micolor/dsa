@@ -113,16 +113,19 @@ const isStageDoneSuccessful = (status?: string): boolean => {
   return ['completed', 'success', 'succeeded', 'done'].includes(normalized);
 };
 
+// 兜底阶段名：后端每个阶段事件都会带用户可见的 message，这里只在事件缺字段时
+// 使用。不能回显 step.stage —— 那是 technical / skill_xxx 之类的内部英文 id。
+const STAGE_FALLBACK_LABEL = '阶段';
+
 const getStageDoneLabel = (step: ProgressStep): string => {
-  const stage = step.stage || 'stage';
   if (step.message) return step.message;
-  if (isStageDoneSuccessful(step.status)) return `${stage} completed`;
-  return `${stage} ${step.status || 'finished'}`;
+  if (isStageDoneSuccessful(step.status)) return `${STAGE_FALLBACK_LABEL}完成`;
+  return `${STAGE_FALLBACK_LABEL}未完成`;
 };
 
 const getPipelineBudgetSkippedLabel = (step: ProgressStep): string => {
   if (step.message) return step.message;
-  return `${step.stage || 'pipeline'} skipped: insufficient budget`;
+  return `${STAGE_FALLBACK_LABEL}因剩余预算不足被跳过`;
 };
 
 const isCompareStockMessage = (
@@ -944,11 +947,11 @@ const ChatPage: React.FC = () => {
     if (last.type === 'tool_done')
       return `${last.display_name || last.tool} 完成`;
     if (last.type === 'stage_start')
-      return last.message || `Starting ${last.stage || 'stage'}...`;
+      return last.message || `${STAGE_FALLBACK_LABEL}进行中...`;
     if (last.type === 'stage_done')
       return getStageDoneLabel(last);
     if (last.type === 'pipeline_timeout')
-      return last.message || `${last.stage || 'pipeline'} timed out`;
+      return last.message || `${STAGE_FALLBACK_LABEL}超时`;
     if (last.type === 'pipeline_budget_skipped')
       return getPipelineBudgetSkippedLabel(last);
     if (last.type === 'generating')
@@ -1012,7 +1015,7 @@ const ChatPage: React.FC = () => {
           statusClass = step.success ? 'chat-progress-item-success' : 'chat-progress-item-danger';
           iconClass = step.success ? 'chat-progress-dot-success' : 'chat-progress-dot-danger';
         } else if (step.type === 'stage_start') {
-          text = step.message || `Starting ${step.stage || 'stage'}...`;
+          text = step.message || `${STAGE_FALLBACK_LABEL}进行中...`;
           statusClass = 'chat-progress-item-thinking';
           iconClass = 'chat-progress-dot-thinking';
         } else if (step.type === 'stage_done') {
@@ -1021,7 +1024,7 @@ const ChatPage: React.FC = () => {
           statusClass = isSuccess ? 'chat-progress-item-success' : 'chat-progress-item-danger';
           iconClass = isSuccess ? 'chat-progress-dot-success' : 'chat-progress-dot-danger';
         } else if (step.type === 'pipeline_timeout') {
-          text = step.message || `${step.stage || 'pipeline'} timed out`;
+          text = step.message || `${STAGE_FALLBACK_LABEL}超时`;
           statusClass = 'chat-progress-item-danger';
           iconClass = 'chat-progress-dot-danger';
         } else if (step.type === 'pipeline_budget_skipped') {

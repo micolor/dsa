@@ -63,6 +63,12 @@ from src.agent.runtime_facts import (
     build_agent_runtime_facts,
 )
 from src.agent.runner import parse_dashboard_json
+from src.agent.stage_labels import (
+    stage_budget_skipped_message,
+    stage_done_message,
+    stage_start_message,
+    stage_timeout_message,
+)
 from src.agent.stock_scope import resolve_stock_scope
 from src.agent.stream_events import stream_event
 from src.agent.tools.registry import ToolRegistry
@@ -567,6 +573,7 @@ class AgentOrchestrator:
                     progress_callback(stream_event(
                         "pipeline_timeout",
                         stage=agent.agent_name,
+                        message=stage_timeout_message(agent.agent_name),
                         elapsed=round(elapsed_s, 2),
                         timeout=timeout_s,
                     ))
@@ -604,10 +611,7 @@ class AgentOrchestrator:
                         remaining=round(remaining_budget, 2),
                         minimum=stage_min_budget_s,
                         reason="insufficient_budget",
-                        message=(
-                            f"Skipped {agent.agent_name} analysis due to insufficient "
-                            "remaining budget"
-                        ),
+                        message=stage_budget_skipped_message(agent.agent_name),
                     ))
                 if ctx is not None:
                     self._apply_partition_fallback(ctx)
@@ -673,7 +677,7 @@ class AgentOrchestrator:
                 progress_callback(stream_event(
                     "stage_start",
                     stage=agent.agent_name,
-                    message=f"Starting {agent.agent_name} analysis...",
+                    message=stage_start_message(agent.agent_name),
                 ))
 
             remaining_timeout_s = (
@@ -699,6 +703,7 @@ class AgentOrchestrator:
                     "stage_done",
                     stage=agent.agent_name,
                     status=result.status.value,
+                    message=stage_done_message(agent.agent_name, result.status.value),
                     duration=result.duration_s,
                 ))
 
@@ -748,6 +753,7 @@ class AgentOrchestrator:
                     progress_callback(stream_event(
                         "pipeline_timeout",
                         stage=agent.agent_name,
+                        message=stage_timeout_message(agent.agent_name),
                         elapsed=round(elapsed_s, 2),
                         timeout=timeout_s,
                     ))
@@ -911,7 +917,7 @@ class AgentOrchestrator:
                 progress_callback(stream_event(
                     "stage_start",
                     stage=agent.agent_name,
-                    message=f"Starting {agent.agent_name} analysis...",
+                    message=stage_start_message(agent.agent_name),
                 ))
 
         batch = scheduler.run(
@@ -926,6 +932,7 @@ class AgentOrchestrator:
                     "stage_done",
                     stage=result.stage_name,
                     status=result.status.value,
+                    message=stage_done_message(result.stage_name, result.status.value),
                     duration=result.duration_s,
                 ))
         return batch
