@@ -1669,7 +1669,10 @@ class AkshareFetcher(BaseFetcher):
             quote = UnifiedRealtimeQuote(
                 code=stock_code,
                 name=str(row.get('名称', '')),
-                source=RealtimeSource.AKSHARE_EM,
+                # 这里是新浪兜底（ak.stock_hk_spot），不是东财。标成 AKSHARE_EM
+                # 会让来源展示、数据质量告警与 provider-run 记录都把新浪数据
+                # 指向东财，排查港股行情问题时被带偏。
+                source=RealtimeSource.AKSHARE_SINA,
                 price=safe_float(row.get('最新价')),
                 change_pct=safe_float(row.get('涨跌幅')),
                 change_amount=safe_float(row.get('涨跌额')),
