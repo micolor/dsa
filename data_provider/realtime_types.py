@@ -91,6 +91,34 @@ def safe_int(val: Any, default: Optional[int] = None) -> Optional[int]:
     return default
 
 
+# 东方财富（push2 快照 / push2his K 线，即 efinance 与 akshare 的 *_em 接口）的
+# 成交量字段以「手」为单位，而本项目的统一口径是「股」（见下方
+# UnifiedRealtimeQuote.volume 与 stock_daily.volume 的字段注释）。所有读取该
+# 字段的位置都必须经过这里换算，否则同一个字段会在不同数据源之间相差 100 倍。
+# 换算依据（efinance 自带文档字符串中的贵州茅台 600519 样本）：
+#   2021-07-29 成交量 63864 / 成交额 1.129957e10 / 换手率 0.51%
+#   → 63864 × 100 = 6,386,400 股，流通股约 12.56 亿 → 换手率 0.51% ✓
+#   （若按「股」解读则为 0.0051%，与接口自报的换手率相差 100 倍）
+EM_VOLUME_LOT_SIZE = 100
+
+
+def em_lots_to_shares(val: Any, default: Optional[int] = None) -> Optional[int]:
+    """
+    把东方财富「手」口径的成交量换算为统一契约要求的「股」
+
+    Args:
+        val: 东方财富返回的成交量（手）
+        default: 转换失败时的默认值
+
+    Returns:
+        换算为「股」后的整数，或默认值
+    """
+    lots = safe_int(val, default=None)
+    if lots is None:
+        return default
+    return lots * EM_VOLUME_LOT_SIZE
+
+
 class RealtimeSource(Enum):
     """实时行情数据源"""
     EFINANCE = "efinance"           # 东方财富（efinance库）

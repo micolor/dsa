@@ -68,7 +68,8 @@ from .base import (
 from .realtime_types import (
     UnifiedRealtimeQuote, RealtimeSource,
     get_realtime_circuit_breaker,
-    safe_float, safe_int  # 使用统一的类型转换函数
+    safe_float,  # 使用统一的类型转换函数
+    EM_VOLUME_LOT_SIZE, em_lots_to_shares,  # 东财成交量「手」→「股」
 )
 
 
@@ -595,7 +596,13 @@ class EfinanceFetcher(BaseFetcher):
         
         # 重命名列
         df = df.rename(columns=column_mapping)
-        
+
+        # 东财 K 线的「成交量」以手为单位，统一契约要求「股」（stock_daily.volume）。
+        # 这里（日线唯一的写入口，股票与 ETF 共用）换算，后续消费方才能与实时行情
+        # 的「股」口径直接相除。
+        if 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce') * EM_VOLUME_LOT_SIZE
+
         # Fallback: if OHLC columns are missing (e.g. very old data path), fill from close
         if 'close' in df.columns and 'open' not in df.columns:
             df['open'] = df['close']
@@ -713,7 +720,7 @@ class EfinanceFetcher(BaseFetcher):
                 price=safe_float(row.get(price_col)),
                 change_pct=safe_float(row.get(pct_col)),
                 change_amount=safe_float(row.get(chg_col)),
-                volume=safe_int(row.get(vol_col)),
+                volume=em_lots_to_shares(row.get(vol_col)),
                 amount=safe_float(row.get(amt_col)),
                 turnover_rate=safe_float(row.get(turn_col)),
                 amplitude=safe_float(row.get(amp_col)),
@@ -814,7 +821,7 @@ class EfinanceFetcher(BaseFetcher):
                 price=safe_float(row.get(price_col)),
                 change_pct=safe_float(row.get(pct_col)),
                 change_amount=safe_float(row.get(chg_col)),
-                volume=safe_int(row.get(vol_col)),
+                volume=em_lots_to_shares(row.get(vol_col)),
                 amount=safe_float(row.get(amt_col)),
                 turnover_rate=safe_float(row.get(turn_col)),
                 amplitude=safe_float(row.get(amp_col)),

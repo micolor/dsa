@@ -25,6 +25,24 @@
 | 选股热点题材 | EastMoney provider、参考 AlphaSift 的 hotspot 实现、last-good cache | 未指定 provider 时默认使用 EastMoney provider | 实时失败时回退热点缓存；无缓存时返回稳定空态和可读错误 |
 | 港股 / 美股 | Longbridge、YFinance、AkShare、Tushare、Finnhub、AlphaVantage、Stooq | 配置 Longbridge 凭证后参与港美股日线/实时兜底；YFinance 保持基础兜底 | Longbridge 冷却或失败时回退 YFinance / 其他可用源 |
 
+## 成交量单位契约
+
+日线 `stock_daily.volume` 与实时行情 `UnifiedRealtimeQuote.volume` 的统一口径是**股**，两者会直接相除（`volume_change_ratio`、`volume_ratio_5d` 以及量能判断），因此任何一端改变单位都会让量能信号整体放大或缩小 100 倍。
+
+各源到该口径的换算情况：
+
+| 源 | 原始单位 | 处理位置 |
+| --- | --- | --- |
+| 东方财富（efinance 日线 / 实时，含 ETF） | 手 | `data_provider/efinance_fetcher.py`，换算常量见 `data_provider/realtime_types.py` 的 `EM_VOLUME_LOT_SIZE` |
+| 东方财富（akshare `stock_zh_a_hist` / `fund_etf_hist_em` / `stock_zh_a_spot_em` / `fund_etf_spot_em`） | 手 | `data_provider/akshare_fetcher.py`，仅在东财专用入口换算 |
+| 新浪、腾讯（akshare `stock_zh_a_daily` / `stock_zh_a_hist_tx`、腾讯实时） | 股 | 无需换算；实时侧由 `_normalize_tencent_volume` 归一为股 |
+| Baostock | 股 | 无需换算 |
+| Tushare（日线 / Pro 实时） | 手 | 各自 ×100 换算 |
+| TickFlow | 手 | `_cn_lots_to_shares` ×100 |
+| Pytdx | 待联网确认 | 未做换算 |
+
+新增数据源或调整任一源时必须同时确认上表口径：换算必须落在**该源自己的入口**，不能放进共享的 `_normalize_data`，否则同文件里的新浪/腾讯链路会被重复放大。
+
 ## 总体链路图
 
 ```mermaid

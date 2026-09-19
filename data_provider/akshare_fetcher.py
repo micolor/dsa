@@ -50,7 +50,8 @@ from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS,
 from .realtime_types import (
     UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
     get_realtime_circuit_breaker, get_chip_circuit_breaker,
-    safe_float, safe_int  # 使用统一的类型转换函数
+    safe_float, safe_int,  # 使用统一的类型转换函数
+    EM_VOLUME_LOT_SIZE, em_lots_to_shares,  # 东财成交量「手」→「股」
 )
 from .us_index_mapping import is_us_index_code, is_us_stock_code
 
@@ -563,6 +564,12 @@ class AkshareFetcher(BaseFetcher):
 
             if df is not None and not df.empty:
                 logger.info(f"[API返回] ak.stock_zh_a_hist 成功: {len(df)} 行, 耗时 {api_elapsed:.2f}s")
+                # 东财（ak.stock_zh_a_hist，映射 f5）的「成交量」以手为单位，统一契约
+                # 要求「股」（stock_daily.volume）。只在本接口内换算：同文件的
+                # 新浪/腾讯历史接口已经是「股」（akshare 文档：stock_zh_a_hist_tx
+                # 的 volume 统一为股），因此不能在共享的 _normalize_data 里统一乘。
+                if '成交量' in df.columns:
+                    df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce') * EM_VOLUME_LOT_SIZE
                 return df
             else:
                 logger.warning(f"[API返回] ak.stock_zh_a_hist 返回空数据")
@@ -715,9 +722,13 @@ class AkshareFetcher(BaseFetcher):
                 logger.info(f"[API返回] 列名: {list(df.columns)}")
                 logger.info(f"[API返回] 日期范围: {df['日期'].iloc[0]} ~ {df['日期'].iloc[-1]}")
                 logger.debug(f"[API返回] 最新3条数据:\n{df.tail(3).to_string()}")
+                # 东财 ETF 日线的「成交量」同样以手为单位（同 f5 字段家族），
+                # 统一契约要求「股」，理由见 _fetch_stock_data_em。
+                if '成交量' in df.columns:
+                    df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce') * EM_VOLUME_LOT_SIZE
             else:
                 logger.warning(f"[API返回] ak.fund_etf_hist_em 返回空数据, 耗时 {api_elapsed:.2f}s")
-            
+
             return df
             
         except Exception as e:
@@ -1045,7 +1056,7 @@ class AkshareFetcher(BaseFetcher):
                 price=safe_float(row.get('最新价')),
                 change_pct=safe_float(row.get('涨跌幅')),
                 change_amount=safe_float(row.get('涨跌额')),
-                volume=safe_int(row.get('成交量')),
+                volume=em_lots_to_shares(row.get('成交量')),
                 amount=safe_float(row.get('成交额')),
                 volume_ratio=safe_float(row.get('量比')),
                 turnover_rate=safe_float(row.get('换手率')),
@@ -1451,7 +1462,7 @@ class AkshareFetcher(BaseFetcher):
                 price=safe_float(row.get('最新价')),
                 change_pct=safe_float(row.get('涨跌幅')),
                 change_amount=safe_float(row.get('涨跌额')),
-                volume=safe_int(row.get('成交量')),
+                volume=em_lots_to_shares(row.get('成交量')),
                 amount=safe_float(row.get('成交额')),
                 volume_ratio=safe_float(row.get('量比')),
                 turnover_rate=safe_float(row.get('换手率')),
