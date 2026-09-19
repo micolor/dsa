@@ -696,33 +696,46 @@ const ChatPage: React.FC = () => {
     setSidebarOpen(false);
   }, [requestScrollToBottom, sessionId, switchSession, clearAllCopyTimers]);
 
+  /** 真正提交一次会话删除（撤销窗口正常到期，或被下一次删除顶替时补交）。 */
+  const commitDeleteSession = useCallback(
+    (sessionIdToDelete: string) => {
+      agentApi
+        .deleteChatSession(sessionIdToDelete)
+        .then(() => {
+          loadSessions();
+          if (sessionIdToDelete === sessionId) {
+            handleStartNewChat();
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to delete chat session:', error);
+        });
+    },
+    [sessionId, loadSessions, handleStartNewChat],
+  );
+
   const requestDeleteSession = useCallback(
     (sessionIdToDelete: string) => {
-      // 取消上一个未执行的删除（若仍在撤销窗口内）
-      if (pendingDeleteRef.current) {
-        window.clearTimeout(pendingDeleteRef.current.timer);
+      // 上一条删除的撤销窗口还没走完就被顶替：它的 toast 已经按「会话已删除」
+      // 渲染过，用户也已撤不回来（撤销按钮已被新的 id 覆盖）。这里必须把那次
+      // 删除补交，不能只清掉计时器——那会让一个已宣告完成的删除静默消失。
+      const superseded = pendingDeleteRef.current;
+      if (superseded) {
+        window.clearTimeout(superseded.timer);
+        pendingDeleteRef.current = null;
+        commitDeleteSession(superseded.id);
       }
       const timer = window.setTimeout(() => {
         pendingDeleteRef.current = null;
         if (isMountedRef.current) {
           setDeleteToastId(null);
         }
-        agentApi
-          .deleteChatSession(sessionIdToDelete)
-          .then(() => {
-            loadSessions();
-            if (sessionIdToDelete === sessionId) {
-              handleStartNewChat();
-            }
-          })
-          .catch((error) => {
-            console.error('Failed to delete chat session:', error);
-          });
+        commitDeleteSession(sessionIdToDelete);
       }, 6000);
       pendingDeleteRef.current = { id: sessionIdToDelete, timer };
       setDeleteToastId(sessionIdToDelete);
     },
-    [sessionId, loadSessions, handleStartNewChat],
+    [commitDeleteSession],
   );
 
   const undoDelete = useCallback(() => {

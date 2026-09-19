@@ -2012,6 +2012,40 @@ describe('ChatPage', () => {
     expect(mockStartNewChat).not.toHaveBeenCalled();
   });
 
+  it('still deletes the first session when a second deletion supersedes its undo window', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockStoreState.sessions = [
+        ...mockStoreState.sessions,
+        {
+          session_id: 'session-2',
+          title: '请简要分析 000001',
+          message_count: 1,
+          created_at: '2026-03-15T10:00:00Z',
+          last_active: '2026-03-15T10:05:00Z',
+        },
+      ];
+      render(
+        <MemoryRouter initialEntries={['/chat']}>
+          <ChatPage />
+        </MemoryRouter>
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 600519' }));
+      // 第二条删除会顶掉第一条的撤销窗口，但界面上两条都宣告过「会话已删除」。
+      fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 000001' }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(6000);
+      });
+
+      await waitFor(() => expect(mockDeleteChatSession).toHaveBeenCalledWith('session-2'));
+      expect(mockDeleteChatSession).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores malformed follow-up query params', async () => {
     render(
       <MemoryRouter initialEntries={['/chat?stock=%3Cscript%3E&name=Bad%0AName&recordId=abc']}>
