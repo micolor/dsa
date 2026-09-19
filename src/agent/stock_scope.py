@@ -103,6 +103,22 @@ def _append_candidate(candidates: List[str], candidate: str, text: str = "") -> 
         candidates.append(normalized)
 
 
+_BARE_FIVE_DIGITS_PATTERN = re.compile(r"^\d{5}$")
+
+
+def _is_markerless_unpadded_hk_code(raw: str) -> bool:
+    """无 hk/.HK 标记的裸 5 位数字，且不是零填充的规范写法。
+
+    裸 5 位数字在中文里同时是价格、成交量、金额的常见写法（「成交量 12000 手」
+    「目标价 25000」「市值 21000 亿」），只看数字无法与港股代码区分，而后者的规范
+    写法是零填充的 `00700`/`01810`（`_normalize_tool_stock_code` 也正是补零到 5 位）。
+    没有这道闸门时，上面三句话都会被判成切股到 `HK12000`/`HK25000`/`HK21000`，
+    清空当前标的、`stock_name` 与全部按标的缓存的分析，再拿一个不存在的代码去查数
+    据。非零填充的港股代码仍可用显式 `hk81200` / `81200.HK` 写法表达。
+    """
+    return bool(_BARE_FIVE_DIGITS_PATTERN.match(raw)) and not raw.startswith("0")
+
+
 def extract_stock_codes(text: str) -> List[str]:
     """Extract all explicit stock-code candidates from free text."""
     if not text:
@@ -120,6 +136,8 @@ def extract_stock_codes(text: str) -> List[str]:
     ):
         for match in re.finditer(pattern, text, flags):
             raw = match.group(1) if match.lastindex else match.group(0)
+            if _is_markerless_unpadded_hk_code(raw):
+                continue
             _append_candidate(candidates, raw, text)
 
     if (

@@ -46,6 +46,20 @@ function isDeniedTickerCandidate(value: string, message: string): boolean {
   );
 }
 
+/**
+ * 无 `hk` / `.HK` 标记的裸 5 位数字，且不是零填充的规范写法。
+ *
+ * 裸 5 位数字在中文里同时是价格、成交量、金额的常见写法（「成交量 12000 手」
+ * 「目标价 25000」「市值 21000 亿」），只看数字无法与港股代码区分。港股代码的规范
+ * 写法是零填充的 `00700`/`01810`，所以这里只接受零填充形式。镜像后端
+ * `src/agent/stock_scope.py` 的 `_is_markerless_unpadded_hk_code`：两侧不一致会
+ * 让页面显示的当前标的与后端实际使用的标的分叉。非零填充的港股代码仍可用显式
+ * `hk81200` / `81200.HK` 写法表达。
+ */
+function isMarkerlessUnpaddedHkCode(value: string): boolean {
+  return /^\d{5}$/.test(value) && !value.startsWith('0');
+}
+
 export function extractStockCodeFromMessage(message: string): string | null {
   return extractStockCodesFromMessage(message)[0] ?? null;
 }
@@ -78,6 +92,9 @@ export function extractStockCodesFromMessage(message: string): string[] {
       const start = match.index ?? 0;
       const end = start + value.length;
       if (/^[A-Z]{2,5}$/.test(value) && (message[start - 1] === '.' || message[end] === '.')) {
+        continue;
+      }
+      if (isMarkerlessUnpaddedHkCode(value)) {
         continue;
       }
       matches.push({

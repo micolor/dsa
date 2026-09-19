@@ -304,6 +304,59 @@ class TestStockScopeResolution(unittest.TestCase):
         self.assertEqual(result.effective_context["stock_name"], "匿名标的")
         self.assertEqual(result.stock_scope.allowed_stock_codes, {"600519", "HK01810", "AAPL"})
 
+    def test_unpadded_five_digit_number_is_not_read_as_hk_code(self):
+        """裸 5 位非零填充数字更可能是价格/成交量/金额，不能当港股代码。"""
+        cases = [
+            "看看 600519 的成交量 12000 手",
+            "分析 600519，目标价 25000",
+            "研究 600519 市值 21000 亿",
+            "看看 600519 的现价 18000",
+        ]
+
+        for message in cases:
+            with self.subTest(message=message):
+                result = resolve_stock_scope(
+                    message,
+                    {"stock_code": "600519", "stock_name": "匿名标的"},
+                )
+
+                self.assertEqual(result.stock_scope.mode, "maintain")
+                self.assertEqual(result.stock_scope.expected_stock_code, "600519")
+                self.assertEqual(result.stock_scope.allowed_stock_codes, {"600519"})
+                self.assertEqual(result.effective_context["stock_code"], "600519")
+                self.assertEqual(result.effective_context["stock_name"], "匿名标的")
+
+    def test_zero_padded_five_digit_number_still_switches_context(self):
+        """零填充写法（00700）是港股代码的规范形式，切股语义保持不变。"""
+        result = resolve_stock_scope(
+            "看看 00700 的走势",
+            {"stock_code": "600519", "stock_name": "匿名标的"},
+        )
+
+        self.assertEqual(result.stock_scope.mode, "switch")
+        self.assertEqual(result.stock_scope.expected_stock_code, "HK00700")
+        self.assertEqual(result.stock_scope.allowed_stock_codes, {"HK00700"})
+        self.assertEqual(result.effective_context["stock_code"], "HK00700")
+        self.assertEqual(result.effective_context["stock_name"], "")
+
+    def test_five_digit_hk_code_with_explicit_marker_is_marker_authoritative(self):
+        """带 hk/.HK 标记时不受零填充约束，非零填充写法仍被接受。"""
+        cases = [
+            ("分析 hk81200", "HK81200"),
+            ("分析 81200.HK", "HK81200"),
+        ]
+
+        for message, expected in cases:
+            with self.subTest(message=message):
+                result = resolve_stock_scope(
+                    message,
+                    {"stock_code": "600519", "stock_name": "匿名标的"},
+                )
+
+                self.assertEqual(result.stock_scope.mode, "switch")
+                self.assertEqual(result.stock_scope.expected_stock_code, expected)
+                self.assertEqual(result.stock_scope.allowed_stock_codes, {expected})
+
     def test_compare_hints_allow_multiple_codes_without_switching_context(self):
         cases = [
             "分析 600519 和 AAPL 的差异",
