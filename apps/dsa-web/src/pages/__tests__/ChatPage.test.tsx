@@ -682,6 +682,13 @@ describe('ChatPage', () => {
     expect(mockSwitchSession).not.toHaveBeenCalled();
     expect(await screen.findByText('会话已删除')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument();
+
+    // 必须撤销：删除走的是 6 秒真实 `setTimeout`，且组件卸载时不会清理它
+    // （导航离开后删除照旧生效，这是刻意的）。若在本用例里留着不管，这个计时器会
+    // 在 6 秒后于**后续用例**的执行窗口内调用 `deleteChatSession`，让「撤销窗口内
+    // 不真正删除」那条断言随文件耗时随机转红——撤销是唯一能确定性地拆掉它的动作。
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    expect(mockDeleteChatSession).not.toHaveBeenCalled();
   });
 
   it('disables header actions when there are no messages', async () => {
