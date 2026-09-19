@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 import contextvars
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass, field
+from queue import Empty, Queue
 from typing import Any, Callable, Dict, List, Optional
 
 from src.agent.llm_adapter import LLMToolAdapter
@@ -635,6 +636,64 @@ def _maybe_emit_alert_proposal(
     return json.dumps({"message": summary}, ensure_ascii=False)
 
 
+class _BoundedToolCall:
+    """Run one tool call on a daemon worker thread with a bounded wait.
+
+    ``ThreadPoolExecutor`` cannot be abandoned once a call overruns its
+    timeout: its worker threads are non-daemon and are joined when the
+    interpreter exits, so a tool blocked inside a third-party library outlives
+    the timeout and can keep the whole process from shutting down. ``future.
+    cancel()`` does not help either — it is a no-op on a call that already
+    started. Python cannot force-stop a thread blocked in such a library, so
+    the call runs on a daemon thread instead: the caller stops waiting on
+    schedule, and a stuck call cannot hold the process open. Same tradeoff as
+    ``src/services/screening/source_guard.call_with_timeout``.
+
+    The caller's context is copied per worker (``copy_context().run``) so
+    ContextVar state such as the frozen target date still reaches the tool.
+
+    A call that overruns is abandoned rather than cancelled: if it ever
+    returns, its result is discarded and it stays in ``_result``.
+    """
+
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        tool_call: Any,
+        *,
+        name: str,
+        completed: Optional["Queue[_BoundedToolCall]"] = None,
+    ):
+        self._context = contextvars.copy_context()
+        self._result: "Queue[tuple[bool, Any]]" = Queue(maxsize=1)
+        self._completed = completed
+        self.tool_call = tool_call
+        self._thread = threading.Thread(
+            target=self._invoke, args=(func, tool_call), name=name, daemon=True
+        )
+        self._thread.start()
+
+    def _invoke(self, func: Callable[..., Any], tool_call: Any) -> None:
+        try:
+            outcome: tuple[bool, Any] = (True, self._context.run(func, tool_call))
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the waiting caller.
+            outcome = (False, exc)
+        self._result.put(outcome)
+        if self._completed is not None:
+            self._completed.put(self)
+
+    def wait(self, timeout: Optional[float]) -> bool:
+        """Wait up to ``timeout`` seconds; True when the call has finished."""
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def result(self) -> Any:
+        ok, payload = self._result.get_nowait()
+        if ok:
+            return payload
+        raise payload
+
+
 def _execute_tools(
     tool_calls,
     tool_registry: ToolRegistry,
@@ -664,29 +723,21 @@ def _execute_tools(
         tc = tool_calls[0]
         if progress_callback:
             progress_callback(stream_event("tool_start", step=step, tool=tc.name))
-        timeout_triggered = False
         if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0:
-            pool = ThreadPoolExecutor(max_workers=1)
-            ctx = contextvars.copy_context()
-            try:
-                future = pool.submit(ctx.run, _exec_single, tc)
-                try:
-                    _, result_str, success, dur, cached, guard_result = future.result(timeout=tool_wait_timeout_seconds)
-                except FuturesTimeoutError:
-                    timeout_triggered = True
-                    future.cancel()
-                    timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
-                    logger.warning("Tool '%s' timed out after %s at step %d", tc.name, timeout_label, step)
-                    result_str = json.dumps({
-                        "error": f"Tool execution timed out after {timeout_label}",
-                        "timeout": True,
-                    })
-                    success = False
-                    dur = round(tool_wait_timeout_seconds, 2)
-                    cached = False
-                    guard_result = None
-            finally:
-                pool.shutdown(wait=not timeout_triggered, cancel_futures=timeout_triggered)
+            call = _BoundedToolCall(_exec_single, tc, name=f"agent-tool:{tc.name}")
+            if call.wait(tool_wait_timeout_seconds):
+                _, result_str, success, dur, cached, guard_result = call.result()
+            else:
+                timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
+                logger.warning("Tool '%s' timed out after %s at step %d", tc.name, timeout_label, step)
+                result_str = json.dumps({
+                    "error": f"Tool execution timed out after {timeout_label}",
+                    "timeout": True,
+                })
+                success = False
+                dur = round(tool_wait_timeout_seconds, 2)
+                cached = False
+                guard_result = None
         else:
             _, result_str, success, dur, cached, guard_result = _exec_single(tc)
         if progress_callback:
@@ -717,69 +768,69 @@ def _execute_tools(
             if progress_callback:
                 progress_callback(stream_event("tool_start", step=step, tool=tc.name))
 
-        pool = ThreadPoolExecutor(max_workers=min(len(tool_calls), 5))
-        timeout_triggered = False
-        try:
-            futures = {pool.submit(contextvars.copy_context().run, _exec_single, tc): tc for tc in tool_calls}
-            pending = set(futures)
-            for future in as_completed(
-                futures,
-                timeout=tool_wait_timeout_seconds if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0 else None,
-            ):
-                pending.discard(future)
-                tc_item, result_str, success, dur, cached, guard_result = future.result()
-                if progress_callback:
-                    progress_callback(stream_event("tool_done", step=step, tool=tc_item.name, success=success, duration=dur))
-                result_str = _maybe_emit_alert_proposal(tc_item, result_str, progress_callback, step)
-                log_entry = {
-                    "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
-                    "success": success, "duration": dur, "result_length": len(result_str),
-                    "cached": cached,
-                }
-                if guard_result is not None:
-                    log_entry.update({
-                        "guarded": True,
-                        "expected_stock_code": guard_result.get("expected_stock_code"),
-                        "requested_stock_code": guard_result.get("requested_stock_code"),
-                        "allowed_stock_codes": guard_result.get("allowed_stock_codes", []),
-                    })
-                tool_calls_log.append(log_entry)
-                results.append({"tc": tc_item, "result_str": result_str})
-        except FuturesTimeoutError:
-            timeout_triggered = True
-            timeout_label = (
-                f"{tool_wait_timeout_seconds:.2f}s"
-                if tool_wait_timeout_seconds is not None
-                else "the configured limit"
-            )
+        has_timeout = bool(tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0)
+        finished: "Queue[_BoundedToolCall]" = Queue()
+        pending = [
+            _BoundedToolCall(_exec_single, tc, name=f"agent-tool:{tc.name}", completed=finished)
+            for tc in tool_calls
+        ]
+        deadline = time.monotonic() + tool_wait_timeout_seconds if has_timeout else None
+
+        while pending:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                break
+            try:
+                done = finished.get(timeout=remaining)
+            except Empty:
+                break
+            pending.remove(done)
+            tc_item, result_str, success, dur, cached, guard_result = done.result()
+            if progress_callback:
+                progress_callback(stream_event("tool_done", step=step, tool=tc_item.name, success=success, duration=dur))
+            result_str = _maybe_emit_alert_proposal(tc_item, result_str, progress_callback, step)
+            log_entry = {
+                "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
+                "success": success, "duration": dur, "result_length": len(result_str),
+                "cached": cached,
+            }
+            if guard_result is not None:
+                log_entry.update({
+                    "guarded": True,
+                    "expected_stock_code": guard_result.get("expected_stock_code"),
+                    "requested_stock_code": guard_result.get("requested_stock_code"),
+                    "allowed_stock_codes": guard_result.get("allowed_stock_codes", []),
+                })
+            tool_calls_log.append(log_entry)
+            results.append({"tc": tc_item, "result_str": result_str})
+
+        if pending:
+            timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
             logger.warning("Tool batch timed out after %s at step %d", timeout_label, step)
-            for future, tc_item in futures.items():
-                if future in pending:
-                    future.cancel()
-                    result_str = json.dumps({
-                        "error": f"Tool execution timed out after {timeout_label}",
-                        "timeout": True,
-                    })
-                    if progress_callback:
-                        progress_callback(stream_event(
-                            "tool_done",
-                            step=step,
-                            tool=tc_item.name,
-                            success=False,
-                            duration=round(tool_wait_timeout_seconds or 0.0, 2),
-                        ))
-                    tool_calls_log.append({
-                        "step": step,
-                        "tool": tc_item.name,
-                        "arguments": tc_item.arguments,
-                        "success": False,
-                        "duration": round(tool_wait_timeout_seconds or 0.0, 2),
-                        "result_length": len(result_str),
-                        "cached": False,
-                        "timeout": True,
-                    })
-                    results.append({"tc": tc_item, "result_str": result_str})
-        finally:
-            pool.shutdown(wait=not timeout_triggered, cancel_futures=timeout_triggered)
+            for call in pending:
+                tc_item = call.tool_call
+                result_str = json.dumps({
+                    "error": f"Tool execution timed out after {timeout_label}",
+                    "timeout": True,
+                })
+                if progress_callback:
+                    progress_callback(stream_event(
+                        "tool_done",
+                        step=step,
+                        tool=tc_item.name,
+                        success=False,
+                        duration=round(tool_wait_timeout_seconds or 0.0, 2),
+                    ))
+                tool_calls_log.append({
+                    "step": step,
+                    "tool": tc_item.name,
+                    "arguments": tc_item.arguments,
+                    "success": False,
+                    "duration": round(tool_wait_timeout_seconds or 0.0, 2),
+                    "result_length": len(result_str),
+                    "cached": False,
+                    "timeout": True,
+                })
+                results.append({"tc": tc_item, "result_str": result_str})
 
     return results

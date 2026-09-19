@@ -40,10 +40,10 @@ def _make_spy_registry(tool_names: list[str], observed: list):
 
 
 class ExecuteToolsFrozenContextTestCase(unittest.TestCase):
-    """Test ContextVar propagation through _execute_tools ThreadPoolExecutor."""
+    """Test ContextVar propagation into _execute_tools' worker threads."""
 
     def test_contextvar_propagates_to_single_tool_thread(self):
-        """Single-tool path with timeout uses copy_context().run()."""
+        """Single-tool path with timeout copies the context per worker."""
         from src.agent.runner import _execute_tools
 
         frozen_date = date(2026, 4, 15)
@@ -71,8 +71,8 @@ class ExecuteToolsFrozenContextTestCase(unittest.TestCase):
         """Multi-tool path propagates ContextVar to all concurrent worker threads.
 
         Uses a Barrier to force genuine overlap: every spy handler blocks
-        until all workers have entered ctx.run(), so if a shared Context
-        were reused the second enter would raise RuntimeError.
+        until all workers have entered ctx.run(), so a shared Context that was
+        reused across workers would raise RuntimeError on the second enter.
         """
         from src.agent.runner import _execute_tools
 
