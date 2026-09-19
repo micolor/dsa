@@ -42,10 +42,27 @@ class DingtalkPlatform(BotPlatform):
     def __init__(self):
         from src.config import get_config
         config = get_config()
-        
+
         self._app_key = getattr(config, 'dingtalk_app_key', None)
         self._app_secret = getattr(config, 'dingtalk_app_secret', None)
-    
+        # 已按原因记录过的「配置类拒绝」，见 _log_config_rejection。
+        self._logged_config_rejections: set = set()
+
+    def _log_config_rejection(self, reason: str, message: str) -> None:
+        """
+        记录一次由**配置缺失**（而非伪造请求）导致的拒绝，同一原因只记一次。
+
+        回调地址是公开的，verify_request 在鉴权之前执行：每个未鉴权请求都会走到
+        这两个分支，若每次都记日志，任何知道回调地址的人都能刷满 ERROR 日志。
+        配置类失败是「一次配置错、之后每次都错」，记一次足够让运维在 ERROR 级别
+        看到可执行的修复说明；请求类失败（签名不符、时间戳过期）仍是逐条 warning。
+        """
+        if reason in self._logged_config_rejections:
+            return
+        # set.add 在 GIL 下是原子的；并发下最坏情况是同一原因多记一行，无需加锁。
+        self._logged_config_rejections.add(reason)
+        logger.error(message)
+
     @property
     def platform_name(self) -> str:
         return "dingtalk"
@@ -64,9 +81,19 @@ class DingtalkPlatform(BotPlatform):
         直接放行，等于「没有密钥就不校验」——任何知道回调地址的人都能驱动
         机器人。钉钉的 `handle_challenge` 恒返回 None，URL 验证不经过这里，
         因此收紧不影响回调地址的首次校验。
+
+        代价是配置错一次、之后每次回调都 403，而响应体不会说明原因。这两个
+        分支（配置缺失）因此用 `_log_config_rejection` 在 **ERROR** 级别记一次
+        可执行的修复说明；签名不符 / 时间戳过期仍逐条 warning——那是请求问题，
+        不是配置问题。
         """
         if not self._app_secret:
-            logger.warning("[DingTalk] 未配置 app_secret，拒绝请求")
+            self._log_config_rejection(
+                "missing_app_secret",
+                "[DingTalk] 未配置 DINGTALK_APP_SECRET：钉钉回调一律拒绝（403）。"
+                "请配置 DINGTALK_APP_SECRET，并在钉钉机器人后台开启「加签」，"
+                "否则机器人不会收到任何命令。",
+            )
             return False
 
         # HTTP 头名大小写不敏感，先归一化，避免合法的签名请求被误判为缺少签名
@@ -75,7 +102,11 @@ class DingtalkPlatform(BotPlatform):
         sign = normalized_headers.get('sign', '')
 
         if not timestamp or not sign:
-            logger.warning("[DingTalk] 缺少 timestamp/sign，拒绝请求")
+            self._log_config_rejection(
+                "missing_signature_headers",
+                "[DingTalk] 回调缺少 timestamp/sign 头：一律拒绝（403）。"
+                "若钉钉机器人后台未开启「加签」，请开启后再触发回调。",
+            )
             return False
 
         # 验证时间戳（1小时内有效）

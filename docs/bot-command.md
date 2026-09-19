@@ -255,6 +255,11 @@ async def dingtalk_webhook(request: Request):
 钉钉的 `handle_challenge` 恒返回 `None`（钉钉不用 URL 验证握手），因此这些校验不影响回调地址的
 首次可用性检查。
 
+配置类的拒绝（未配置 `DINGTALK_APP_SECRET`、或回调没有 `timestamp`/`sign`）在 **ERROR** 级别记一条
+带修复说明的日志，同一原因每个平台实例只记一次：回调地址是公开的，逐条记会让未鉴权请求刷满日志；
+而配置错是「一次错、之后每次都错」，记一次就够排查。签名不符、时间戳过期属于请求问题，仍是逐条
+`WARNING`。排障时先看 `ERROR` 级的 `[DingTalk]` 行，它会直接说明要改哪个配置。
+
 ## 配置
 
 在 [config.py](../src/config.py) 中新增机器人配置：

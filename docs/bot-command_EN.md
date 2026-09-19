@@ -227,6 +227,13 @@ too, and header names are matched case-insensitively per the HTTP spec.
 DingTalk's `handle_challenge` always returns `None` (DingTalk has no URL-verification
 handshake), so these checks do not affect the callback URL's initial availability check.
 
+Rejections caused by *configuration* (no `DINGTALK_APP_SECRET`, or a callback without
+`timestamp`/`sign`) are logged once per platform instance at **ERROR** level with the fix
+to apply. The callback URL is public, so logging every rejection would let an
+unauthenticated caller flood the log; a misconfiguration fails every time after the first,
+so one line is enough to triage. A bad signature or a stale timestamp is a request
+problem, not a configuration one, and stays a per-request `WARNING`.
+
 ---
 
 ## 7. Configuration

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 钉钉回调 fail-closed 的代价——配置错一次就每次 403——现在在 **ERROR** 级别可诊断：`DingtalkPlatform` 对两类**配置缺失**导致的拒绝（未配置 `DINGTALK_APP_SECRET`、回调缺少 `timestamp`/`sign` 头）记一条带修复说明的日志，同一原因每个平台实例只记一次；签名不符、时间戳过期属于请求问题，仍是逐条 `WARNING`。之所以限制为「一次」：回调地址是公开的，`verify_request` 在鉴权之前执行，逐条记会让任何知道地址的人刷满 ERROR 日志；而配置错是「一次错、之后每次都错」，一次足够排查。排障时先看 ERROR 级的 `[DingTalk]` 行即可知道要改哪个配置，不必靠翻 `docs/bot-command.md` 反推 403 的原因。新增 3 例回归（两类配置拒绝各只记一次 ERROR 且含 `DINGTALK_APP_SECRET` / 「加签」字样、伪造签名不得占用 ERROR），前两例在把日志降回 `warning` 后转红
 - [修复] 钉钉 Webhook 校验不再 fail-open：`DingtalkPlatform.verify_request` 此前在「未配置 `dingtalk_app_secret`」和「请求缺少 `timestamp`/`sign` 头」两种情况下都直接 `return True`，等于**没有密钥就不校验**——任何知道回调地址的人都能驱动机器人，而 `bot/platforms/__init__.py` 的 `ALL_PLATFORMS` 目前只登记了钉钉，这是仓库里唯一在册的 Webhook 平台。现两种情况都拒绝（`handle_webhook` 返回 403），与 `DiscordPlatform` 的既有契约一致；时间戳窗口（1 小时）与非数字时间戳仍按原样拒绝，请求头名改为大小写不敏感匹配（HTTP 规范如此，否则合法的加签请求会被误判成缺少签名而拒绝）。钉钉的 `handle_challenge` 恒返回 `None`，URL 可用性校验不经过 `verify_request`，因此收紧不影响回调地址的首次校验。新增 7 例回归（已签名的请求可被接受并解析出群聊消息、缺密钥拒绝、缺签名头拒绝、签名错误拒绝、时间戳过期拒绝、时间戳非数字拒绝、头名大小写不敏感），其中 2 例在修复前转红
 - [文档] 修正 `docs/bot-command.md` 「Webhook 路由」与实现不符的描述：原文称 `/bot/feishu`、`/bot/dingtalk`、`/bot/wecom`、`/bot/telegram` 已「在 `api/v1/router.py` 中注册路由」，但该文件里没有任何 `/bot/*`，`server.py` 也没有，`ALL_PLATFORMS` 只登记了钉钉；现改为与 `docs/bot-command_EN.md` 一致的「尚未挂载」表格（钉钉可用、飞书仅 Stream、企业微信与 Telegram 有 handler 无适配器），并同步补上钉钉回调 fail-closed 的签名校验说明。中英两份文档本次同步更新
 

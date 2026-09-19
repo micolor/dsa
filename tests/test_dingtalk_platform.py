@@ -7,6 +7,7 @@
 import base64
 import hashlib
 import hmac
+import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -129,3 +130,47 @@ def test_header_names_are_matched_case_insensitively():
     upper = {key.upper(): value for key, value in headers.items()}
 
     assert platform.verify_request(upper, b"{}") is True
+
+
+def _error_records(caplog):
+    return [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+def test_missing_app_secret_is_reported_once_as_an_actionable_error(caplog):
+    """fail-closed 的代价是回调静默 403，运维必须能在 ERROR 级别看到怎么修。"""
+    platform = _make_platform(None)
+
+    with caplog.at_level(logging.ERROR, logger="bot.platforms.dingtalk"):
+        assert platform.verify_request(_signed_headers(b"{}"), b"{}") is False
+        assert platform.verify_request(_signed_headers(b"{}"), b"{}") is False
+
+    errors = _error_records(caplog)
+    assert len(errors) == 1, "配置类拒绝只应记一次，避免未鉴权请求刷满日志"
+    message = errors[0].getMessage()
+    assert "DINGTALK_APP_SECRET" in message
+    assert "加签" in message
+
+
+def test_missing_signature_headers_are_reported_once_as_an_actionable_error(caplog):
+    platform = _make_platform(APP_SECRET)
+
+    with caplog.at_level(logging.ERROR, logger="bot.platforms.dingtalk"):
+        assert platform.verify_request({}, b"{}") is False
+        assert platform.verify_request({}, b"{}") is False
+
+    errors = _error_records(caplog)
+    assert len(errors) == 1
+    assert "加签" in errors[0].getMessage()
+
+
+def test_forged_signature_is_not_reported_as_a_configuration_error(caplog):
+    """签名不符是请求问题，不是配置问题：保持逐条 warning，不占用 ERROR。"""
+    platform = _make_platform(APP_SECRET)
+    headers = _signed_headers(b"{}")
+    headers["sign"] = _sign(headers["timestamp"], "some-other-secret")
+
+    with caplog.at_level(logging.WARNING, logger="bot.platforms.dingtalk"):
+        assert platform.verify_request(headers, b"{}") is False
+
+    assert _error_records(caplog) == []
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
