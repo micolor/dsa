@@ -1197,6 +1197,60 @@ class TestOrchestratorModes(unittest.TestCase):
         self.assertIn("Strong trend", summary)
         self.assertIn("Minor sell-down", summary)
 
+    def _build_fallback_ctx(self, language=None):
+        ctx = AgentContext(query="test", stock_code="600519", stock_name="贵州茅台")
+        if language is not None:
+            ctx.meta["report_language"] = language
+        ctx.add_opinion(AgentOpinion(
+            agent_name="technical", signal="sell", confidence=0.8, reasoning="跌破均线"))
+        ctx.add_opinion(AgentOpinion(
+            agent_name="skill_shrink_pullback", signal="hold", confidence=0.5, reasoning="量能不足"))
+        ctx.add_opinion(AgentOpinion(
+            agent_name="skill_consensus", signal="hold", confidence=0.6, reasoning="多策略一致偏空"))
+        ctx.add_risk_flag("goodwill", "商誉减值风险", severity="high")
+        return ctx
+
+    def test_fallback_summary_localizes_its_scaffolding(self):
+        orch = self._make_orchestrator()
+        summary = orch._fallback_summary(self._build_fallback_ctx("zh"))
+
+        self.assertIn("# 分析结果摘要: 600519 (贵州茅台)", summary)
+        self.assertIn("## 技术面", summary)
+        self.assertIn("卖出 · 置信度 80%", summary)
+        self.assertIn("## 缩量回踩", summary)
+        self.assertIn("## 多策略综合", summary)
+        self.assertIn("## 风险警报", summary)
+        self.assertIn("- [高] 商誉减值风险", summary)
+
+    def test_fallback_summary_does_not_echo_internal_identifiers(self):
+        orch = self._make_orchestrator()
+        summary = orch._fallback_summary(self._build_fallback_ctx("zh"))
+
+        for internal in ("technical", "skill_shrink_pullback", "skill_consensus",
+                         "Analysis Summary", "Signal:", "Risk Flags", "sell", "hold"):
+            with self.subTest(internal=internal):
+                self.assertNotIn(internal, summary)
+
+    def test_fallback_summary_follows_report_language(self):
+        orch = self._make_orchestrator()
+        for language, heading, risk_heading, signal in (
+            ("en", "# Summary: 600519", "## Risk Alerts", "Sell · Confidence 80%"),
+            ("ko", "# 분석 결과 요약: 600519", "## 리스크 경보", "매도 · 신뢰도 80%"),
+        ):
+            with self.subTest(language=language):
+                summary = orch._fallback_summary(self._build_fallback_ctx(language))
+                self.assertIn(heading, summary)
+                self.assertIn(risk_heading, summary)
+                self.assertIn(signal, summary)
+
+    def test_fallback_summary_omits_empty_stock_name_and_severity(self):
+        orch = self._make_orchestrator()
+        ctx = AgentContext(query="test", stock_code="600519")
+        ctx.add_risk_flag("misc", "未分级提示", severity="")
+        summary = orch._fallback_summary(ctx)
+
+        self.assertEqual(summary, "# 分析结果摘要: 600519\n\n## 风险警报\n- 未分级提示")
+
 
 class TestOrchestratorExecution(unittest.TestCase):
     """Test main orchestrator execution paths."""
@@ -1344,7 +1398,7 @@ class TestOrchestratorExecution(unittest.TestCase):
             result = orch._execute_pipeline(ctx, parse_dashboard=False)
 
         self.assertTrue(result.success)
-        self.assertIn("Analysis Summary", result.content)
+        self.assertIn("分析结果摘要", result.content)
 
     def test_execute_pipeline_degrades_on_skill_agent_failure_and_continues_to_decision(self):
         orch = self._make_orchestrator()
@@ -1368,7 +1422,7 @@ class TestOrchestratorExecution(unittest.TestCase):
                 result = orch._execute_pipeline(ctx, parse_dashboard=False)
 
         self.assertTrue(result.success)
-        self.assertIn("Analysis Summary", result.content)
+        self.assertIn("分析结果摘要", result.content)
         skill.run.assert_called_once()
         decision.run.assert_called_once()
 

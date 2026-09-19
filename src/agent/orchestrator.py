@@ -47,7 +47,7 @@ from src.agent.protocols import (
     normalize_decision_signal,
     normalize_stage_failure_reason,
 )
-from src.agent.skills.defaults import is_skill_agent_name
+from src.agent.skills.defaults import is_skill_agent_name, is_skill_consensus_name
 from src.agent.skills.engine import EvidencePartition, StrategyEngine, StrategyResult, StrategyResultStatus
 from src.agent.skills.scheduler import AgentSkillScheduler, SkillBatchResult
 from src.agent.risk_override import (
@@ -65,6 +65,7 @@ from src.agent.runtime_facts import (
 from src.agent.runner import parse_dashboard_json
 from src.agent.stage_labels import (
     stage_budget_skipped_message,
+    stage_display_name,
     stage_done_message,
     stage_start_message,
     stage_timeout_message,
@@ -73,7 +74,12 @@ from src.agent.stock_scope import resolve_stock_scope
 from src.agent.stream_events import stream_event
 from src.agent.tools.registry import ToolRegistry
 from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
-from src.report_language import normalize_report_language
+from src.report_language import (
+    get_report_labels,
+    localize_conflict_severity,
+    localize_strategy_signal,
+    normalize_report_language,
+)
 from src.services.risk_position_engine import (
     compute_atr,
     compute_position_size,
@@ -1230,17 +1236,40 @@ class AgentOrchestrator:
 
     @staticmethod
     def _fallback_summary(ctx: AgentContext) -> str:
-        """Build a plaintext summary when dashboard JSON is unavailable."""
-        lines = [f"# Analysis Summary: {ctx.stock_code} ({ctx.stock_name})", ""]
+        """Build a plaintext summary when dashboard JSON is unavailable.
+
+        这是流水线被超时/预算截断时唯一能交给用户的正文，因此和正式报告一样
+        按 ``report_language`` 出文：栏目名取自 ``_REPORT_LABELS``，信号与风险
+        等级复用既有译名函数，每条 opinion 的生产者名走 ``stage_display_name``
+        —— 否则用户会读到 ``## technical`` 这类内部英文标识加英文正文。
+        """
+        language = normalize_report_language(ctx.meta.get("report_language"))
+        labels = get_report_labels(language)
+        heading = labels.get("summary_heading") or "分析结果摘要"
+        stock_name = (ctx.stock_name or "").strip()
+        code = ctx.stock_code or ""
+        subject = f"{code} ({stock_name})" if stock_name else code
+        title = f"{heading}: {subject}" if subject else heading
+        lines = [f"# {title}", ""]
+        confidence_label = labels.get("strategy_confidence_label") or "置信度"
         for op in ctx.opinions:
-            lines.append(f"## {op.agent_name}")
-            lines.append(f"Signal: {op.signal} (confidence: {op.confidence:.0%})")
+            # 战法共识不是流水线阶段，取「多策略综合」这一既有译名。
+            source = (
+                labels.get("strategy_synthesis_heading")
+                if is_skill_consensus_name(op.agent_name)
+                else None
+            )
+            lines.append(f"## {source or stage_display_name(op.agent_name)}")
+            signal = localize_strategy_signal(op.signal, language)
+            lines.append(f"{signal} · {confidence_label} {op.confidence:.0%}")
             lines.append(op.reasoning)
             lines.append("")
         if ctx.risk_flags:
-            lines.append("## Risk Flags")
+            lines.append(f"## {labels.get('risk_alerts_label') or '风险警报'}")
             for rf in ctx.risk_flags:
-                lines.append(f"- [{rf['severity']}] {rf['description']}")
+                severity = localize_conflict_severity(rf.get("severity"), language)
+                prefix = f"[{severity}] " if severity else ""
+                lines.append(f"- {prefix}{rf.get('description', '')}")
         return "\n".join(lines)
 
     def _resolve_final_output(
