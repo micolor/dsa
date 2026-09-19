@@ -431,9 +431,12 @@ async def auth_login(request: Request, body: LoginRequest):
 @router.post(
     "/change-password",
     summary="Change password",
-    description="Change password. Requires valid session.",
+    description=(
+        "Change password. Requires valid session. "
+        "On success all other sessions are invalidated and a fresh session cookie is issued."
+    ),
 )
-async def auth_change_password(body: ChangePasswordRequest):
+async def auth_change_password(request: Request, body: ChangePasswordRequest):
     """Change password. Requires login."""
     if not is_password_changeable():
         return JSONResponse(
@@ -456,13 +459,54 @@ async def auth_change_password(body: ChangePasswordRequest):
             content={"error": "password_mismatch", "message": "两次输入的新密码不一致"},
         )
 
+    ip = get_client_ip(request)
+    if not check_rate_limit(ip):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limited",
+                "message": "Too many failed attempts. Please try again later.",
+            },
+        )
+
+    # 当前密码同样是可暴力猜解的入口，因此与 /login、/settings 走同一张限流表。
+    # change_password() 只返回文案，无法区分「当前密码错误」与「新密码不合规 / 写盘失败」，
+    # 而只有前者属于认证失败；所以这里先单独校验一次当前密码，失败才计入次数，
+    # 响应仍交给下面的 change_password() 维持既有 400 invalid_password 契约。
+    if not verify_stored_password(current):
+        record_login_failure(ip)
+
     err = change_password(current, new_pwd)
     if err:
         return JSONResponse(
             status_code=400,
             content={"error": "invalid_password", "message": err},
         )
-    return Response(status_code=204)
+    clear_rate_limit(ip)
+
+    # 改密后轮换会话秘钥，让其它已登录会话立刻失效：否则改了密码仍然拦不住
+    # 旧会话，密码泄露后的补救手段形同虚设。轮换会连带失效调用者自己的 Cookie，
+    # 因此随后重发一个会话，避免操作者被自己踢下线。
+    if is_auth_enabled() and not rotate_session_secret():
+        logger.error("Failed to rotate session secret after password change")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "internal_error",
+                "message": "密码已修改，但会话轮换失败；其它已登录会话仍然有效",
+            },
+        )
+
+    session_val = create_session()
+    if not session_val:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Failed to create session"},
+        )
+
+    resp = Response(status_code=204)
+    _set_session_cookie(resp, session_val, request)
+    return resp
 
 
 @router.post(

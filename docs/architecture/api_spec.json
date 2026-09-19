@@ -112,7 +112,7 @@
           "Auth"
         ],
         "summary": "Change password",
-        "description": "Change password. Requires valid session.",
+        "description": "Change password. Requires valid session. On success all other sessions are invalidated and a fresh session cookie is issued.",
         "operationId": "auth_change_password_api_v1_auth_change_password_post",
         "requestBody": {
           "content": {

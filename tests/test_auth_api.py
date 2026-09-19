@@ -26,6 +26,14 @@ from api.v1.endpoints import auth as auth_endpoint
 from src.config import Config
 
 
+def _extract_session_cookie(response) -> str:
+    """Read the dsa_session value out of a response's Set-Cookie header."""
+    header = response.headers.get("set-cookie", "")
+    name, _, value = header.split(";", 1)[0].partition("=")
+    assert name == auth_endpoint.COOKIE_NAME, f"unexpected cookie in response: {header!r}"
+    return value.strip().strip('"')
+
+
 def _reset_auth_globals() -> None:
     auth._auth_enabled = None
     auth._session_secret = None
@@ -178,6 +186,7 @@ class AuthApiTestCase(unittest.TestCase):
 
         response = asyncio.run(
             auth_endpoint.auth_change_password(
+                self._build_request(),
                 auth_endpoint.ChangePasswordRequest(
                     currentPassword="oldpass6",
                     newPassword="newpass6",
@@ -198,6 +207,7 @@ class AuthApiTestCase(unittest.TestCase):
 
         response = asyncio.run(
             auth_endpoint.auth_change_password(
+                self._build_request(),
                 auth_endpoint.ChangePasswordRequest(
                     currentPassword="wrong",
                     newPassword="new123",
@@ -206,6 +216,120 @@ class AuthApiTestCase(unittest.TestCase):
             )
         )
         self.assertEqual(response.status_code, 400)
+
+    def _change_password(self, request, current: str, new: str):
+        """Invoke the change-password handler with a matching confirm field."""
+        return asyncio.run(
+            auth_endpoint.auth_change_password(
+                request,
+                auth_endpoint.ChangePasswordRequest(
+                    currentPassword=current,
+                    newPassword=new,
+                    newPasswordConfirm=new,
+                ),
+            )
+        )
+
+    def test_change_password_rotates_session_and_keeps_caller_logged_in(self) -> None:
+        """改密成功后必须轮换会话秘钥，并给调用者重发一个可用会话。
+
+        只改密码不轮换秘钥时，改密前签发的 Cookie 仍然有效——旧会话（例如被泄露的
+        那个）在改密后照样能用，等于补救手段失效。轮换又会连带失效调用者自己的
+        Cookie，所以同一个响应里必须补发新会话，操作者不能把自己踢下线。
+        """
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.refresh_auth_state()
+            login_resp = asyncio.run(
+                auth_endpoint.auth_login(
+                    self._build_request(),
+                    auth_endpoint.LoginRequest(password="oldpass6", passwordConfirm="oldpass6"),
+                )
+            )
+            self.assertEqual(login_resp.status_code, 200)
+            old_session = _extract_session_cookie(login_resp)
+            self.assertTrue(auth.verify_session(old_session))
+
+            response = self._change_password(
+                self._build_request(cookies={auth_endpoint.COOKIE_NAME: old_session}),
+                "oldpass6",
+                "newpass6",
+            )
+
+            self.assertEqual(response.status_code, 204)
+            new_session = _extract_session_cookie(response)
+            self.assertNotEqual(new_session, old_session)
+            # 轮换后旧会话立即失效，其它已登录会话被踢下线
+            self.assertFalse(auth.verify_session(old_session))
+            # 调用者拿到的新会话是有效的，不需要重新登录
+            self.assertTrue(auth.verify_session(new_session))
+            self.assertTrue(auth.verify_stored_password("newpass6"))
+            self.assertFalse(auth.verify_stored_password("oldpass6"))
+
+    def test_change_password_wrong_current_triggers_rate_limit_429(self) -> None:
+        """反复输错当前密码必须累积到限流表并触发 429。
+
+        与 /login、/settings 共用同一张限流表；这里的失败次数全部来自真实的
+        认证失败（当前密码错误），不是预填状态。
+        """
+        from src.auth import RATE_LIMIT_MAX_FAILURES
+
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.refresh_auth_state()
+            auth.set_initial_password("oldpass6")
+
+            responses = [
+                self._change_password(self._build_request(), "wrongpass", "newpass6")
+                for _ in range(RATE_LIMIT_MAX_FAILURES + 1)
+            ]
+
+            self.assertEqual(
+                [r.status_code for r in responses[:-1]],
+                [400] * RATE_LIMIT_MAX_FAILURES,
+            )
+            self.assertEqual(responses[-1].status_code, 429)
+            self.assertIn(b'"error":"rate_limited"', responses[-1].body)
+            # 限流拦截不能顺手把密码改掉
+            self.assertTrue(auth.verify_stored_password("oldpass6"))
+
+    def test_change_password_invalid_new_password_does_not_consume_rate_limit(self) -> None:
+        """新密码不合规不是认证失败，不应把用户推进限流。
+
+        同一语义的两种失败必须分开记账：否则攻击者/手抖用户只要连续提交短密码，
+        就能凭新密码校验失败把自己（或别人）锁进 429。
+        """
+        from src.auth import RATE_LIMIT_MAX_FAILURES
+
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.refresh_auth_state()
+            auth.set_initial_password("oldpass6")
+
+            responses = [
+                self._change_password(self._build_request(), "oldpass6", "abc")
+                for _ in range(RATE_LIMIT_MAX_FAILURES + 1)
+            ]
+
+            self.assertEqual([r.status_code for r in responses], [400] * (RATE_LIMIT_MAX_FAILURES + 1))
+            self.assertTrue(all(b'"error":"invalid_password"' in r.body for r in responses))
+            self.assertNotIn("429", {str(r.status_code) for r in responses})
+            # 密码未被改动，且正确密码依然可以用
+            self.assertTrue(auth.verify_stored_password("oldpass6"))
+
+    def test_change_password_rotation_failure_reports_error_after_password_changed(self) -> None:
+        """轮换失败返回 500，但不能谎报密码没改。
+
+        密码已经落盘，此时没有可用的回滚路径（旧哈希不在手上）；如实返回错误并说明
+        其它会话仍然有效，比假装成功（静默降级）更能让操作者判断下一步。
+        """
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.refresh_auth_state()
+            auth.set_initial_password("oldpass6")
+            with patch.object(auth_endpoint, "rotate_session_secret", return_value=False):
+                response = self._change_password(self._build_request(), "oldpass6", "newpass6")
+
+            self.assertEqual(response.status_code, 500)
+            self.assertIn(b'"error":"internal_error"', response.body)
+            self.assertTrue(auth.verify_stored_password("newpass6"))
+            self.assertFalse(auth.verify_stored_password("oldpass6"))
 
     def test_protected_api_returns_401_without_session(self) -> None:
         scope = {
@@ -826,6 +950,103 @@ class AuthDisableViaRealASGITestCase(unittest.TestCase):
         #    authenticated jar state has actually been cleared, not just
         #    overwritten with a new value.
         self.assertNotIn("dsa_session", self.client.cookies)
+
+
+class AuthChangePasswordViaRealASGITestCase(unittest.TestCase):
+    """End-to-end change-password through the real ASGI / AuthMiddleware stack.
+
+    The handler-level tests above call ``auth_change_password`` directly, so they
+    cannot show what an actual client experiences. This class logs in over HTTP,
+    changes the password over HTTP, and then replays the pre-change cookie to prove
+    it is rejected by ``AuthMiddleware`` — the user-visible contract behind
+    "changing the password logs out other sessions".
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._temp_dir = tempfile.TemporaryDirectory()
+        cls.data_dir = Path(cls._temp_dir.name)
+        cls.env_path = cls.data_dir / ".env"
+        cls.env_path.write_text(
+            "STOCK_LIST=600519\nGEMINI_API_KEY=test\nADMIN_AUTH_ENABLED=true\n",
+            encoding="utf-8",
+        )
+        os.environ["ENV_FILE"] = str(cls.env_path)
+        os.environ["DATABASE_PATH"] = str(cls.data_dir / "test.db")
+        Config.reset_instance()
+
+        cls._data_dir_patcher = patch.object(
+            auth, "_get_data_dir", return_value=cls.data_dir
+        )
+        cls._data_dir_patcher.start()
+
+        _reset_auth_globals()
+        auth.refresh_auth_state()
+
+        # Minimal create_app: static_dir pointed at the temp data dir so the
+        # frontend-asset consistency check has nothing to scan.
+        from api.app import create_app
+        from fastapi.testclient import TestClient
+        cls.client = TestClient(create_app(static_dir=cls.data_dir))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._data_dir_patcher.stop()
+        Config.reset_instance()
+        os.environ.pop("ENV_FILE", None)
+        os.environ.pop("DATABASE_PATH", None)
+        _reset_auth_globals()
+        cls._temp_dir.cleanup()
+
+    def setUp(self) -> None:
+        _reset_auth_globals()
+        self.env_path.write_text(
+            "STOCK_LIST=600519\nGEMINI_API_KEY=test\nADMIN_AUTH_ENABLED=true\n",
+            encoding="utf-8",
+        )
+        Config.reset_instance()
+        auth.refresh_auth_state()
+        # Unconditional: the change-password test below rewrites the credential,
+        # so every test must start from a known password.
+        auth.set_initial_password("passwd6")
+        self.client.cookies.clear()
+
+    def test_change_password_via_real_asgi_invalidates_old_session(self) -> None:
+        login_resp = self.client.post("/api/v1/auth/login", json={"password": "passwd6"})
+        self.assertEqual(login_resp.status_code, 200, login_resp.text)
+        old_cookie = _extract_session_cookie(login_resp)
+
+        # Sanity: the login cookie actually opens a protected endpoint.
+        opened_before = self.client.get("/api/v1/system/config")
+        self.assertEqual(opened_before.status_code, 200, opened_before.text)
+
+        change_resp = self.client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "currentPassword": "passwd6",
+                "newPassword": "passwd9",
+                "newPasswordConfirm": "passwd9",
+            },
+        )
+        self.assertEqual(change_resp.status_code, 204, change_resp.text)
+        new_cookie = _extract_session_cookie(change_resp)
+        self.assertNotEqual(new_cookie, old_cookie)
+
+        # The caller keeps working without re-logging in...
+        opened_after = self.client.get("/api/v1/system/config")
+        self.assertEqual(opened_after.status_code, 200, opened_after.text)
+
+        # ...while the pre-change cookie is now dead as far as the middleware cares.
+        self.client.cookies.set("dsa_session", old_cookie)
+        replayed = self.client.get("/api/v1/system/config")
+        self.assertEqual(replayed.status_code, 401, replayed.text)
+
+        # And the old password no longer logs in.
+        self.client.cookies.clear()
+        relogin = self.client.post("/api/v1/auth/login", json={"password": "passwd6"})
+        self.assertEqual(relogin.status_code, 401, relogin.text)
+        new_login = self.client.post("/api/v1/auth/login", json={"password": "passwd9"})
+        self.assertEqual(new_login.status_code, 200, new_login.text)
 
 
 if __name__ == "__main__":
