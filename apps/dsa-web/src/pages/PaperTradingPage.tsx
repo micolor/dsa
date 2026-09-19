@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
-import { ApiErrorAlert, Badge, DatePicker, EmptyState, InlineAlert, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AutoDismissToast, Badge, DatePicker, EmptyState, InlineAlert, ToastViewport } from '../components/common';
 import { EquityCurveChart } from '../components/paper/EquityCurveChart';
 import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
@@ -38,13 +38,6 @@ export const PaperTradingPage: React.FC = () => {
   useEffect(() => {
     document.title = text.documentTitle;
   }, [text.documentTitle]);
-
-  // 成功提示（回填/刷新）为右上角 toast，几秒后自动消失。
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 3200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   // 静态数据（账户/持仓/净值曲线）：只在首次进入、手动刷新、回填后拉取一次。
   // account 响应内嵌 snapshot（types/paper.ts PaperAccount.snapshot），
@@ -196,22 +189,29 @@ export const PaperTradingPage: React.FC = () => {
 
       {toast ? (
         <ToastViewport>
-          <InlineAlert
-            elevated
-            variant="success"
-            message={toast}
-            className="pointer-events-auto"
-            action={(
-              <button
-                type="button"
-                onClick={() => setToast(null)}
-                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label={text.retry}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-          />
+          {/* 成功提示（回填/刷新）几秒后自动消失；鼠标悬停其上时暂停计时。 */}
+          <AutoDismissToast
+            active={toast}
+            onDismiss={() => setToast(null)}
+            delayMs={3200}
+          >
+            <InlineAlert
+              elevated
+              variant="success"
+              message={toast}
+              className="pointer-events-auto"
+              action={(
+                <button
+                  type="button"
+                  onClick={() => setToast(null)}
+                  className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                  aria-label={text.retry}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+            />
+          </AutoDismissToast>
         </ToastViewport>
       ) : null}
       {error ? <ApiErrorAlert error={error} /> : null}

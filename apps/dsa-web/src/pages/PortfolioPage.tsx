@@ -9,6 +9,7 @@ import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import {
   ApiErrorAlert,
+  AutoDismissToast,
   Badge,
   Button,
   ConfirmDialog,
@@ -324,24 +325,12 @@ const PortfolioPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
-  // 刷新结果用全局 toast 呈现，不占卡片高度；带自动消失 + 手动关闭。
-  const fxRefreshFeedbackTimerRef = useRef<number | null>(null);
+  // 刷新结果用全局 toast 呈现，不占卡片高度；自动消失 + 手动关闭由 AutoDismissToast 负责。
   const dismissFxRefreshFeedback = useCallback(() => {
-    if (fxRefreshFeedbackTimerRef.current !== null) {
-      window.clearTimeout(fxRefreshFeedbackTimerRef.current);
-      fxRefreshFeedbackTimerRef.current = null;
-    }
     setFxRefreshFeedback(null);
   }, []);
   const showFxRefreshFeedback = useCallback((feedback: FxRefreshFeedback) => {
-    if (fxRefreshFeedbackTimerRef.current !== null) {
-      window.clearTimeout(fxRefreshFeedbackTimerRef.current);
-    }
     setFxRefreshFeedback(feedback);
-    fxRefreshFeedbackTimerRef.current = window.setTimeout(() => {
-      fxRefreshFeedbackTimerRef.current = null;
-      setFxRefreshFeedback(null);
-    }, 5000);
   }, []);
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [riskWarning, setRiskWarning] = useState<string | null>(null);
@@ -641,9 +630,6 @@ const PortfolioPage: React.FC = () => {
     return () => {
       snapshotRequestRef.current += 1;
       eventsRequestRef.current += 1;
-      if (fxRefreshFeedbackTimerRef.current !== null) {
-        window.clearTimeout(fxRefreshFeedbackTimerRef.current);
-      }
     };
   }, []);
 
@@ -2462,23 +2448,30 @@ const PortfolioPage: React.FC = () => {
       </Dialog>
       <ToastViewport>
         {fxRefreshFeedback ? (
-          <InlineAlert
-            elevated
-            variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
-            title={text.fxRefreshResult}
-            message={fxRefreshFeedback.text}
-            action={(
-              <button
-                type="button"
-                onClick={dismissFxRefreshFeedback}
-                className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-            className="pointer-events-auto"
-          />
+          /* 刷新结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
+          <AutoDismissToast
+            active={fxRefreshFeedback}
+            onDismiss={dismissFxRefreshFeedback}
+            delayMs={5000}
+          >
+            <InlineAlert
+              elevated
+              variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
+              title={text.fxRefreshResult}
+              message={fxRefreshFeedback.text}
+              action={(
+                <button
+                  type="button"
+                  onClick={dismissFxRefreshFeedback}
+                  className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                  aria-label={t('common.close')}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+              className="pointer-events-auto"
+            />
+          </AutoDismissToast>
         ) : null}
       </ToastViewport>
     </div>

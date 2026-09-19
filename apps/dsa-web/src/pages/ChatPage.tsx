@@ -6,7 +6,7 @@ import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User, X } f
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
+import { ApiErrorAlert, AutoDismissToast, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import { alertsApi } from '../api/alerts';
 import type { AlertProposal } from '../types/alerts';
@@ -228,6 +228,7 @@ const ChatPage: React.FC = () => {
   const [sendToast, setSendToast] = useState<{
     type: 'success' | 'error';
     message: string;
+    durationMs: number;
   } | null>(null);
   const [introToastVisible, setIntroToastVisible] = useState(false);
   const introToastShownRef = useRef(false);
@@ -257,7 +258,6 @@ const ChatPage: React.FC = () => {
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const sendToastTimerRef = useRef<number | null>(null);
   const pendingDeleteRef = useRef<{ id: string; timer: number } | null>(null);
   const introToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
@@ -273,9 +273,6 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const timers = copyResetTimerRef.current;
     return () => {
-      if (sendToastTimerRef.current !== null) {
-        window.clearTimeout(sendToastTimerRef.current);
-      }
       if (introToastTimerRef.current !== null) {
         window.clearTimeout(introToastTimerRef.current);
       }
@@ -873,22 +870,15 @@ const ChatPage: React.FC = () => {
     handleSend(q.label, [q.skill], q.stockContext);
   };
 
-  const showSendFeedback = useCallback((nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => {
-    if (sendToastTimerRef.current !== null) {
-      window.clearTimeout(sendToastTimerRef.current);
-    }
-    setSendToast(nextToast);
-    sendToastTimerRef.current = window.setTimeout(() => {
-      setSendToast(null);
-      sendToastTimerRef.current = null;
-    }, durationMs);
-  }, []);
+  // 自动消失的计时交给 AutoDismissToast：同一提示换新时它会重新计时。
+  const showSendFeedback = useCallback(
+    (nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => {
+      setSendToast({ ...nextToast, durationMs });
+    },
+    [],
+  );
 
   const dismissSendToast = useCallback(() => {
-    if (sendToastTimerRef.current !== null) {
-      window.clearTimeout(sendToastTimerRef.current);
-      sendToastTimerRef.current = null;
-    }
     setSendToast(null);
   }, []);
 
@@ -1819,23 +1809,30 @@ const ChatPage: React.FC = () => {
     </div>
     <ToastViewport>
       {sendToast ? (
-        <InlineAlert
-          elevated
-          variant={sendToast.type === 'success' ? 'success' : 'danger'}
-          title={sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')}
-          message={sendToast.message}
-          action={(
-            <button
-              type="button"
-              onClick={dismissSendToast}
-              className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
-              aria-label={t('common.close')}
-            >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-          className="pointer-events-auto"
-        />
+        /* 发送结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
+        <AutoDismissToast
+          active={sendToast}
+          onDismiss={dismissSendToast}
+          delayMs={sendToast.durationMs}
+        >
+          <InlineAlert
+            elevated
+            variant={sendToast.type === 'success' ? 'success' : 'danger'}
+            title={sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')}
+            message={sendToast.message}
+            action={(
+              <button
+                type="button"
+                onClick={dismissSendToast}
+                className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                aria-label={t('common.close')}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            className="pointer-events-auto"
+          />
+        </AutoDismissToast>
       ) : null}
       {deleteToastId ? (
         <InlineAlert

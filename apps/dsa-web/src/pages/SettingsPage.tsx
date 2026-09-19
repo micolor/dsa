@@ -9,7 +9,7 @@ import { dataQualityApi } from '../api/dataQuality';
 import { notificationsApi } from '../api/notifications';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Loading, Pagination, Select, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AutoDismissToast, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Loading, Pagination, Select, ToastViewport } from '../components/common';
 import { UiLanguageToggle } from '../components/i18n/UiLanguageToggle';
 import { ThemeTabs } from '../components/theme/ThemeTabs';
 import {
@@ -1465,20 +1465,6 @@ const SettingsPage: React.FC = () => {
   }, [refreshSetupStatus]);
 
   useEffect(() => {
-    if (!toast) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      clearToast();
-    }, 3200);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [clearToast, toast]);
-
-  useEffect(() => {
     if (!canCheckDesktopUpdate) {
       setDesktopUpdateState(null);
       setIsCheckingDesktopUpdate(false);
@@ -2484,25 +2470,28 @@ const SettingsPage: React.FC = () => {
 
       {toast ? (
         <ToastViewport>
-          {toast.type === 'success'
-            ? <InlineAlert
-                elevated
-                variant="success"
-                title={t('settings.actionSuccess')}
-                message={toast.message}
-                action={(
-                  <button
-                    type="button"
-                    onClick={clearToast}
-                    className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                    aria-label={t('common.close')}
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                )}
-                className="pointer-events-auto"
-              />
-            : <ApiErrorAlert error={toast.error} className="pointer-events-auto" />}
+          {/* 操作结果几秒后自动消失；鼠标悬停其上时暂停计时。 */}
+          <AutoDismissToast active={toast} onDismiss={clearToast} delayMs={3200}>
+            {toast.type === 'success'
+              ? <InlineAlert
+                  elevated
+                  variant="success"
+                  title={t('settings.actionSuccess')}
+                  message={toast.message}
+                  action={(
+                    <button
+                      type="button"
+                      onClick={clearToast}
+                      className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                      aria-label={t('common.close')}
+                    >
+                      <X className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                  className="pointer-events-auto"
+                />
+              : <ApiErrorAlert error={toast.error} className="pointer-events-auto" />}
+          </AutoDismissToast>
         </ToastViewport>
       ) : null}
       <ConfirmDialog

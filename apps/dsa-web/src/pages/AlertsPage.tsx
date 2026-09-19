@@ -14,7 +14,7 @@ import {
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
 import { EventFactList } from '../components/alerts/EventFactList';
 import { filterEventTriggers } from '../components/alerts/eventFacts';
-import { ApiErrorAlert, AppPage, Dialog, EmptyState, InlineAlert, Loading, Pagination, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AppPage, AutoDismissToast, Dialog, EmptyState, InlineAlert, Loading, Pagination, ToastViewport } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText } from '../i18n/uiText';
@@ -190,13 +190,6 @@ const AlertsPage: React.FC = () => {
       mountedRef.current = false;
     };
   }, []);
-
-  // 测试结果为右上角 toast，几秒后自动消失。
-  useEffect(() => {
-    if (!testResult) return;
-    const timer = window.setTimeout(() => setTestResult(null), 5000);
-    return () => window.clearTimeout(timer);
-  }, [testResult]);
 
   const loadRules = useCallback(async (pageOverride?: number) => {
     const requestId = rulesRequestIdRef.current + 1;
@@ -401,23 +394,26 @@ const AlertsPage: React.FC = () => {
       ) : null}
       {testResult ? (
         <ToastViewport>
-          <InlineAlert
-            elevated
-            title={text.testResult}
-            variant={testVariant(testResult)}
-            message={renderTestResultMessage(testResult, text, dryRunLabels, recordLabels)}
-            className="pointer-events-auto"
-            action={(
-              <button
-                type="button"
-                onClick={() => setTestResult(null)}
-                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label={text.close}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-          />
+          {/* 测试结果几秒后自动消失；鼠标悬停其上时暂停计时。 */}
+          <AutoDismissToast active={testResult} onDismiss={() => setTestResult(null)} delayMs={5000}>
+            <InlineAlert
+              elevated
+              title={text.testResult}
+              variant={testVariant(testResult)}
+              message={renderTestResultMessage(testResult, text, dryRunLabels, recordLabels)}
+              className="pointer-events-auto"
+              action={(
+                <button
+                  type="button"
+                  onClick={() => setTestResult(null)}
+                  className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                  aria-label={text.close}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+            />
+          </AutoDismissToast>
         </ToastViewport>
       ) : null}
       <div className="flex min-h-full flex-col gap-4">

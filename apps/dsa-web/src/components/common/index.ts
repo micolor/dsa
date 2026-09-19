@@ -9,6 +9,7 @@ export * from './InlineAlert';
 export * from './StickyActionBar';
 export * from './Toolbar';
 export * from './ToastViewport';
+export * from './AutoDismissToast';
 export * from './PageHeader';
 export { Input } from './Input';
 export * from './EyeToggleIcon';
