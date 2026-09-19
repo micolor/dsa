@@ -1455,6 +1455,7 @@ const HomePage: React.FC = () => {
           onTabChange={setSidebarWorkspaceTab}
           watchlistRows={watchlistRows}
           watchlistLoading={watchlistState.isLoading}
+          watchlistLoadFailed={watchlistState.loadFailed}
           watchlistActioning={watchlistState.isActioning}
           watchlistMessage={watchlistState.actionMessage}
           onAddToWatchlist={watchlistState.addToWatchlist}
@@ -1506,6 +1507,7 @@ const HomePage: React.FC = () => {
       watchlistState.addToWatchlist,
       watchlistState.isActioning,
       watchlistState.isLoading,
+      watchlistState.loadFailed,
       watchlistState.removeFromWatchlist,
       watchlistState.activeListId,
       watchlistState.onCreateList,

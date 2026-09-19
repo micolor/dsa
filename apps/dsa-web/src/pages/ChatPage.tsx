@@ -242,6 +242,8 @@ const ChatPage: React.FC = () => {
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [sessionMessagesLoading, setSessionMessagesLoading] = useState(false);
   const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
+  // 自选列表没读到时不能把 codes=[] 当成「不在自选里」这个结论展示给用户。
+  const [watchlistLoadFailed, setWatchlistLoadFailed] = useState(false);
   const [isWatchlistActioning, setIsWatchlistActioning] = useState(false);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
   const [activeStockCode, setActiveStockCode] = useState<string | null>(null);
@@ -301,9 +303,14 @@ const ChatPage: React.FC = () => {
       const codes = await systemConfigApi.getWatchlist();
       if (isMountedRef.current) {
         setWatchlistCodes(codes);
+        setWatchlistLoadFailed(false);
       }
     } catch {
-      // ignore error silently
+      // 静默失败会让「加入自选 / 从自选删除」变成一个没有依据的断言：codes 还是空数组，
+      // 按钮就按「不在自选里」渲染，点击也按这个错误前提去写。这里改成显式失败态。
+      if (isMountedRef.current) {
+        setWatchlistLoadFailed(true);
+      }
     }
   }, []);
 
@@ -1750,15 +1757,35 @@ const ChatPage: React.FC = () => {
             {activeStockCode && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-text font-mono">{activeStockCode}</span>
-                <Button
-                  variant="secondary"
-                  size="xsm"
-                  isLoading={isWatchlistActioning}
-                  onClick={() => void handleToggleWatchlist(activeStockCode)}
-                  className="text-[11px]"
-                >
-                  {stockInWatchlist(activeStockCode) ? '从自选删除' : '加入自选'}
-                </Button>
+                {watchlistLoadFailed ? (
+                  // 读不到自选列表时既不能断言「不在自选里」，也不该让用户在这个未知状态上增删。
+                  <>
+                    <Button variant="secondary" size="xsm" disabled className="text-[11px]">
+                      自选状态未知
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xsm"
+                      onClick={() => void loadWatchlist()}
+                      className="text-[11px]"
+                    >
+                      重新加载自选
+                    </Button>
+                    <span className="text-[11px] text-secondary-text">
+                      自选列表加载失败，无法判断该股票是否已加入。
+                    </span>
+                  </>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="xsm"
+                    isLoading={isWatchlistActioning}
+                    onClick={() => void handleToggleWatchlist(activeStockCode)}
+                    className="text-[11px]"
+                  >
+                    {stockInWatchlist(activeStockCode) ? '从自选删除' : '加入自选'}
+                  </Button>
+                )}
                 {watchlistMessage && (
                   <span className="text-[11px] text-secondary-text animate-in fade-in">{watchlistMessage}</span>
                 )}

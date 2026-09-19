@@ -193,6 +193,30 @@ describe('useWatchlist', () => {
     expect(result.current.isLoading).toBe(false);
   });
 
+  // 首次加载失败时 codes 保持空数组，调用方会把「没读到」渲染成「暂无自选股」——
+  // 那是在替用户下一个没有依据的结论。
+  it('reports a failed load instead of pretending the list is empty', async () => {
+    mockGetWatchlist.mockRejectedValue(new Error('watchlist unavailable'));
+
+    const { result } = renderHook(() => useWatchlist());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.watchlistCodes).toEqual([]);
+    expect(result.current.loadFailed).toBe(true);
+
+    // 重新加载成功后回到正常态。
+    mockGetWatchlist.mockResolvedValue(['600519']);
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.watchlistCodes).toEqual(['600519']);
+  });
+
   it('creating a list optimistically inserts it and switches to it', async () => {
     mockGetWatchlist.mockResolvedValueOnce([]);
 

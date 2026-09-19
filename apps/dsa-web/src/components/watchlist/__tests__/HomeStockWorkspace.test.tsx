@@ -9,10 +9,12 @@ function renderWorkspace({
   watchlistRows,
   selectedRecordId,
   selectedStockCode,
+  watchlistLoadFailed = false,
 }: {
   watchlistRows: HomeWatchlistRow[];
   selectedRecordId?: number;
   selectedStockCode?: string;
+  watchlistLoadFailed?: boolean;
 }) {
   const onHistoryItemClick = vi.fn();
   const onRemoveFromWatchlist = vi.fn().mockResolvedValue(undefined);
@@ -25,6 +27,7 @@ function renderWorkspace({
         onTabChange={vi.fn()}
         watchlistRows={rows}
         watchlistLoading={false}
+        watchlistLoadFailed={watchlistLoadFailed}
         watchlistActioning={false}
         watchlistMessage={null}
         onAddToWatchlist={vi.fn().mockResolvedValue(undefined)}
@@ -56,6 +59,14 @@ function renderWorkspace({
 }
 
 describe('HomeStockWorkspace', () => {
+  // 列表读取失败时 codes 为空，此前会渲染成「暂无自选股」：把「没读到」当成「没有自选」。
+  it('says the watchlist could not be loaded instead of showing an empty list', () => {
+    renderWorkspace({ watchlistRows: [], watchlistLoadFailed: true });
+
+    expect(screen.getByText('自选列表加载失败')).toBeInTheDocument();
+    expect(screen.queryByText('暂无自选股')).not.toBeInTheDocument();
+  });
+
   it('opens the latest watchlist detail from a native button and keeps the row selected', () => {
     const { onHistoryItemClick } = renderWorkspace({
       watchlistRows: [{

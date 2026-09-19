@@ -2264,6 +2264,33 @@ describe('extractStockCodeFromMessage', () => {
 });
 
 describe('watchlist button with code variants', () => {
+  // 首次加载失败时 watchlistCodes 保持空数组，按钮就渲染成「加入自选」——把「没读到」
+  // 当成「不在自选里」这个结论展示给用户，而点击还会按这个错误前提去写。
+  it('does not present "加入自选" as fact when the watchlist failed to load', async () => {
+    mockGetWatchlist.mockRejectedValue(new Error('watchlist unavailable'));
+
+    render(
+      <MemoryRouter>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const textarea = await screen.findByPlaceholderText(/例如/);
+    fireEvent.change(textarea, { target: { value: '分析 600519.SH' } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(await screen.findByText(/自选列表加载失败/)).toBeInTheDocument();
+    expect(screen.queryByText('加入自选')).not.toBeInTheDocument();
+    expect(screen.queryByText('从自选删除')).not.toBeInTheDocument();
+
+    // 重新加载成功后回到正常态：确实在自选里就显示「从自选删除」。
+    mockGetWatchlist.mockResolvedValue(['600519']);
+    fireEvent.click(screen.getByRole('button', { name: '重新加载自选' }));
+
+    expect(await screen.findByText('从自选删除')).toBeInTheDocument();
+    expect(screen.queryByText(/自选列表加载失败/)).not.toBeInTheDocument();
+  });
+
   it('shows "从自选删除" when canonical code is in watchlist and user inputs variant', async () => {
     mockGetWatchlist.mockResolvedValue(['600519', 'HK01810']);
 

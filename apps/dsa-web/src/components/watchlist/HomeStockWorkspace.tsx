@@ -68,6 +68,8 @@ interface HomeStockWorkspaceProps {
   onTabChange: (tab: HomeWorkspaceTab) => void;
   watchlistRows: HomeWatchlistRow[];
   watchlistLoading: boolean;
+  /** 自选股列表是否读取失败（与「列表为空」区分：失败时不能显示成「暂无自选股」）。 */
+  watchlistLoadFailed: boolean;
   watchlistActioning: boolean;
   watchlistMessage: string | null;
   onAddToWatchlist: (code: string) => Promise<void>;
@@ -315,6 +317,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   onTabChange,
   watchlistRows,
   watchlistLoading,
+  watchlistLoadFailed,
   watchlistActioning,
   watchlistMessage,
   onAddToWatchlist,
@@ -688,6 +691,14 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
         {activeTab === 'watchlist' ? (
           watchlistLoading ? (
             <DashboardStateBlock loading compact title={t('watchlist.loading')} />
+          ) : watchlistRows.length === 0 && watchlistLoadFailed ? (
+            // 读取失败时 codes 是空的，但「空」不是结论：这里明确说读不到，
+            // 而不是替用户断言「暂无自选股」。
+            <DashboardStateBlock
+              compact
+              title={t('watchlist.loadFailedTitle')}
+              description={t('watchlist.loadFailedDescription')}
+            />
           ) : watchlistRows.length === 0 ? (
             <DashboardStateBlock
               compact

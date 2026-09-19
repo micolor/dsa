@@ -25,6 +25,8 @@ export interface WatchlistOption {
 
 export interface UseWatchlistReturn {
   watchlistCodes: string[];
+  /** 是否读不到自选股列表（区分「请求失败」与「列表为空」）。 */
+  loadFailed: boolean;
   isLoading: boolean;
   isActioning: boolean;
   actionMessage: string | null;
@@ -45,6 +47,9 @@ export interface UseWatchlistReturn {
 export function useWatchlist(): UseWatchlistReturn {
   const { t } = useUiLanguage();
   const [codes, setCodes] = useState<string[]>([]);
+  // codes 为 [] 既可能是「列表为空」，也可能是「压根没读到」；调用方需要区分，
+  // 否则首页会把加载失败渲染成「暂无自选股」。
+  const [loadFailed, setLoadFailed] = useState(false);
   const [lists, setLists] = useState<WatchlistSetInfo[]>([]);
   const [activeListId, setActiveListId] = useState<string>(DEFAULT_WATCHLIST_ID);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,10 +91,15 @@ export function useWatchlist(): UseWatchlistReturn {
       const result = await systemConfigApi.getWatchlist(listName);
       if (mountedRef.current && seq === codesSeqRef.current) {
         setCodes(result);
+        setLoadFailed(false);
       }
       return true;
     } catch {
-      // 失败时保留已有 codes（不要清空成空列表，那会让误判成「列表被清空」）。
+      // 失败时保留已有 codes（不要清空成空列表，那会让误判成「列表被清空」），
+      // 但要显式记下「这份列表没读到」，免得被当成空列表展示。
+      if (mountedRef.current && seq === codesSeqRef.current) {
+        setLoadFailed(true);
+      }
       return false;
     }
   }, []);
@@ -288,6 +298,7 @@ export function useWatchlist(): UseWatchlistReturn {
 
   return {
     watchlistCodes: codes,
+    loadFailed,
     isLoading,
     isActioning,
     actionMessage,
