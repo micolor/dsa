@@ -469,7 +469,9 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         loader.assert_called_once_with()
 
-    def test_standalone_futu_downstream_failure_keeps_existing_exit_semantics(self) -> None:
+    def test_standalone_futu_downstream_failure_surfaces_in_exit_code(self) -> None:
+        # Futu 持仓模式下分析流程自身抛错，同样要以非零退出码结束：单次运行的
+        # 退出码是 wrapper 脚本与每日分析 workflow 判定当天成败的唯一依据。
         args = self._make_args(portfolio="futu")
         config = self._make_config(run_immediately=True)
 
@@ -489,7 +491,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         ):
             exit_code = main.main()
 
-        self.assertEqual(exit_code, 0)
+        self.assertEqual(exit_code, 1)
         loader.assert_called_once_with()
 
     def test_schedule_mode_reload_uses_latest_runtime_config(self) -> None:
@@ -826,6 +828,49 @@ class MainScheduleModeTestCase(unittest.TestCase):
         run_with_lock.assert_called_once_with(config, args, None)
         run_full_analysis.assert_not_called()
         start_bots.assert_called_once_with(config)
+
+    def test_single_run_returns_nonzero_when_analysis_fails(self) -> None:
+        """run_full_analysis 的 False 必须传到退出码。
+
+        run_with_global_analysis_lock 只回报「有没有拿到锁」，之前它把 runner 的
+        返回值丢掉，`python main.py` 于是在分析失败（例如没有生成任何报告）时仍然
+        退出码 0，每日分析 workflow 把这一步判为成功。
+        """
+        args = self._make_args(serve=False, schedule=False, portfolio=None)
+        config = self._make_config(webui_enabled=False, run_immediately=True)
+
+        with (
+            patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}, clear=False),
+            patch("main.parse_arguments", return_value=args),
+            patch("main.get_config", return_value=config),
+            patch("main.prepare_webui_frontend_assets", return_value=True),
+            patch("main.start_api_server"),
+            patch("main.start_bot_stream_clients"),
+            patch("main.run_full_analysis", return_value=False) as run_full_analysis,
+            patch("main.logger.error") as error_log,
+        ):
+            exit_code = main.main()
+
+        self.assertEqual(exit_code, 1)
+        run_full_analysis.assert_called_once_with(config, args, None)
+        error_log.assert_any_call("分析流程执行失败，进程以非零退出码结束")
+
+    def test_single_run_returns_zero_when_analysis_succeeds(self) -> None:
+        args = self._make_args(serve=False, schedule=False, portfolio=None)
+        config = self._make_config(webui_enabled=False, run_immediately=True)
+
+        with (
+            patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}, clear=False),
+            patch("main.parse_arguments", return_value=args),
+            patch("main.get_config", return_value=config),
+            patch("main.prepare_webui_frontend_assets", return_value=True),
+            patch("main.start_api_server"),
+            patch("main.start_bot_stream_clients"),
+            patch("main.run_full_analysis", return_value=True),
+        ):
+            exit_code = main.main()
+
+        self.assertEqual(exit_code, 0)
 
     def test_serve_mode_keeps_running_after_futu_portfolio_load_failure(self) -> None:
         args = self._make_args(

@@ -1088,19 +1088,34 @@ def _run_analysis_with_runtime_scheduler_lock(
     config: Config,
     args: argparse.Namespace,
     stock_codes: Optional[List[str]] = None,
-) -> None:
+) -> bool:
+    """Run the startup analysis under the shared runtime lock.
+
+    Returns whether the analysis succeeded. ``run_with_global_analysis_lock``
+    only reports whether it acquired the lock, so the runner's own outcome is
+    captured here — dropping it made a failed single-run analysis invisible to
+    the caller, which is what CI reads as the step's success.
+    """
     from src.services.runtime_scheduler import run_with_global_analysis_lock
+
+    outcome: List[bool] = []
+
+    def _run_and_capture(cfg, run_args, codes):
+        outcome.append(run_full_analysis(cfg, run_args, codes))
 
     # Keep startup/triggered analysis in sync with API runtime scheduler and
     # run-now entrypoint. Blocking is expected here because startup paths should
     # wait for an in-flight job before returning a response.
-    run_with_global_analysis_lock(
-        task_runner=run_full_analysis,
+    acquired = run_with_global_analysis_lock(
+        task_runner=_run_and_capture,
         config=config,
         args=args,
         stock_codes=stock_codes,
         blocking=True,
     )
+    if not acquired:
+        return False
+    return bool(outcome and outcome[0])
 
 
 def start_api_server(host: str, port: int, config: Config) -> None:
@@ -1591,9 +1606,10 @@ def main() -> int:
             return 0
 
         # 模式3: 正常单次运行
+        analysis_ok = True
         if config.run_immediately:
             try:
-                _run_analysis_with_runtime_scheduler_lock(config, args, stock_codes)
+                analysis_ok = _run_analysis_with_runtime_scheduler_lock(config, args, stock_codes)
             except FutuPortfolioError as exc:
                 if not start_serve:
                     raise
@@ -1603,6 +1619,13 @@ def main() -> int:
                 )
         else:
             logger.info("配置为不立即运行分析 (RUN_IMMEDIATELY=false)")
+
+        if analysis_ok is False and not start_serve:
+            # 分析失败要让退出码反映出来：单次运行（含每日分析工作流）是拿
+            # `python main.py` 的退出码判断当天成败的，返回 0 会把「没有生成报告」
+            # 显示成绿色通过。
+            logger.error("分析流程执行失败，进程以非零退出码结束")
+            return 1
 
         logger.info("\n程序执行完成")
 
