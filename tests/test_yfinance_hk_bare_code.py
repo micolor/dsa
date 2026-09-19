@@ -84,6 +84,45 @@ class TestAShareRoutingUnchanged:
         assert YfinanceFetcher()._convert_stock_code("430047") == "430047.BJ"
 
 
+class TestASharePrefixCoverage:
+    """沪市 605/689/900 与深市 001/003/200/301 的归属。
+
+    这些段此前不在任何前缀表里，落到「默认使用深市」分支：``605499``
+    （东鹏饮料，沪市主板）被映射成 Yahoo 上不存在的 ``605499.SZ``，
+    ``689009``（科创板 CDR）、``900901``（沪市 B 股）同理。同一批代码在
+    tushare / baostock 适配器里都已被正确识别，只有这里漏了。
+    """
+
+    def test_sh_605_main_board(self) -> None:
+        assert YfinanceFetcher()._convert_stock_code("605499") == "605499.SS"
+
+    def test_sh_689_kcb_cdr(self) -> None:
+        assert YfinanceFetcher()._convert_stock_code("689009") == "689009.SS"
+
+    def test_sh_900_b_share(self) -> None:
+        assert YfinanceFetcher()._convert_stock_code("900901") == "900901.SS"
+
+    def test_sz_001_003_200_301(self) -> None:
+        assert YfinanceFetcher()._convert_stock_code("001979") == "001979.SZ"
+        assert YfinanceFetcher()._convert_stock_code("003816") == "003816.SZ"
+        assert YfinanceFetcher()._convert_stock_code("200011") == "200011.SZ"
+        assert YfinanceFetcher()._convert_stock_code("301029") == "301029.SZ"
+
+
+class TestUnknownAShareSegmentRaises:
+    """未知代码段不能猜一个后缀。
+
+    猜出来的后缀只会换来一次注定 404 的请求（还要赔上重试），因此改为直接
+    报错，让 ``fetch_daily_data`` 记录本源失败并切到下一个数据源。
+    """
+
+    def test_unknown_6digit_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError):
+            YfinanceFetcher()._convert_stock_code("123456")
+
+
 class TestETFAndSuffixUnchanged:
     """ETF and suffix codes must route exactly as before."""
 

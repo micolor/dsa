@@ -183,14 +183,20 @@ class YfinanceFetcher(BaseFetcher):
             base = code.split('.')[0] if '.' in code else code
             return f"{base}.BJ"
 
-        # A股：根据代码前缀判断市场
-        if code.startswith(('600', '601', '603', '688')):
+        # A股：根据代码前缀判断市场。前缀集合与同链路的
+        # tushare_fetcher / baostock_fetcher 保持一致，避免同一只股票
+        # 在不同数据源上被映射到不同的交易所后缀（605 主板、689 科创板
+        # CDR、900 沪市 B 股此前落到「默认深市」分支，`605499` 会被映射成
+        # Yahoo 上不存在的 `605499.SZ`）。
+        if code.startswith(('600', '601', '603', '605', '688', '689', '900')):
             return f"{code}.SS"
-        elif code.startswith(('000', '002', '300')):
+        elif code.startswith(('000', '001', '002', '003', '200', '300', '301')):
             return f"{code}.SZ"
-        else:
-            logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
-            return f"{code}.SZ"
+
+        # 其余 6 位 A 股代码段全部在上面覆盖，走到这里说明代码段未知。
+        # 猜一个后缀只会换来一次注定 404 的请求（还要赔上 tenacity 的 3 次
+        # 重试），因此直接报错，让管理器把这次失败记在当前源上并切到下一个源。
+        raise ValueError(f"无法确定 A 股代码 {code} 的市场，无法转换为 Yahoo Finance 代码")
 
     @retry(
         stop=stop_after_attempt(3),
