@@ -6,7 +6,8 @@ import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User, X } f
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, AutoDismissToast, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, ToastViewport, Tooltip } from '../components/common';
+import { ApiErrorAlert, AutoDismissToast, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import { alertsApi } from '../api/alerts';
 import type { AlertProposal } from '../types/alerts';
@@ -116,6 +117,8 @@ const isStageDoneSuccessful = (status?: string): boolean => {
 // 兜底阶段名：后端每个阶段事件都会带用户可见的 message，这里只在事件缺字段时
 // 使用。不能回显 step.stage —— 那是 technical / skill_xxx 之类的内部英文 id。
 const STAGE_FALLBACK_LABEL = '阶段';
+// 引导提示的自动消失时长，与其它页面的 toast 保持同一量级。
+const INTRO_TOAST_DURATION_MS = 4500;
 
 const getStageDoneLabel = (step: ProgressStep): string => {
   if (step.message) return step.message;
@@ -264,7 +267,6 @@ const ChatPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const pendingDeleteRef = useRef<{ id: string; timer: number } | null>(null);
-  const introToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -278,9 +280,6 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const timers = copyResetTimerRef.current;
     return () => {
-      if (introToastTimerRef.current !== null) {
-        window.clearTimeout(introToastTimerRef.current);
-      }
       Object.values(timers).forEach((timerId) => {
         if (timerId !== undefined) {
           window.clearTimeout(timerId);
@@ -780,20 +779,9 @@ const ChatPage: React.FC = () => {
     if (introToastShownRef.current) return;
     introToastShownRef.current = true;
     setIntroToastVisible(true);
-    if (introToastTimerRef.current !== null) {
-      window.clearTimeout(introToastTimerRef.current);
-    }
-    introToastTimerRef.current = window.setTimeout(() => {
-      setIntroToastVisible(false);
-      introToastTimerRef.current = null;
-    }, 4500);
   }, []);
 
   const dismissIntroToast = useCallback(() => {
-    if (introToastTimerRef.current !== null) {
-      window.clearTimeout(introToastTimerRef.current);
-      introToastTimerRef.current = null;
-    }
     setIntroToastVisible(false);
   }, []);
 
@@ -1342,44 +1330,51 @@ const ChatPage: React.FC = () => {
 
           {/* Main chat area */}
           <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          {agentStatus?.backend === 'codex_app_server' ? (
-            <InlineAlert
-              variant="warning"
-              title={t('chat.codexLimitedTitle')}
-              message={t('chat.codexLimitedMessage')}
-              action={(
-                <Button
-                  variant="action-primary"
-                  size="sm"
-                  onClick={() => navigate('/settings?category=agent')}
-                >
-                  {t('chat.codexChangeBackend')}
-                </Button>
-              )}
-              className="mb-4 rounded-xl px-3 py-2 text-xs shadow-none"
-            />
-          ) : null}
-          {/* Intro guide toast (page-local guidance, stays at top) */}
-          <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 px-4">
-            {introToastVisible ? (
+          {/* 页面级提示统一送到右上角容器，不再占用聊天区顶部和输入框上方的版面 */}
+          <ToastPortal>
+            {agentStatus?.backend === 'codex_app_server' ? (
               <InlineAlert
-                variant="info"
-                title={t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
-                message="输入股票代码或名称，选择技能后即可开始分析。"
+                variant="warning"
+                title={t('chat.codexLimitedTitle')}
+                message={t('chat.codexLimitedMessage')}
                 action={(
-                  <button
-                    type="button"
-                    onClick={dismissIntroToast}
-                    className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
-                    aria-label="关闭提示"
+                  <Button
+                    variant="action-primary"
+                    size="sm"
+                    onClick={() => navigate('/settings?category=agent')}
                   >
-                    ✕
-                  </button>
+                    {t('chat.codexChangeBackend')}
+                  </Button>
                 )}
-                className="pointer-events-auto"
+                className="rounded-xl px-3 py-2 text-xs shadow-none"
               />
             ) : null}
-          </div>
+            {/* 引导提示几秒后自动消失，鼠标悬停其上时暂停计时 */}
+            {introToastVisible ? (
+              <AutoDismissToast
+                active={introToastVisible}
+                onDismiss={dismissIntroToast}
+                delayMs={INTRO_TOAST_DURATION_MS}
+              >
+                <InlineAlert
+                  variant="info"
+                  title={t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
+                  message={t('chat.introMessage')}
+                  action={(
+                    <button
+                      type="button"
+                      onClick={dismissIntroToast}
+                      className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
+                      aria-label={t('common.close')}
+                    >
+                      ✕
+                    </button>
+                  )}
+                  className="pointer-events-auto"
+                />
+              </AutoDismissToast>
+            ) : null}
+          </ToastPortal>
 
           <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
           {/* Messages */}
@@ -1586,55 +1581,73 @@ const ChatPage: React.FC = () => {
           {/* Input area */}
           <div className="border-t border-white/6 bg-card/88 p-4 md:p-6 relative z-20">
             <div className="space-y-3">
-              {chatError ? <ApiErrorAlert error={chatError} /> : null}
-              {terminalStatus === 'cancelled' ? (
-                <div role="status" className="rounded-xl border border-slate-500/20 bg-slate-500/5 px-4 py-3 text-sm">
-                  {t('chat.analysisStopped')}
-                </div>
-              ) : null}
-              {terminalStatus === 'timeout' ? (
-                <div role="status" className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm">
-                  {t('chat.analysisTimedOut')}
-                </div>
-              ) : null}
-              {stopError ? (
-                <div role="alert" className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm">
-                  {t('chat.stopRequestFailed')}
-                </div>
-              ) : null}
-              {agentUnavailableError ? (
-                <div className="space-y-2">
-                  <ApiErrorAlert
-                    error={agentUnavailableError}
-                    actionLabel={t('chat.openAgentSettings')}
-                    onAction={() => navigate('/settings?category=agent')}
+              {/* 发送/分析状态提示统一走右上角容器。这些都是持续型状态，不自动消失 ——
+                  带按钮的提示若几秒后自己没了，用户就再也点不到「去设置」。 */}
+              <ToastPortal>
+                {chatError ? <ApiErrorAlert elevated error={chatError} className="pointer-events-auto" /> : null}
+                {terminalStatus === 'cancelled' ? (
+                  <InlineAlert
+                    elevated
+                    role="status"
+                    variant="info"
+                    message={t('chat.analysisStopped')}
+                    className="pointer-events-auto text-sm"
                   />
-                  <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
-                    {t('chat.recheckAgentStatus')}
-                  </Button>
-                </div>
-              ) : null}
-              {agentStatusError ? (
-                <InlineAlert
-                  variant="warning"
-                  title={t('chat.statusUnavailableTitle')}
-                  message={t('chat.statusUnavailableMessage')}
-                  action={(
+                ) : null}
+                {terminalStatus === 'timeout' ? (
+                  <InlineAlert
+                    elevated
+                    role="status"
+                    variant="warning"
+                    message={t('chat.analysisTimedOut')}
+                    className="pointer-events-auto text-sm"
+                  />
+                ) : null}
+                {stopError ? (
+                  <InlineAlert
+                    elevated
+                    variant="warning"
+                    message={t('chat.stopRequestFailed')}
+                    className="pointer-events-auto text-sm"
+                  />
+                ) : null}
+                {agentUnavailableError ? (
+                  <div className="pointer-events-auto space-y-2">
+                    <ApiErrorAlert
+                      elevated
+                      error={agentUnavailableError}
+                      actionLabel={t('chat.openAgentSettings')}
+                      onAction={() => navigate('/settings?category=agent')}
+                    />
                     <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
                       {t('chat.recheckAgentStatus')}
                     </Button>
-                  )}
-                  className="rounded-xl px-3 py-2 text-xs shadow-none"
-                />
-              ) : null}
-              {isFollowUpContextLoading ? (
-                <InlineAlert
-                  variant="info"
-                  title="追问上下文加载中"
-                  message="正在加载历史分析上下文；现在可直接发送追问。"
-                  className="rounded-xl px-3 py-2 text-xs shadow-none"
-                />
-              ) : null}
+                  </div>
+                ) : null}
+                {agentStatusError ? (
+                  <InlineAlert
+                    elevated
+                    variant="warning"
+                    title={t('chat.statusUnavailableTitle')}
+                    message={t('chat.statusUnavailableMessage')}
+                    action={(
+                      <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
+                        {t('chat.recheckAgentStatus')}
+                      </Button>
+                    )}
+                    className="pointer-events-auto px-3 py-2 text-xs"
+                  />
+                ) : null}
+                {isFollowUpContextLoading ? (
+                  <InlineAlert
+                    elevated
+                    variant="info"
+                    title={t('chat.followUpContextLoadingTitle')}
+                    message={t('chat.followUpContextLoadingMessage')}
+                    className="pointer-events-auto px-3 py-2 text-xs"
+                  />
+                ) : null}
+              </ToastPortal>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2">
                 <label
                   className={cn(
@@ -1663,12 +1676,15 @@ const ChatPage: React.FC = () => {
                 </span>
               </div>
               {contextCompressionError ? (
-                <InlineAlert
-                  variant="danger"
-                  title="上下文压缩设置未保存"
-                  message={contextCompressionError}
-                  className="rounded-xl px-3 py-2 text-xs shadow-none"
-                />
+                <ToastPortal>
+                  <InlineAlert
+                    elevated
+                    variant="danger"
+                    title={t('chat.compressionSaveFailedTitle')}
+                    message={contextCompressionError}
+                    className="pointer-events-auto px-3 py-2 text-xs"
+                  />
+                </ToastPortal>
               ) : null}
               {skills.length > 0 && (
                 <div className="space-y-2">
@@ -1838,7 +1854,8 @@ const ChatPage: React.FC = () => {
         </div>
       </div>
     </div>
-    <ToastViewport>
+    {/* 提示统一送到全局右上角容器；这里不再有页面自己的定位层。 */}
+    <ToastPortal>
       {sendToast ? (
         /* 发送结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
         <AutoDismissToast
@@ -1866,24 +1883,26 @@ const ChatPage: React.FC = () => {
         </AutoDismissToast>
       ) : null}
       {deleteToastId ? (
+        /* 撤销窗口由页面自己的计时器负责关闭 —— 倒计时到期会真的执行删除，
+           交给 AutoDismissToast 的自动消失语义会提前触发副作用。 */
         <InlineAlert
           elevated
           variant="success"
-          title="会话已删除"
-          message="如需恢复，请在 6 秒内点击撤销。"
+          title={t('chat.sessionDeletedTitle')}
+          message={t('chat.sessionDeletedUndoHint')}
           action={(
             <button
               type="button"
               onClick={undoDelete}
               className="ml-3 shrink-0 self-center rounded-lg bg-primary/15 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
             >
-              撤销
+              {t('chat.sessionDeletedUndo')}
             </button>
           )}
           className="pointer-events-auto"
         />
       ) : null}
-    </ToastViewport>
+    </ToastPortal>
     </>
   );
 };

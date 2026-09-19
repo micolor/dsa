@@ -9,6 +9,8 @@ interface ApiErrorAlertProps {
   onAction?: () => void;
   dismissLabel?: string;
   onDismiss?: () => void;
+  /** Render on a solid elevated surface instead of a translucent color tint. Used for floating toasts over content. */
+  elevated?: boolean;
 }
 
 export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
@@ -18,13 +20,24 @@ export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
   onAction,
   dismissLabel,
   onDismiss,
+  elevated = false,
 }) => {
   const { t } = useUiLanguage();
   const showDetails = error.rawMessage.trim() && error.rawMessage.trim() !== error.message.trim();
+  const dangerText = 'text-[hsl(var(--color-danger-alert-text))]';
+  const dangerBorder = 'border-[hsl(var(--color-danger-alert-border)/0.3)]';
+  const dangerTint = 'bg-[hsl(var(--color-danger-alert-bg)/0.1)]';
 
   return (
     <div
-      className={`rounded-xl border border-[hsl(var(--color-danger-alert-border)/0.3)] bg-[hsl(var(--color-danger-alert-bg)/0.1)] px-4 py-3 text-[hsl(var(--color-danger-alert-text))] ${className}`}
+      className={[
+        'rounded-xl border px-4 py-3',
+        dangerText,
+        dangerBorder,
+        // 浮动提示压在页面内容之上，半透明底色会读不清，改用不透明玻璃面。
+        elevated ? 'glass-surface-strong' : dangerTint,
+        className,
+      ].filter(Boolean).join(' ')}
       role="alert"
     >
       <div className="flex items-start justify-between gap-3">

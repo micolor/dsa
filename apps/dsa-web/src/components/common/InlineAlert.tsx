@@ -10,6 +10,8 @@ interface InlineAlertProps {
   action?: React.ReactNode;
   /** Render on a solid elevated surface instead of a translucent color tint. Used for floating toasts over content. */
   elevated?: boolean;
+  /** Live-region role. `status` is the polite variant for informational state changes; errors keep the default `alert`. */
+  role?: 'alert' | 'status';
   className?: string;
   style?: React.CSSProperties;
 }
@@ -34,12 +36,13 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
   variant = 'info',
   action,
   elevated = false,
+  role = 'alert',
   className = '',
   style,
 }) => {
   return (
     <div
-      role="alert"
+      role={role}
       style={style}
       className={cn(
         'max-w-full overflow-hidden rounded-2xl border px-4 py-3',
