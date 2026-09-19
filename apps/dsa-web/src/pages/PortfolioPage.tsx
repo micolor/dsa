@@ -20,8 +20,8 @@ import {
   Loading,
   Select,
   StatCard,
-  ToastViewport,
 } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
@@ -1423,28 +1423,39 @@ const PortfolioPage: React.FC = () => {
 
       <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-3 pb-4 md:px-4">
 
-      {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
-      {riskWarning ? (
-        <InlineAlert
-          variant="warning"
-          title={text.riskDegraded}
-          message={riskWarning}
-        />
-      ) : null}
-      {writeWarning ? (
-        <InlineAlert
-          variant="warning"
-          title={text.operationHint}
-          message={writeWarning}
-        />
-      ) : null}
-      {positionAnalysisMessage ? (
-        <InlineAlert
-          variant="success"
-          title={text.analysisTask}
-          message={positionAnalysisMessage}
-        />
-      ) : null}
+      {/* 页面级提示统一送全局右上角容器；都是持续型，由页面状态控制显隐。 */}
+      <ToastPortal>
+        {error ? (
+          <ApiErrorAlert elevated error={error} onDismiss={() => setError(null)} className="pointer-events-auto" />
+        ) : null}
+        {riskWarning ? (
+          <InlineAlert
+            elevated
+            variant="warning"
+            title={text.riskDegraded}
+            message={riskWarning}
+            className="pointer-events-auto"
+          />
+        ) : null}
+        {writeWarning ? (
+          <InlineAlert
+            elevated
+            variant="warning"
+            title={text.operationHint}
+            message={writeWarning}
+            className="pointer-events-auto"
+          />
+        ) : null}
+        {positionAnalysisMessage ? (
+          <InlineAlert
+            elevated
+            variant="success"
+            title={text.analysisTask}
+            message={positionAnalysisMessage}
+            className="pointer-events-auto"
+          />
+        ) : null}
+      </ToastPortal>
 
       {(showCreateAccount || !hasAccounts) ? (
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -2450,7 +2461,7 @@ const PortfolioPage: React.FC = () => {
           </div>
         ) : null}
       </Dialog>
-      <ToastViewport>
+      <ToastPortal>
         {fxRefreshFeedback ? (
           /* 刷新结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
           <AutoDismissToast
@@ -2477,7 +2488,7 @@ const PortfolioPage: React.FC = () => {
             />
           </AutoDismissToast>
         ) : null}
-      </ToastViewport>
+      </ToastPortal>
     </div>
   );
 };

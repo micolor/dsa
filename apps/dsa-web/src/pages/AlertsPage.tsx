@@ -14,7 +14,8 @@ import {
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
 import { EventFactList } from '../components/alerts/EventFactList';
 import { filterEventTriggers } from '../components/alerts/eventFacts';
-import { ApiErrorAlert, AppPage, AutoDismissToast, Dialog, EmptyState, InlineAlert, Loading, Pagination, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AppPage, AutoDismissToast, Dialog, EmptyState, InlineAlert, Loading, Pagination } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText } from '../i18n/uiText';
@@ -374,27 +375,29 @@ const AlertsPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-5">
-      {createSuccess ? (
-        <InlineAlert
-          elevated
-          title={text.createSuccess}
-          message={createSuccess}
-          variant="success"
-          action={(
-            <button
-              type="button"
-              onClick={() => setCreateSuccess(null)}
-              className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-              aria-label={text.close}
-            >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-        />
-      ) : null}
-      {testResult ? (
-        <ToastViewport>
-          {/* 测试结果几秒后自动消失；鼠标悬停其上时暂停计时。 */}
+      {/* 操作结果类提示统一送全局右上角容器，都由页面状态控制显隐。 */}
+      <ToastPortal>
+        {createSuccess ? (
+          <InlineAlert
+            elevated
+            title={text.createSuccess}
+            message={createSuccess}
+            variant="success"
+            className="pointer-events-auto"
+            action={(
+              <button
+                type="button"
+                onClick={() => setCreateSuccess(null)}
+                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
+                aria-label={text.close}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          />
+        ) : null}
+        {testResult ? (
+          /* 测试结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
           <AutoDismissToast active={testResult} onDismiss={() => setTestResult(null)} delayMs={5000}>
             <InlineAlert
               elevated
@@ -414,8 +417,8 @@ const AlertsPage: React.FC = () => {
               )}
             />
           </AutoDismissToast>
-        </ToastViewport>
-      ) : null}
+        ) : null}
+      </ToastPortal>
       <div className="flex min-h-full flex-col gap-4">
         <div className="grid grid-cols-4 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
           {tabs.map((tab) => {
@@ -438,7 +441,11 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'rules' ? (
           <>
-            {rulesError ? <ApiErrorAlert error={rulesError} onDismiss={() => setRulesError(null)} /> : null}
+            {rulesError ? (
+              <ToastPortal>
+                <ApiErrorAlert elevated error={rulesError} onDismiss={() => setRulesError(null)} className="pointer-events-auto" />
+              </ToastPortal>
+            ) : null}
             <AlertRuleList
               className="flex min-h-0 flex-1 flex-col"
               rules={rules}
@@ -471,7 +478,11 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'history' ? (
           <>
-            {triggersError ? <ApiErrorAlert error={triggersError} onDismiss={() => setTriggersError(null)} /> : null}
+            {triggersError ? (
+              <ToastPortal>
+                <ApiErrorAlert elevated error={triggersError} onDismiss={() => setTriggersError(null)} className="pointer-events-auto" />
+              </ToastPortal>
+            ) : null}
             <AlertTriggerHistory
               triggers={triggers}
               isLoading={triggersLoading}
@@ -485,14 +496,22 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'events' ? (
           <>
-            {eventsError ? <ApiErrorAlert error={eventsError} onDismiss={() => setEventsError(null)} /> : null}
+            {eventsError ? (
+              <ToastPortal>
+                <ApiErrorAlert elevated error={eventsError} onDismiss={() => setEventsError(null)} className="pointer-events-auto" />
+              </ToastPortal>
+            ) : null}
             <EventFactList triggers={events} isLoading={eventsLoading} />
           </>
         ) : null}
 
         {activeTab === 'notifications' ? (
           <>
-            {notificationsError ? <ApiErrorAlert error={notificationsError} onDismiss={() => setNotificationsError(null)} /> : null}
+            {notificationsError ? (
+              <ToastPortal>
+                <ApiErrorAlert elevated error={notificationsError} onDismiss={() => setNotificationsError(null)} className="pointer-events-auto" />
+              </ToastPortal>
+            ) : null}
             <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
               <DashboardPanelHeader
                 className="mb-3"

@@ -9,7 +9,8 @@ import { dataQualityApi } from '../api/dataQuality';
 import { notificationsApi } from '../api/notifications';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, AutoDismissToast, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Loading, Pagination, Select, ToastViewport } from '../components/common';
+import { ApiErrorAlert, AutoDismissToast, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Loading, Pagination, Select } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { UiLanguageToggle } from '../components/i18n/UiLanguageToggle';
 import { ThemeTabs } from '../components/theme/ThemeTabs';
 import {
@@ -610,9 +611,22 @@ const FirstRunSetupCard: React.FC<FirstRunSetupCardProps> = ({
             {firstStockCode ? t('settings.setupGuideSmokeNotReady') : t('settings.setupGuideSmokeNeedsStock')}
           </p>
         ) : null}
-        {smokeError ? <ApiErrorAlert error={smokeError} /> : null}
+        {/* 冒烟测试结果是操作结果类提示，送右上角但不自动消失。 */}
+        {smokeError ? (
+          <ToastPortal>
+            <ApiErrorAlert elevated error={smokeError} className="pointer-events-auto" />
+          </ToastPortal>
+        ) : null}
         {!smokeError && smokeSuccess ? (
-          <SettingsAlert title={t('settings.actionSuccess')} message={smokeSuccess} variant="success" />
+          <ToastPortal>
+            <SettingsAlert
+              presentation="toast"
+              title={t('settings.actionSuccess')}
+              message={smokeSuccess}
+              variant="success"
+              className="pointer-events-auto"
+            />
+          </ToastPortal>
         ) : null}
       </div>
     </SettingsSectionCard>
@@ -950,10 +964,27 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
             ))}
           </div>
         ) : null}
-        {statusError ? <ApiErrorAlert error={statusError} /> : null}
-        {runNowError ? <ApiErrorAlert error={runNowError} /> : null}
+        {/* 调度状态与「立即运行」结果都是操作结果类提示，送右上角但不自动消失。 */}
+        {statusError ? (
+          <ToastPortal>
+            <ApiErrorAlert elevated error={statusError} className="pointer-events-auto" />
+          </ToastPortal>
+        ) : null}
+        {runNowError ? (
+          <ToastPortal>
+            <ApiErrorAlert elevated error={runNowError} className="pointer-events-auto" />
+          </ToastPortal>
+        ) : null}
         {!runNowError && runNowSuccess ? (
-          <SettingsAlert title={t('settings.actionSuccess')} message={runNowSuccess} variant="success" />
+          <ToastPortal>
+            <SettingsAlert
+              presentation="toast"
+              title={t('settings.actionSuccess')}
+              message={runNowSuccess}
+              variant="success"
+              className="pointer-events-auto"
+            />
+          </ToastPortal>
         ) : null}
       </div>
     </SettingsSectionCard>
@@ -2044,23 +2075,29 @@ const SettingsPage: React.FC = () => {
             </Button>
         </div>
       </div>
-      <div className="mb-4">
-        {saveError ? (
+      {/* 配置保存/加载结果是页面级提示：送右上角，带重试按钮所以不自动消失。 */}
+      {saveError ? (
+        <ToastPortal>
           <ApiErrorAlert
+            elevated
             error={saveError}
+            className="pointer-events-auto"
             actionLabel={retryAction === 'save' ? t('settings.saveRetry') : undefined}
             onAction={retryAction === 'save' ? () => void retry() : undefined}
           />
-        ) : null}
-      </div>
+        </ToastPortal>
+      ) : null}
 
       {loadError ? (
-        <ApiErrorAlert
-          error={loadError}
-          actionLabel={retryAction === 'load' ? t('common.retry') : t('settings.reload')}
-          onAction={() => void retry()}
-          className="mb-4"
-        />
+        <ToastPortal>
+          <ApiErrorAlert
+            elevated
+            error={loadError}
+            className="pointer-events-auto"
+            actionLabel={retryAction === 'load' ? t('common.retry') : t('settings.reload')}
+            onAction={() => void retry()}
+          />
+        </ToastPortal>
       ) : null}
 
       {isLoading ? (
@@ -2152,14 +2189,20 @@ const SettingsPage: React.FC = () => {
                   </div>
                 </div>
                 {screeningActionError ? (
-                  <div className="mt-3">
-                    <ApiErrorAlert error={screeningActionError} />
-                  </div>
+                  <ToastPortal>
+                    <ApiErrorAlert elevated error={screeningActionError} className="pointer-events-auto" />
+                  </ToastPortal>
                 ) : null}
                 {!screeningActionError && screeningActionSuccess ? (
-                  <div className="mt-3">
-                    <SettingsAlert title={t('settings.actionSuccess')} message={screeningActionSuccess} variant="success" />
-                  </div>
+                  <ToastPortal>
+                    <SettingsAlert
+                      presentation="toast"
+                      title={t('settings.actionSuccess')}
+                      message={screeningActionSuccess}
+                      variant="success"
+                      className="pointer-events-auto"
+                    />
+                  </ToastPortal>
                 ) : null}
               </SettingsSectionCard>
             ) : null}
@@ -2256,19 +2299,23 @@ const SettingsPage: React.FC = () => {
                       </Button>
                     </div>
                     {desktopUpdateNotice ? (
-                      <SettingsAlert
-                        title={desktopUpdateNotice.title}
-                        message={desktopUpdateNotice.message}
-                        variant={desktopUpdateNotice.variant}
-                        actionLabel={desktopUpdateNotice.actionLabel}
-                        onAction={desktopUpdateNotice.actionLabel ? () => {
-                          if (desktopUpdateNotice.actionKind === 'install') {
-                            void installDesktopUpdate();
-                            return;
-                          }
-                          void openDesktopReleasePage();
-                        } : undefined}
-                      />
+                      <ToastPortal>
+                        <SettingsAlert
+                          presentation="toast"
+                          className="pointer-events-auto"
+                          title={desktopUpdateNotice.title}
+                          message={desktopUpdateNotice.message}
+                          variant={desktopUpdateNotice.variant}
+                          actionLabel={desktopUpdateNotice.actionLabel}
+                          onAction={desktopUpdateNotice.actionLabel ? () => {
+                            if (desktopUpdateNotice.actionKind === 'install') {
+                              void installDesktopUpdate();
+                              return;
+                            }
+                            void openDesktopReleasePage();
+                          } : undefined}
+                        />
+                      </ToastPortal>
                     ) : (
                       <p className="text-xs leading-6 text-muted-text">
                         {t('settings.desktopCurrentNoStatus')}
@@ -2332,14 +2379,26 @@ const SettingsPage: React.FC = () => {
                     {t('settings.envDockerNote')}
                   </p>
                   {envBackupActionError ? (
-                    <ApiErrorAlert
-                      error={envBackupActionError}
-                      actionLabel={envBackupActionError.status === 409 ? t('settings.reload') : undefined}
-                      onAction={envBackupActionError.status === 409 ? () => void load() : undefined}
-                    />
+                    <ToastPortal>
+                      <ApiErrorAlert
+                        elevated
+                        error={envBackupActionError}
+                        className="pointer-events-auto"
+                        actionLabel={envBackupActionError.status === 409 ? t('settings.reload') : undefined}
+                        onAction={envBackupActionError.status === 409 ? () => void load() : undefined}
+                      />
+                    </ToastPortal>
                   ) : null}
                   {!envBackupActionError && envBackupActionSuccess ? (
-                    <SettingsAlert title={t('settings.actionSuccess')} message={envBackupActionSuccess} variant="success" />
+                    <ToastPortal>
+                      <SettingsAlert
+                        presentation="toast"
+                        title={t('settings.actionSuccess')}
+                        message={envBackupActionSuccess}
+                        variant="success"
+                        className="pointer-events-auto"
+                      />
+                    </ToastPortal>
                   ) : null}
                 </div>
               </SettingsSectionCard>
@@ -2469,7 +2528,7 @@ const SettingsPage: React.FC = () => {
       </div>
 
       {toast ? (
-        <ToastViewport>
+        <ToastPortal>
           {/* 操作结果几秒后自动消失；鼠标悬停其上时暂停计时。 */}
           <AutoDismissToast active={toast} onDismiss={clearToast} delayMs={3200}>
             {toast.type === 'success'
@@ -2490,9 +2549,9 @@ const SettingsPage: React.FC = () => {
                   )}
                   className="pointer-events-auto"
                 />
-              : <ApiErrorAlert error={toast.error} className="pointer-events-auto" />}
+              : <ApiErrorAlert elevated error={toast.error} className="pointer-events-auto" />}
           </AutoDismissToast>
-        </ToastViewport>
+        </ToastPortal>
       ) : null}
       <ConfirmDialog
         isOpen={showImportConfirm}
