@@ -208,17 +208,24 @@ Zeabur 服务建议从 `1G` 内存起步；`512M` 仅适合轻量 Web/API、单�
 
 系统内置了健康检查机制，默认检查：
 
-- WebUI 模式：检查 `http://localhost:8000/health` 端点
-- FastAPI 模式：检查 `http://localhost:8000/api/health` 端点
+- WebUI 模式：检查 `http://127.0.0.1:<端口>/health` 端点
+- FastAPI 模式：检查 `http://127.0.0.1:<端口>/api/health` 端点
 - 非服务模式：始终返回健康状态
 
 健康检查配置如下：
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || curl -f http://localhost:8000/health \
-    || python -c "import sys; sys.exit(0)"
+    CMD ["/usr/local/bin/docker-healthcheck.sh"]
 ```
+
+`<端口>` 按容器实际绑定的值取：启动命令里的 `--port` 优先，其次是环境变量 `API_PORT`，都没有时用 8000。
+也就是说改了 `API_PORT`（例如避开宿主机端口冲突时常用的 `8888` / `8080`）之后，健康检查会跟着探测新端口。
+
+“非服务模式始终健康”只适用于没有 HTTP 端点的定时任务容器（`python main.py --schedule`）。
+只要本次运行会起服务（`--serve` / `--serve-only` / `--webui` / `--webui-only`，或 `WEBUI_ENABLED=true`），
+探测不到 API 就判为 `unhealthy`——不会在 WebUI/API 已经不可达时仍然报健康。
+判定依据是容器内 PID 1 的实际启动命令；相关实现见 `docker/healthcheck.sh`。
 
 ## 8. 常见问题
 
