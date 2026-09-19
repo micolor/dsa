@@ -1171,6 +1171,51 @@ describe('StockScreeningPage', () => {
     expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toContain('screen-task-1');
   });
 
+  // 可恢复错误（超时 / 连不上本地服务）此前没有上限地每 2s 重试，服务端一直不可达
+  // 就会永久轮询下去，页面既不结束加载态也不给用户别的出路。
+  it('stops polling a screening task once the retry cap is reached', async () => {
+    vi.useFakeTimers();
+    try {
+      getScreeningStatus.mockResolvedValue({
+        enabled: true,
+        available: true,
+      });
+      window.sessionStorage.setItem('dsa.screening.activeScreenTask.v1', JSON.stringify({
+        taskId: 'screen-task-1',
+        market: 'cn',
+        strategy: 'dual_low',
+        maxResults: 3,
+      }));
+      getScreenTask.mockRejectedValue(Object.assign(new Error('timeout of 30000ms exceeded'), {
+        code: 'ECONNABORTED',
+      }));
+
+      render(<StockScreeningPage />);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getScreenTask).toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      const callsAtCap = getScreenTask.mock.calls.length;
+      // 到了上限必须真的停下来（上限本身不写死，只要求它是有限的）。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      expect(getScreenTask.mock.calls.length).toBe(callsAtCap);
+
+      expect(screen.getByText(/不再自动重试/)).toBeInTheDocument();
+      // 放弃轮询后不得继续占着加载态，用户要能重新提交。
+      expect(screen.getByRole('button', { name: /运行选股/ })).toBeEnabled();
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('publishes the running screening task to the global task store while pending', async () => {
     getScreeningStatus.mockResolvedValue({
       enabled: true,

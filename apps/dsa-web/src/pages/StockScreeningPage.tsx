@@ -173,6 +173,14 @@ const clearPersistedScreenTask = () => {
   }
 };
 
+/**
+ * 连续失败多少次后放弃轮询这个选股任务（30 × 2s = 1 分钟）。
+ *
+ * 可恢复错误（超时、连不上本地服务）此前无上限地每 2s 重试：只要服务端一直不可达，
+ * 页面就会永远停在加载态，用户既看不到结论也没有别的出路。到上限后停下并交还入口。
+ */
+const SCREEN_TASK_POLL_MAX_FAILURES = 30;
+
 const formatRecoverableScreenTaskPollingError = (error: ParsedApiError) => {
   if (error.category === 'upstream_timeout') {
     return '选股任务仍在后台运行，状态轮询暂时超时，将自动重试。';
@@ -1162,6 +1170,7 @@ const StockScreeningPage: React.FC = () => {
     const pollingTaskId = activeTaskId;
     let active = true;
     let timer: ReturnType<typeof window.setTimeout> | undefined;
+    let consecutiveFailures = 0;
 
     function finishTask() {
       clearPersistedScreenTask();
@@ -1219,6 +1228,7 @@ const StockScreeningPage: React.FC = () => {
         if (!active) {
           return;
         }
+        consecutiveFailures = 0;
         applyTaskStatus(task);
       } catch (err) {
         if (!active) {
@@ -1229,6 +1239,15 @@ const StockScreeningPage: React.FC = () => {
           setError(formatParsedApiError(parsedError) || '选股任务不可恢复，请重新提交。');
           setCandidates([]);
           setScreenMeta(null);
+          finishTask();
+          return;
+        }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= SCREEN_TASK_POLL_MAX_FAILURES) {
+          setError(
+            `${formatRecoverableScreenTaskPollingError(parsedError)}已连续 ${SCREEN_TASK_POLL_MAX_FAILURES} 次取不到状态，不再自动重试；`
+            + '任务可能仍在后台运行，可重新提交选股。',
+          );
           finishTask();
           return;
         }
