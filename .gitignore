@@ -85,6 +85,10 @@ verify_*.py
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+# `!.claude/skills/**` 会把该目录下的一切重新纳入跟踪，含系统垃圾文件；gitignore
+# 后匹配优先，所以在它后面再把这两类排除掉，否则 `git add -A` 会把 .DS_Store 入库。
+.claude/skills/**/.DS_Store
+.claude/skills/**/Thumbs.db
 
 # ignore static files
 static/
