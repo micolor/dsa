@@ -50,7 +50,9 @@ export const historyApi = {
       total: data.total,
       page: data.page,
       limit: data.limit,
-      items: data.items.map(item => toCamelCase<HistoryItem>(item)),
+      // 与 getNews / backtest 保持一致：载荷缺 items 时按空列表处理，
+      // 而不是在 API 层抛 TypeError 让页面把「没有记录」显示成「解析失败」。
+      items: (data.items ?? []).map(item => toCamelCase<HistoryItem>(item)),
     };
   },
 
@@ -160,7 +162,7 @@ export const historyApi = {
     const data = toCamelCase<{ total: number; items: unknown[] }>(response.data);
     return {
       total: data.total,
-      items: data.items.map(item => toCamelCase<Record<string, unknown>>(item) as unknown as typeof data.items[0]),
+      items: (data.items ?? []).map(item => toCamelCase<Record<string, unknown>>(item) as unknown as StockBarResponse['items'][number]),
     } as StockBarResponse;
   },
 };
