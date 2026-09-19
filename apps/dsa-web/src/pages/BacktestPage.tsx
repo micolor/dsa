@@ -5,6 +5,7 @@ import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { ApiErrorAlert, Card, Badge, DatePicker, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
@@ -702,8 +703,11 @@ const BacktestPage: React.FC = () => {
             <RunSummary data={runResult} language={language} />
           </div>
         )}
+        {/* 运行失败是页面级提示，送全局右上角容器。 */}
         {runError && (
-          <ApiErrorAlert error={runError} className="mt-2 max-w-4xl" />
+          <ToastPortal>
+            <ApiErrorAlert elevated error={runError} className="pointer-events-auto" />
+          </ToastPortal>
         )}
         <p className="mt-2 text-xs text-muted-text">
           {isNextDayValidation
@@ -736,7 +740,9 @@ const BacktestPage: React.FC = () => {
         {/* Results table */}
         <section className="min-h-0 flex-1 overflow-y-auto">
           {pageError ? (
-            <ApiErrorAlert error={pageError} className="mb-3" />
+            <ToastPortal>
+              <ApiErrorAlert elevated error={pageError} className="pointer-events-auto" />
+            </ToastPortal>
           ) : null}
           {isLoadingResults ? (
             <Loading label={text.loadingResults} className="h-64" />

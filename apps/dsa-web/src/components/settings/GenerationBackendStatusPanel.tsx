@@ -7,6 +7,7 @@ import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { GenerationBackendStatus, GenerationBackendStatusResponse, SystemConfigUpdateItem, TestGenerationBackendResponse } from '../../types/systemConfig';
 import { ApiErrorAlert, Badge, Button } from '../common';
 import { SettingsAlert } from './SettingsAlert';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 
 type Translate = ReturnType<typeof useUiLanguage>['t'];
 
@@ -199,14 +200,19 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
           </Button>
         </div>
       </div>
-      {error ? <ApiErrorAlert error={error} /> : null}
-      {smokeResult ? (
-        <SettingsAlert
-          title={smokeResult.success ? t('settings.generationBackendSmokePassed') : t('settings.generationBackendSmokeFailed')}
-          message={smokeResult.success ? t('settings.generationBackendSmokePassedMessage') : smokeResult.message}
-          variant={smokeResult.success ? 'success' : 'warning'}
-        />
-      ) : null}
+      {/* 冒烟测试的结果送全局右上角容器。 */}
+      <ToastPortal>
+        {error ? <ApiErrorAlert elevated error={error} className="pointer-events-auto" /> : null}
+        {smokeResult ? (
+          <SettingsAlert
+            presentation="toast"
+            className="pointer-events-auto"
+            title={smokeResult.success ? t('settings.generationBackendSmokePassed') : t('settings.generationBackendSmokeFailed')}
+            message={smokeResult.success ? t('settings.generationBackendSmokePassedMessage') : smokeResult.message}
+            variant={smokeResult.success ? 'success' : 'warning'}
+          />
+        ) : null}
+      </ToastPortal>
       <BackendStatusRow title={t('settings.generationBackendPrimary')} status={status?.primary} t={t} />
       <BackendStatusRow title={t('settings.generationBackendFallback')} status={status?.fallback} t={t} />
     </div>

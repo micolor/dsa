@@ -6,6 +6,7 @@ import { useAuth } from '../../hooks';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { AutoDismissToast, Button, Input } from '../common';
 import { SettingsAlert } from './SettingsAlert';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
 export const ChangePasswordCard: React.FC = () => {
@@ -111,17 +112,20 @@ export const ChangePasswordCard: React.FC = () => {
           />
         </div>
 
-        {error
-          ? isParsedApiError(error)
-            ? <SettingsAlert title={t('settings.changePasswordFailure')} message={error.message} variant="error" className="!mt-3" />
-            : <SettingsAlert title={t('settings.changePasswordFailure')} message={error} variant="error" className="!mt-3" />
-          : null}
-        {success ? (
-          // 计时交给 AutoDismissToast，成功提示和全局提示共享同一套「悬停暂停、移开重新计时」语义。
-          <AutoDismissToast active={success} onDismiss={() => setSuccess(false)} delayMs={4000}>
-            <SettingsAlert title={t('settings.changePasswordSuccess')} message={t('settings.changePasswordSuccessMessage')} variant="success" />
-          </AutoDismissToast>
-        ) : null}
+        {/* 改密的失败 / 成功都是操作结果，送全局右上角容器。 */}
+        <ToastPortal>
+          {error ? (
+            isParsedApiError(error)
+              ? <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.changePasswordFailure')} message={error.message} variant="error" />
+              : <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.changePasswordFailure')} message={error} variant="error" />
+          ) : null}
+          {success ? (
+            // 计时交给 AutoDismissToast，成功提示和全局提示共享同一套「悬停暂停、移开重新计时」语义。
+            <AutoDismissToast active={success} onDismiss={() => setSuccess(false)} delayMs={4000}>
+              <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.changePasswordSuccess')} message={t('settings.changePasswordSuccessMessage')} variant="success" />
+            </AutoDismissToast>
+          ) : null}
+        </ToastPortal>
 
         <Button type="submit" variant="primary" isLoading={isSubmitting}>
           {t('settings.changePasswordSave')}

@@ -28,6 +28,7 @@ import {
 import { DecisionSignalProfileCalibration } from '../components/decision-signals/DecisionSignalProfileCalibration';
 import { DecisionSignalTimeline } from '../components/decision-signals/DecisionSignalTimeline';
 import { StockAutocomplete } from '../components/StockAutocomplete';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { UiTextKey } from '../i18n/uiText';
@@ -1641,12 +1642,17 @@ const DecisionSignalsPage: React.FC = () => {
           </Card>
         ) : null}
 
+        {/* 列表加载失败是页面级提示，送全局右上角容器。 */}
         {error ? (
-          <ApiErrorAlert
-            error={{ ...error, title: t('decisionSignals.errorTitle') }}
-            actionLabel={t('common.retry')}
-            onAction={() => void loadSignals()}
-          />
+          <ToastPortal>
+            <ApiErrorAlert
+              elevated
+              error={{ ...error, title: t('decisionSignals.errorTitle') }}
+              actionLabel={t('common.retry')}
+              onAction={() => void loadSignals()}
+              className="pointer-events-auto"
+            />
+          </ToastPortal>
         ) : null}
 
         <div className="flex items-center justify-between gap-3">
@@ -2161,13 +2167,17 @@ const DecisionSignalsPage: React.FC = () => {
         ) : null}
       </Drawer>
 
+      {/* 处理中提示原先钉在右下角，现在跟随全站约定走右上角容器。 */}
       {statusUpdating ? (
-        <InlineAlert
-          className="fixed bottom-5 right-5 z-[60] max-w-sm"
-          variant="info"
-          title={t('common.processing')}
-          message={t('decisionSignals.confirmStatusTitle')}
-        />
+        <ToastPortal>
+          <InlineAlert
+            elevated
+            className="pointer-events-auto"
+            variant="info"
+            title={t('common.processing')}
+            message={t('decisionSignals.confirmStatusTitle')}
+          />
+        </ToastPortal>
       ) : null}
 
       <ConfirmDialog

@@ -5,6 +5,7 @@ import { getParsedApiError } from '../../api/error';
 import { systemConfigApi } from '../../api/systemConfig';
 import type { LLMApiSurface, LLMCapabilityCheck, LLMCapabilityCheckResult } from '../../types/systemConfig';
 import { ApiErrorAlert, Badge, Button, InlineAlert, Input, Select, StatusDot, Tooltip } from '../common';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 import type { ChannelProtocol } from './llmProviderTemplates';
 import {
   LLM_PROVIDER_CAPABILITY_LABELS,
@@ -2537,38 +2538,46 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             {!hasChanges ? <span className="text-xs text-muted-text">当前没有未保存的改动</span> : null}
           </div>
 
-          {saveMessage?.type === 'success' ? (
-            <InlineAlert
-              variant="success"
-              message={saveMessage.text}
-              className="rounded-lg px-3 py-2 text-sm shadow-none"
-            />
-          ) : null}
+          {/* 保存结果（成功、警告、失败）都送全局右上角容器。 */}
+          <ToastPortal>
+            {saveMessage?.type === 'success' ? (
+              <InlineAlert
+                elevated
+                variant="success"
+                message={saveMessage.text}
+                className="pointer-events-auto"
+              />
+            ) : null}
 
-          {saveWarnings.length > 0 ? (
-            <InlineAlert
-              variant="warning"
-              title="保存后提示"
-              message={(
-                <div className="space-y-1">
-                  {saveWarnings.map((warning) => (
-                    <p key={warning}>{warning}</p>
-                  ))}
-                </div>
-              )}
-              className="rounded-lg px-3 py-2 text-sm shadow-none"
-            />
-          ) : null}
+            {saveWarnings.length > 0 ? (
+              <InlineAlert
+                elevated
+                variant="warning"
+                title="保存后提示"
+                message={(
+                  <div className="space-y-1">
+                    {saveWarnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
+                    ))}
+                  </div>
+                )}
+                className="pointer-events-auto"
+              />
+            ) : null}
 
-          {saveMessage?.type === 'local-error' ? (
-            <InlineAlert
-              variant="danger"
-              message={saveMessage.text}
-              className="rounded-lg px-3 py-2 text-sm shadow-none"
-            />
-          ) : null}
+            {saveMessage?.type === 'local-error' ? (
+              <InlineAlert
+                elevated
+                variant="danger"
+                message={saveMessage.text}
+                className="pointer-events-auto"
+              />
+            ) : null}
 
-          {saveMessage?.type === 'error' ? <ApiErrorAlert error={saveMessage.error} /> : null}
+            {saveMessage?.type === 'error' ? (
+              <ApiErrorAlert elevated error={saveMessage.error} className="pointer-events-auto" />
+            ) : null}
+          </ToastPortal>
         </div>
       ) : null}
     </div>

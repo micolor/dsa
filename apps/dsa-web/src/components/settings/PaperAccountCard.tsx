@@ -8,6 +8,7 @@ import { PAPER_TRADING_TEXT } from '../../locales/featureText';
 import type { PaperAccount } from '../../types/paper';
 import { Badge, Button, ConfirmDialog, Input } from '../common';
 import { SettingsAlert } from './SettingsAlert';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
 // 与模拟盘页一致的数字口径。
@@ -120,12 +121,15 @@ export const PaperAccountCard: React.FC = () => {
 
       <p className="text-xs leading-6 text-muted-text">{text.resetCardHint}</p>
 
-      {actionError ? (
-        <SettingsAlert title={text.resetFailed} message={actionError} variant="error" />
-      ) : null}
-      {successMessage ? (
-        <SettingsAlert title={t('settings.actionSuccess')} message={successMessage} variant="success" />
-      ) : null}
+      {/* 重置账户的结果送全局右上角容器；卡片自身的加载失败占位留在卡片里。 */}
+      <ToastPortal>
+        {actionError ? (
+          <SettingsAlert presentation="toast" className="pointer-events-auto" title={text.resetFailed} message={actionError} variant="error" />
+        ) : null}
+        {successMessage ? (
+          <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.actionSuccess')} message={successMessage} variant="success" />
+        ) : null}
+      </ToastPortal>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

@@ -7,6 +7,7 @@ import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiTextKey } from '../../i18n/uiText';
 import { Badge, Button, Input, Checkbox } from '../common';
 import { SettingsAlert } from './SettingsAlert';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
 function createNextModeLabel(authEnabled: boolean, desiredEnabled: boolean, t: (key: UiTextKey) => string) {
@@ -189,21 +190,26 @@ export const AuthSettingsCard: React.FC = () => {
           </div>
         )}
 
-        {error ? (
-          isParsedApiError(error) ? (
-            <SettingsAlert
-              title={t('settings.authFailure')}
-              message={error.message}
-              variant="error"
-            />
-          ) : (
-            <SettingsAlert title={t('settings.authFailure')} message={error} variant="error" />
-          )
-        ) : null}
+        {/* 认证操作的失败 / 成功都是操作结果，送全局右上角容器。 */}
+        <ToastPortal>
+          {error ? (
+            isParsedApiError(error) ? (
+              <SettingsAlert
+                presentation="toast"
+                className="pointer-events-auto"
+                title={t('settings.authFailure')}
+                message={error.message}
+                variant="error"
+              />
+            ) : (
+              <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.authFailure')} message={error} variant="error" />
+            )
+          ) : null}
 
-        {successMessage ? (
-          <SettingsAlert title={t('settings.actionSuccess')} message={successMessage} variant="success" />
-        ) : null}
+          {successMessage ? (
+            <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.actionSuccess')} message={successMessage} variant="success" />
+          ) : null}
+        </ToastPortal>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button type="submit" variant="primary" isLoading={isSubmitting} disabled={!isDirty}>

@@ -9,6 +9,7 @@ import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { Button, ConfirmDialog, Drawer, InlineAlert, Tooltip } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
 import { HomeReportRegion, type MarketReviewNotice } from '../components/report/HomeReportRegion';
@@ -1683,48 +1684,51 @@ const HomePage: React.FC = () => {
           </div>
         </header>
 
-        {deleteError ? (
+        {/* 输入校验提示是输入区的一部分，留在原地；其余页面级提示送全局右上角容器。 */}
+        {inputError ? (
           <div className="px-3 pb-2 md:px-4">
             <InlineAlert
               variant="danger"
-              title={t('common.deleteFailed')}
-              message={deleteError}
+              title={t('home.inputInvalid')}
+              message={inputError}
               className="rounded-xl px-3 py-2 text-xs shadow-none"
             />
           </div>
         ) : null}
 
-        {inputError || (duplicateError && duplicateBannerVisible) ? (
-          <div className="px-3 pb-2 md:px-4">
-            {inputError ? (
-              <InlineAlert
-                variant="danger"
-                title={t('home.inputInvalid')}
-                message={inputError}
-                className="rounded-xl px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-            {!inputError && duplicateError && duplicateBannerVisible ? (
-              <InlineAlert
-                variant="warning"
-                title={t('home.duplicateTask')}
-                message={duplicateError}
-                action={(
-                  <button
-                    type="button"
-                    onClick={dismissDuplicateBanner}
-                    aria-label={t('common.close')}
-                    className="-my-1 -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg opacity-70 transition-colors hover:bg-warning/15 hover:opacity-100"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                )}
-                className="rounded-xl px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-          </div>
-        ) : null}
+        <ToastPortal>
+          {deleteError ? (
+            <InlineAlert
+              elevated
+              variant="danger"
+              title={t('common.deleteFailed')}
+              message={deleteError}
+              className="pointer-events-auto"
+            />
+          ) : null}
+          {!inputError && duplicateError && duplicateBannerVisible ? (
+            <InlineAlert
+              elevated
+              variant="warning"
+              title={t('home.duplicateTask')}
+              message={duplicateError}
+              action={(
+                <button
+                  type="button"
+                  onClick={dismissDuplicateBanner}
+                  aria-label={t('common.close')}
+                  className="-my-1 -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg opacity-70 transition-colors hover:bg-warning/15 hover:opacity-100"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+              className="pointer-events-auto"
+            />
+          ) : null}
+        </ToastPortal>
 
+        {/* 配置不完整提示常驻在首页，而首页右上角正是「大盘复盘 / 分析」按钮所在：
+            浮动到右上角会长期盖住主操作入口，所以这条留在原地。 */}
         {setupNeedsAction ? (
           <div className="px-3 pb-2 md:px-4">
             <InlineAlert

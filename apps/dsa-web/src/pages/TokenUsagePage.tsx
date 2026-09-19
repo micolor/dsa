@@ -3,6 +3,7 @@ import { Activity, Clock3, Cpu, Database, Gauge, RefreshCw } from 'lucide-react'
 import { usageApi, type UsageDashboard, type UsageModelBreakdown, type UsagePeriod } from '../api/usage';
 import type { ParsedApiError } from '../api/error';
 import { ApiErrorAlert, AppPage, Button, EmptyState, StatCard } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey, UiTextParams } from '../i18n/uiText';
@@ -182,7 +183,17 @@ const TokenUsagePage: React.FC = () => {
           </div>
         </div>
 
-        {error ? <ApiErrorAlert error={error} actionLabel={t('common.retry')} onAction={() => void loadDashboard()} /> : null}
+        {error ? (
+          <ToastPortal>
+            <ApiErrorAlert
+              elevated
+              error={error}
+              actionLabel={t('common.retry')}
+              onAction={() => void loadDashboard()}
+              className="pointer-events-auto"
+            />
+          </ToastPortal>
+        ) : null}
 
         {loading && !dashboard ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

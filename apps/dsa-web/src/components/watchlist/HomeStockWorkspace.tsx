@@ -14,6 +14,7 @@ import {
   Star,
 } from 'lucide-react';
 import { Badge, Button, Dialog, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip } from '../common';
+import { ToastPortal } from '../../contexts/ToastHostContext';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBar } from '../history';
 import { useStockPoolStore } from '../../stores';
@@ -365,13 +366,6 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     { key: 'today', label: t('watchlist.tabToday') },
   ];
 
-  const statusClassName = useMemo(() => {
-    if (!batchStatus) return '';
-    if (batchStatus.variant === 'danger') return 'border-danger/30 bg-danger/10 text-danger';
-    if (batchStatus.variant === 'warning') return 'border-warning/30 bg-warning/10 text-warning';
-    return 'border-success/30 bg-success/10 text-success';
-  }, [batchStatus]);
-
   const visibleWorkspaceNotice = useMemo(() => {
     if (!workspaceNoticeCode) return null;
     const row = watchlistRows.find((item) => areStockCodesEquivalent(item.code, workspaceNoticeCode));
@@ -618,27 +612,29 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 <Plus className="h-4 w-4" aria-hidden="true" />
               </Button>
             </form>
-            {batchStatus ? (
-              // 批量提交结果是异步反馈，裸 div 不会播报；role="status" 让读屏用户能拿到
-              // 「成功 / 部分失败 / 重复」的结论。用 polite 而非 alert：它是对用户操作的回应，
-              // 不该打断当前朗读。
-              <div
-                role="status"
-                aria-live="polite"
-                className={`rounded-xl border px-3 py-2 text-xs ${statusClassName}`}
-              >
-                {batchStatus.message}
-              </div>
-            ) : null}
-            {watchlistMessage ? (
-              <div
-                role="status"
-                aria-live="polite"
-                className="rounded-xl border border-subtle bg-base/35 px-3 py-2 text-xs text-secondary-text"
-              >
-                {watchlistMessage}
-              </div>
-            ) : null}
+            {/* 批量提交结果与自选股提示是操作结果，送全局右上角容器。
+                role="status"（polite）保持不变：它是对用户操作的回应，
+                不该打断当前朗读。 */}
+            <ToastPortal>
+              {batchStatus ? (
+                <InlineAlert
+                  elevated
+                  role="status"
+                  variant={batchStatus.variant}
+                  message={batchStatus.message}
+                  className="pointer-events-auto"
+                />
+              ) : null}
+              {watchlistMessage ? (
+                <InlineAlert
+                  elevated
+                  role="status"
+                  variant="info"
+                  message={watchlistMessage}
+                  className="pointer-events-auto"
+                />
+              ) : null}
+            </ToastPortal>
             {visibleWorkspaceNotice ? (
               <InlineAlert
                 variant="warning"

@@ -37,6 +37,7 @@ import {
 } from '../api/screening';
 import { formatParsedApiError, getParsedApiError, isUnrecoverableScreenTaskError, toApiErrorMessage, type ParsedApiError } from '../api/error';
 import { AppPage, Badge, Button, EmptyState, InlineAlert, Select } from '../components/common';
+import { ToastPortal } from '../contexts/ToastHostContext';
 import { DashboardPanelHeader } from '../components/dashboard/DashboardPanelHeader';
 import { CandidateListItem } from '../components/screening/CandidateListItem';
 import { formatNumber } from '../components/screening/candidateFormat';
@@ -1339,28 +1340,41 @@ const StockScreeningPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-6 pb-12 pt-6">
-      {statusChecked && !enabled ? (
-        <InlineAlert
-          variant="info"
-          title="选股未开启"
-          message="开启后即可运行选股策略。"
-          action={
-            <Button size="sm" isLoading={enabling} loadingText="开启中..." onClick={() => void handleEnable()}>
-              开启选股
-            </Button>
-          }
-        />
-      ) : null}
-
-      {statusChecked && enabled && !available ? (
-        <InlineAlert
-          variant="warning"
-          title="选股功能不可用"
-          message="请检查后端日志、策略文件和基础数据依赖后重启服务。"
-        />
-      ) : null}
-
-      {error ? <InlineAlert variant="danger" title="调用失败" message={error} /> : null}
+      {/* 页面级提示统一送全局右上角容器；卡片内的热点题材错误仍留在卡片里。 */}
+      <ToastPortal>
+        {statusChecked && !enabled ? (
+          <InlineAlert
+            elevated
+            variant="info"
+            title="选股未开启"
+            message="开启后即可运行选股策略。"
+            className="pointer-events-auto"
+            action={
+              <Button size="sm" isLoading={enabling} loadingText="开启中..." onClick={() => void handleEnable()}>
+                开启选股
+              </Button>
+            }
+          />
+        ) : null}
+        {statusChecked && enabled && !available ? (
+          <InlineAlert
+            elevated
+            variant="warning"
+            title="选股功能不可用"
+            message="请检查后端日志、策略文件和基础数据依赖后重启服务。"
+            className="pointer-events-auto"
+          />
+        ) : null}
+        {error ? (
+          <InlineAlert
+            elevated
+            variant="danger"
+            title="调用失败"
+            message={error}
+            className="pointer-events-auto"
+          />
+        ) : null}
+      </ToastPortal>
 
       <section className="glass-card !border-transparent p-4 md:p-5">
         <DashboardPanelHeader
