@@ -123,6 +123,25 @@ def _select_best_bars(db, stock_code: str, start: date, end: date) -> Tuple[Opti
     return best_code, best_bars
 
 
+def _latest_session_date(stock_code: str) -> date:
+    """Resolve the newest date a daily bar *should* exist for (no explicit target date).
+
+    直接用 ``date.today()`` 会让 DB 命中条件 ``latest_date >= end`` 在非交易日
+    必然失配：周末、节假日以及当日日线尚未落库时，库里最新的一根 K 线一定早于
+    今天，于是每次都跳过本地缓存去走网络（网络被限流或不可用时，价格走势图就
+    长期停在「刷新中」）。这里按标的市场取「最近一个已完成交易日的日期」，
+    与 ``resolve_valuation_date`` / 盘后判定用的是同一套日历；日历不可用时
+    fail-open 回落到自然日，行为与原先一致。
+    """
+    try:
+        from src.core.trading_calendar import get_effective_trading_date, get_market_for_stock
+
+        return get_effective_trading_date(get_market_for_stock(stock_code))
+    except Exception as e:  # pragma: no cover - 日历不可用时的 fail-open
+        logger.debug("_latest_session_date(%s): 交易日历不可用，回落到今天: %s", stock_code, e)
+        return date.today()
+
+
 def load_history_df(
     stock_code: str,
     days: int = 60,
@@ -141,7 +160,7 @@ def load_history_df(
         end = target_date
     else:
         frozen = get_frozen_target_date()
-        end = frozen if frozen else date.today()
+        end = frozen if frozen else _latest_session_date(stock_code)
 
     # Calendar-day buffer: ~1.8x trading days + margin for long holidays
     start = end - timedelta(days=int(days * 1.8) + 10)

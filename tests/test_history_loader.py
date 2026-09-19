@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -55,6 +55,55 @@ class HistoryLoaderTestCase(unittest.TestCase):
         self.assertEqual(source, "db_cache")
         self.assertEqual(len(df), 40)
         mock_db.get_data_range.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # Default end date on a non-session day
+    # ------------------------------------------------------------------
+    @patch("src.core.trading_calendar.get_effective_trading_date")
+    @patch("src.core.trading_calendar.get_market_for_stock", return_value="cn")
+    @patch("src.storage.get_db")
+    def test_default_end_date_is_the_latest_completed_session(
+        self, mock_get_db, _mock_market, mock_effective
+    ):
+        """无 target_date 时，DB 查询上界必须是最近一个已完成交易日，而不是今天。
+
+        命中条件是 `latest_date >= end`，而 `get_data_range` 是闭区间，所以
+        `end = date.today()` 实际要求「库里有一根日期正好等于今天的 K 线」。
+        周末 / 节假日 / 当日日线尚未落库时它必然不成立，哪怕库里已有整段历史，
+        也会跳过本地缓存去走网络（网络不可用或限流时价格走势图长期停在「刷新中」）。
+        """
+        from src.services.history_loader import load_history_df
+
+        session = date.today() - timedelta(days=7)
+        mock_effective.return_value = session
+
+        class _Bar:
+            def __init__(self, d):
+                self.date = d
+                self.open = self.high = self.low = self.close = 10.0
+                self.volume = 100
+
+            def to_dict(self):
+                return {
+                    "date": self.date,
+                    "open": self.open,
+                    "high": self.high,
+                    "low": self.low,
+                    "close": self.close,
+                    "volume": self.volume,
+                }
+
+        mock_db = MagicMock()
+        mock_db.get_data_range.return_value = [_Bar(session) for _ in range(40)]
+        mock_get_db.return_value = mock_db
+
+        with patch("src.services.history_loader._get_fetcher_manager") as mock_get_fm:
+            df, source = load_history_df("600519", days=60)
+
+        self.assertEqual(source, "db_cache")
+        self.assertIsNotNone(df)
+        self.assertEqual(mock_db.get_data_range.call_args[0][2], session)
+        mock_get_fm.assert_not_called()
 
     # ------------------------------------------------------------------
     # DB miss → DFM fallback
