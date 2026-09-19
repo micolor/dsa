@@ -2196,6 +2196,93 @@ describe('HomePage', () => {
     expect(analysisApi.getStatus).toHaveBeenCalledWith('task-1');
   });
 
+  // 大盘复盘轮询若允许上一请求未返回就发起下一次，迟到的 processing 响应会晚于终态落地，
+  // 把已经渲染出来的复盘正文清掉并退回「进行中」，而定时器此时已被清除，页面不再恢复。
+  it('never lets a stale market-review poll overwrite a completed report', async () => {
+    vi.useFakeTimers();
+    let resolveStalePoll: (() => void) | undefined;
+    let statusCall = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    try {
+      vi.mocked(historyApi.getList).mockResolvedValue({
+        total: 0,
+        page: 1,
+        limit: 20,
+        items: [],
+      });
+      vi.mocked(analysisApi.triggerMarketReview).mockResolvedValue({
+        status: 'accepted',
+        sendNotification: true,
+        message: '大盘复盘任务已提交',
+        region: 'cn',
+        taskId: 'task-race',
+      });
+      vi.mocked(analysisApi.getStatus).mockImplementation((async (taskId: string) => {
+        statusCall += 1;
+        const call = statusCall;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          if (call === 1) {
+            return { taskId, status: 'processing' };
+          }
+          if (call === 2) {
+            // 第二次轮询一直未决，模拟后端比轮询间隔还慢。
+            return await new Promise((resolve) => {
+              resolveStalePoll = () => resolve({ taskId, status: 'processing' });
+            });
+          }
+          return { taskId, status: 'completed', marketReviewReport: '市场复盘报告示例文本' };
+        } finally {
+          inFlight -= 1;
+        }
+      }) as never);
+
+      render(
+        <MemoryRouter>
+          <HomePage />
+        </MemoryRouter>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '大盘复盘' }));
+      // 第一次轮询（processing）先落地，随后按间隔发出第二次（一直未决）。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(statusCall).toBe(2);
+
+      // 再过一个间隔：修复前定时器会在第二次仍未返回时发出第三次，并看到 completed。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      // 让更早发出的第二次轮询以过期的 processing 落地。
+      await act(async () => {
+        resolveStalePoll?.();
+        await Promise.resolve();
+      });
+      // 下一次轮询只在第二次返回之后才排期，因此这里必须走满一个间隔。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(statusCall).toBe(3);
+
+      // 迟到的那次响应不得把已经完成的卡片退回「进行中」（正文同时会被清掉）。
+      expect(screen.getByText('大盘复盘已完成')).toBeInTheDocument();
+      expect(screen.queryByText('大盘复盘进行中')).not.toBeInTheDocument();
+      // 同一时刻只允许一次在途请求：这是上面两条断言成立的根因。
+      expect(maxInFlight).toBe(1);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('submits a one-time multi-market override without saving system config', async () => {
     vi.mocked(historyApi.getList).mockResolvedValue({
       total: 0,

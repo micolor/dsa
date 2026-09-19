@@ -270,6 +270,9 @@ const HomePage: React.FC = () => {
   );
   const duplicateBannerTimer = useRef<number | null>(null);
   const marketReviewPollTimer = useRef<number | null>(null);
+  // 每次启动轮询领一个序号。停止轮询（切页、重新触发、终态）会作废当前序号，
+  // 作废之后才落地的响应一律不再写状态：迟到的旧响应会把新终态覆盖回去。
+  const marketReviewPollGeneration = useRef(0);
   const mountedRef = useRef(true);
   const stockBarLoadStartedRef = useRef(false);
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
@@ -279,8 +282,10 @@ const HomePage: React.FC = () => {
   const strategyInitialFocusIndexRef = useRef<number | null>(null);
 
   const stopMarketReviewPolling = useCallback(() => {
+    // 先作废序号再清定时器：已发出去、还没回来的那次请求不能再改写状态。
+    marketReviewPollGeneration.current += 1;
     if (marketReviewPollTimer.current !== null) {
-      window.clearInterval(marketReviewPollTimer.current);
+      window.clearTimeout(marketReviewPollTimer.current);
       marketReviewPollTimer.current = null;
     }
   }, []);
@@ -963,6 +968,9 @@ const HomePage: React.FC = () => {
       const maxAttempts = MARKET_REVIEW_POLL_MAX_ATTEMPTS;
       const intervalMs = MARKET_REVIEW_POLL_INTERVAL_MS;
       let attempts = 0;
+      const generation = marketReviewPollGeneration.current;
+      const isCurrentPoll = () =>
+        mountedRef.current && marketReviewPollGeneration.current === generation;
 
       // 轮询每 2s 重建 notice 对象；内容未变化时跳过 setState，避免无谓的整页重渲染。
       const applyMarketReviewNotice = (notice: MarketReviewNotice) => {
@@ -993,7 +1001,9 @@ const HomePage: React.FC = () => {
 
         try {
           const status = await analysisApi.getStatus(taskId);
-          if (!mountedRef.current) {
+          if (!isCurrentPoll()) {
+            // 组件已卸载，或这次轮询已被停止/被新一次轮询取代：响应不再代表当前状态，
+            // 落地会把更新的终态覆盖成过期状态（复盘正文被清掉、卡片退回「进行中」）。
             return false;
           }
           if (status.status === 'pending' || status.status === 'processing') {
@@ -1062,7 +1072,7 @@ const HomePage: React.FC = () => {
           return false;
         } catch (err: unknown) {
           const parsed = getParsedApiError(err);
-          if (!mountedRef.current) {
+          if (!isCurrentPoll()) {
             return false;
           }
           if (attempts >= maxAttempts) {
@@ -1077,14 +1087,20 @@ const HomePage: React.FC = () => {
         }
       };
 
-      if (await poll()) {
-        marketReviewPollTimer.current = window.setInterval(() => {
+      // 链式 setTimeout 而不是 setInterval：下一次轮询要等上一次返回之后才发出，
+      // 后端比轮询间隔慢时不会出现两次请求同时在途（再配合上面的序号守卫兜底）。
+      const scheduleNextPoll = () => {
+        marketReviewPollTimer.current = window.setTimeout(() => {
           void poll().then((shouldContinue) => {
-            if (!shouldContinue) {
-              stopMarketReviewPolling();
+            if (shouldContinue) {
+              scheduleNextPoll();
             }
           });
         }, intervalMs);
+      };
+
+      if (await poll()) {
+        scheduleNextPoll();
       }
     },
     [clearLiveMarketReviewReport, refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t, updateMarketReviewNotice],
