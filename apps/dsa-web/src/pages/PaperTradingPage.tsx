@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
@@ -64,21 +64,36 @@ export const PaperTradingPage: React.FC = () => {
 
   // 各 Tab 的列表：持仓来自静态 positions（无需额外请求），信号/成交按需拉取。
   // 切 Tab 或翻页只拉当前 Tab 对应的列表，避免整页 6 个请求重发。
+  // 只有最后一次发出的请求可以写状态：快速翻页时旧页的响应可能后到，
+  // 落地就会变成「分页器高亮第 N 页、行内容是第 M 页的」。
+  const listSeqRef = useRef(0);
+
   const loadList = useCallback(async (section: 'positions' | 'signals' | 'trades', p: number) => {
     if (section === 'positions') {
       return;
     }
+    listSeqRef.current += 1;
+    const seq = listSeqRef.current;
     try {
       if (section === 'signals') {
         const data = await paperApi.getSignals(p, PAGE_SIZE);
+        if (seq !== listSeqRef.current) {
+          return;
+        }
         setSignals(data.items);
         setSignalTotal(data.total);
       } else {
         const data = await paperApi.getTrades(p, PAGE_SIZE);
+        if (seq !== listSeqRef.current) {
+          return;
+        }
         setTrades(data.items);
         setTradeTotal(data.total);
       }
     } catch (err) {
+      if (seq !== listSeqRef.current) {
+        return;
+      }
       setError(getParsedApiError(err));
     }
   }, []);

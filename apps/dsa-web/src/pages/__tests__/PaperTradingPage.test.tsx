@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '../../contexts/UiLanguageContext';
 import PaperTradingPage from '../PaperTradingPage';
@@ -164,6 +164,55 @@ describe('PaperTradingPage', () => {
     screen.getByRole('button', { name: 'Trades' }).click();
     await waitFor(() => expect(screen.getByText('测试')).toBeInTheDocument());
     expect(screen.getByText('Buy')).toBeInTheDocument();
+  });
+
+  // 翻页没有请求序号守卫时，先翻到第 3 页再翻回第 2 页，第 3 页的响应后到就会覆盖第 2 页：
+  // 分页器高亮第 2 页，行内容却是第 3 页的。
+  it('ignores a slower page load that lands after a newer one', async () => {
+    const signalRow = (signalId: string, stockCode: string, stockName: string) => ({
+      signalId,
+      action: 'buy',
+      disposition: 'opened',
+      stockCode,
+      stockName,
+      processedAt: '2026-01-05 10:00:00',
+    });
+    let resolveSlowPage: ((value: unknown) => void) | undefined;
+    mockGetSignals.mockImplementation((p: number) => {
+      if (p === 3) {
+        return new Promise((resolve) => {
+          resolveSlowPage = resolve;
+        });
+      }
+      if (p === 2) {
+        return Promise.resolve({ items: [signalRow('sig-p2', '000001', '平安银行')], total: 60 });
+      }
+      return Promise.resolve({ items: [signalRow('sig-p1', '600519', '贵州茅台')], total: 60 });
+    });
+
+    render(
+      <UiLanguageProvider>
+        <PaperTradingPage />
+      </UiLanguageProvider>
+    );
+
+    // 等静态数据加载完、页签渲染出来再切到 Signals。
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Signals' })).toBeInTheDocument());
+    screen.getByRole('button', { name: 'Signals' }).click();
+    await waitFor(() => expect(screen.getByText('贵州茅台')).toBeInTheDocument());
+
+    // 先翻到第 3 页（一直未决），再翻回第 2 页。
+    screen.getByRole('button', { name: '3' }).click();
+    screen.getByRole('button', { name: '2' }).click();
+    await waitFor(() => expect(screen.getByText('平安银行')).toBeInTheDocument());
+
+    // 第 3 页的响应迟到：不得把第 2 页的内容替换掉。
+    await act(async () => {
+      resolveSlowPage?.({ items: [signalRow('sig-p3', '300750', '宁德时代')], total: 60 });
+    });
+
+    expect(screen.getByText('平安银行')).toBeInTheDocument();
+    expect(screen.queryByText('宁德时代')).not.toBeInTheDocument();
   });
 
   it('renders a readable label for the dispositions that mean "wanted to trade but could not"', async () => {
