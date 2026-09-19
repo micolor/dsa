@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import tempfile
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -137,6 +143,101 @@ def test_backend_filter_covers_mixed_changes_and_shared_web_assets() -> None:
     assert backend_output(["apps/dsa-web/src/App.tsx", "docs/CHANGELOG.md"]) is True
     assert backend_output(["apps/dsa-web/public/stocks.index.json"]) is True
     assert backend_output(["apps/dsa-web/public/runtime/new-asset.json"]) is True
+
+
+def _run_auto_tag_marker_step(commit_message: str) -> str:
+    """执行 auto-tag.yml 里那段检测脚本，返回它写出的 bump 值。"""
+    bash = shutil.which("bash")
+    if bash is None:  # pragma: no cover - 仅在没有 bash 的平台上跳过
+        pytest.skip("bash is required to exercise the auto-tag marker gate")
+    auto_tag = _workflow(".github/workflows/auto-tag.yml")
+    steps = auto_tag["jobs"]["tag"]["steps"]
+    marker_step = next(
+        step for step in steps if step.get("id") == "release_marker"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = Path(tmpdir) / "github_output"
+        output_path.write_text("", encoding="utf-8")
+        completed = subprocess.run(
+            [bash, "-c", marker_step["run"]],
+            env={
+                **os.environ,
+                "COMMIT_MESSAGE": commit_message,
+                "GITHUB_OUTPUT": str(output_path),
+            },
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert completed.returncode == 0
+        written = output_path.read_text(encoding="utf-8")
+    for line in written.splitlines():
+        if line.startswith("bump="):
+            return line[len("bump="):]
+    raise AssertionError("the marker step did not write bump to GITHUB_OUTPUT")
+
+
+def test_auto_tag_reads_the_release_marker_from_the_commit_title_only() -> None:
+    """版本标记只认 commit title，正文里出现 #patch 不得触发发布。
+
+    ``github.event.head_commit.message`` 是整条 commit message，squash 合并会把
+    被合并分支的提交正文一并带进来。用真实历史提交 c4e94203 复现：它的 title 是
+    「fix: 修正 akshare 腾讯数据源字段索引和 ETF 行情字段映射 (#579)」，正文里带着
+    一行裸 ``#patch``（来自被 squash 的提交），且改动路径是 data_provider/*.py
+    （不在 paths-ignore 内）。修复前该 push 会走完 tag job 并推出一个没有人要求的
+    版本号，与 AGENTS.md §7「只有 commit title 含 #patch/#minor/#major 才触发」冲突。
+    """
+    auto_tag = _workflow(".github/workflows/auto-tag.yml")
+    job = auto_tag["jobs"]["tag"]
+    steps = job["steps"]
+    by_id = {step.get("id"): step for step in steps}
+
+    # 门禁不再建立在整条 message 上：job 级 if 已移除，且全文件不再用 contains() 匹配
+    assert "if" not in job
+    workflow_text = _read(".github/workflows/auto-tag.yml")
+    assert "contains(" not in workflow_text
+
+    marker_step = by_id["release_marker"]
+    assert marker_step["env"]["COMMIT_MESSAGE"] == (
+        "${{ github.event.head_commit.message }}"
+    )
+    assert "${COMMIT_MESSAGE%%$'\\n'*}" in marker_step["run"]
+    # 只有检测步骤能读到整条 message，其余步骤不得直接引用
+    for step in steps:
+        if step is marker_step:
+            continue
+        assert "head_commit.message" not in json.dumps(step, ensure_ascii=False)
+
+    # 检出与发版都挂在检测结果上，空标记时一步都不跑
+    tag_steps = [step for step in steps if step is not marker_step]
+    assert tag_steps, "expected checkout/action steps after the marker detection"
+    for step in tag_steps:
+        assert step["if"] == "steps.release_marker.outputs.bump != ''"
+
+    bump_step = next(
+        step for step in steps if step.get("uses") == "anothrNick/github-tag-action@v1"
+    )
+    assert "steps.release_marker.outputs.bump" in bump_step["env"]["DEFAULT_BUMP"]
+
+    # 真实历史 squash 提交：正文有 #patch，title 没有 → 不发版
+    assert (
+        _run_auto_tag_marker_step(
+            "fix: 修正 akshare 腾讯数据源字段索引和 ETF 行情字段映射 (#579)\n\n"
+            "* fix: add TRADING_DAY_CHECK_ENABLED env var\n\n#patch\n"
+        )
+        == ""
+    )
+    # title 里有标记：按标记档位发版，且正文里更大的标记不能顶掉 title
+    assert _run_auto_tag_marker_step("fix: 修复量能单位 (#patch)\n\n后续说明\n") == "patch"
+    assert (
+        _run_auto_tag_marker_step(
+            "feat: add agent strategy chat #minor (#367)\n\n正文提到 #patch 不算\n"
+        )
+        == "minor"
+    )
+    assert _run_auto_tag_marker_step("feat: 重构配置语义 #major") == "major"
+    # 没有 head_commit（如分支删除）时不得崩，也不得发版
+    assert _run_auto_tag_marker_step("") == ""
 
 
 def test_manual_docker_publish_builds_the_requested_release_tag() -> None:

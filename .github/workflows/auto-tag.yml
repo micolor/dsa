@@ -16,26 +16,51 @@ on:
 jobs:
   tag:
     runs-on: ubuntu-latest
-    # Default: NO tag. Only tag when commit message contains #patch, #minor, or #major.
-    if: >-
-      contains(github.event.head_commit.message, '#patch') ||
-      contains(github.event.head_commit.message, '#minor') ||
-      contains(github.event.head_commit.message, '#major')
-
     permissions:
       contents: write
 
     steps:
+      # 默认不发版：只有 commit title（message 第一行）含 #patch / #minor / #major
+      # 才继续。这里只看第一行，是因为 `github.event.head_commit.message` 是**整条**
+      # commit message：squash 合并会把被合并分支的提交正文带进来，正文里出现
+      # 「按 AGENTS.md，发版要在 commit title 写 #patch」这种句子本不该发布任何版本
+      # （AGENTS.md §7 的 opt-in 规则写的是 commit title）。
+      - name: Detect release marker in commit title
+        id: release_marker
+        env:
+          # 用 env 传值而不是把表达式直接插进脚本，避免提交信息里的内容被当命令执行
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          TITLE="${COMMIT_MESSAGE%%$'\n'*}"
+          BUMP=""
+          for marker in major minor patch; do
+            if [[ "$TITLE" == *"#${marker}"* ]]; then
+              BUMP="$marker"
+              break
+            fi
+          done
+          if [[ -z "$BUMP" ]]; then
+            echo "commit title 未含 #patch/#minor/#major，本次不发布版本" >&2
+            echo "title: ${TITLE}" >&2
+          else
+            echo "commit title 请求 ${BUMP} 发布: ${TITLE}"
+          fi
+          echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v5
+        if: steps.release_marker.outputs.bump != ''
         with:
           fetch-depth: 0
 
       - name: Bump version and push tag
+        if: steps.release_marker.outputs.bump != ''
         uses: anothrNick/github-tag-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WITH_V: true
-          DEFAULT_BUMP: patch
+          # 兜底档位与 title 里读到的标记一致，不再无条件写 patch
+          DEFAULT_BUMP: ${{ steps.release_marker.outputs.bump }}
           INITIAL_VERSION: 2.1.0
           PATCH_STRING_TOKEN: '#patch'
           MINOR_STRING_TOKEN: '#minor'
