@@ -17,6 +17,7 @@ A股自选股智能分析系统 - 通知层
 from __future__ import annotations
 
 import logging
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -2655,11 +2656,7 @@ class NotificationService(
             return self.send_to_wechat(content)
         if channel == NotificationChannel.FEISHU:
             if getattr(self, "_feishu_send_as_file", False) and route_type == "report":
-                date_str = datetime.now().strftime('%Y%m%d')
-                filepath = self.save_report_to_file(
-                    sanitized_content, filename=f"report_{date_str}.md"
-                )
-                return self.send_feishu_file(filepath)
+                return self._send_feishu_report_as_file(sanitized_content)
             return self.send_to_feishu(sanitized_content)
         if channel == NotificationChannel.DINGTALK:
             return self.send_to_dingtalk(sanitized_content)
@@ -3052,6 +3049,27 @@ class NotificationService(
             structured_payload=structured_payload,
         )
         return bool(result.success)
+
+    def _send_feishu_report_as_file(self, content: str) -> bool:
+        """把 route_type="report" 的正文以附件形式发到飞书。
+
+        ``FEISHU_SEND_AS_FILE`` 只是「改用附件投递」这一种投递方式，不是「把这份
+        正文写成当天的规范日报」：``reports/report_{YYYYMMDD}.md`` 由
+        ``pipeline._save_local_report`` 写入，企业微信正文里的
+        「详细报告见 reports/report_{YYYYMMDD}.md」也指向它。过去这里复用同一个
+        文件名并以 ``open(..., 'w')`` 截断写入，于是同一轮里排在保存日报之后的
+        任意一次 ``route_type="report"`` 推送（例如飞书文档建好后的那条链接提示）
+        都会把当天日报覆盖掉，本地产物被不可逆销毁，用户按提示取到的是无关内容。
+        附件投递只需要一个临时文件，上传完即删，不落任何规范路径。
+        """
+        from pathlib import Path
+
+        date_str = datetime.now().strftime('%Y%m%d')
+        with tempfile.TemporaryDirectory(prefix='dsa-feishu-report-') as tmpdir:
+            filepath = Path(tmpdir) / f"report_{date_str}.md"
+            filepath.write_text(content, encoding='utf-8')
+            logger.info("将上传文件到飞书: %s", filepath)
+            return self.send_feishu_file(str(filepath))
 
     def save_report_to_file(
         self,

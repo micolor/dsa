@@ -467,11 +467,19 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
         mock_get_config.return_value = cfg
         service = NotificationService()
         with mock.patch.object(service, "send_feishu_file", return_value=True) as mock_file, \
-             mock.patch.object(service, "save_report_to_file", return_value="/tmp/report.md") as mock_save:
+             mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results("report content", route_type="report")
         self.assertTrue(result.success)
         mock_file.assert_called_once()
-        mock_save.assert_called_once_with("report content", filename=mock.ANY)
+        # 附件走临时文件，不再把正文写进 reports/ 的规范日报路径
+        mock_save.assert_not_called()
+        uploaded = mock_file.call_args.args[0].replace("\\", "/")
+        self.assertTrue(uploaded.endswith("report_%s.md" % date.today().strftime("%Y%m%d")))
+        self.assertIn("/dsa-feishu-report-", uploaded)
+        repo_reports_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports"
+        ).replace("\\", "/")
+        self.assertFalse(uploaded.startswith(repo_reports_dir))
 
     @mock.patch("src.notification.get_config")
     def test_feishu_send_as_file_route_report_strips_hidden_metadata_before_save(self, mock_get_config):
@@ -482,15 +490,59 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
         mock_get_config.return_value = cfg
         service = NotificationService()
         content = "[dsa-market-region]: # (cn)\n\n# 市场复盘\n\n正文"
+        uploaded_content = {}
 
-        with mock.patch.object(service, "send_feishu_file", return_value=True), \
-             mock.patch.object(service, "save_report_to_file", return_value="/tmp/report.md") as mock_save:
+        def _capture_upload(file_path):
+            # 上传发生在临时目录被清理之前，这里读到的是真正会发出去的正文
+            with open(file_path, encoding="utf-8") as handle:
+                uploaded_content["body"] = handle.read()
+            return True
+
+        with mock.patch.object(service, "send_feishu_file", side_effect=_capture_upload), \
+             mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results(content, route_type="report")
 
         self.assertTrue(result.success)
-        saved_content = mock_save.call_args.args[0]
-        self.assertNotIn("[dsa-market-region]", saved_content)
-        self.assertIn("# 市场复盘", saved_content)
+        mock_save.assert_not_called()
+        self.assertNotIn("[dsa-market-region]", uploaded_content["body"])
+        self.assertIn("# 市场复盘", uploaded_content["body"])
+
+    @mock.patch("src.notification.get_config")
+    def test_feishu_send_as_file_route_report_keeps_the_daily_report_file(self, mock_get_config):
+        """route_type=report 的附件投递不得覆盖 reports/report_YYYYMMDD.md。
+
+        该路径由 pipeline._save_local_report 写入当天完整日报，企业微信正文里的
+        「详细报告见 reports/report_YYYYMMDD.md」也指向它；过去这里用同一个文件名
+        截断写入，于是排在保存日报之后的任意一次 report 路由推送（例如飞书文档
+        建好后那条链接提示）都会把当天日报换成一行链接。
+        """
+        cfg = _make_config(
+            feishu_webhook_url="https://feishu.example/hook",
+            feishu_send_as_file=True,
+        )
+        mock_get_config.return_value = cfg
+        service = NotificationService()
+        reports_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports"
+        )
+        target = os.path.join(reports_dir, "report_%s.md" % date.today().strftime("%Y%m%d"))
+        existed = os.path.exists(target)
+        before = None
+        if existed:
+            with open(target, encoding="utf-8") as handle:
+                before = handle.read()
+
+        with mock.patch.object(service, "send_feishu_file", return_value=True):
+            result = service.send_with_results(
+                "复盘文档创建成功: https://feishu.cn/docx/XXXX",
+                route_type="report",
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(os.path.exists(target), existed)
+        if existed:
+            with open(target, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), before)
 
     @mock.patch("src.notification.get_config")
     def test_feishu_send_as_file_route_alert_calls_send_to_feishu(self, mock_get_config):
