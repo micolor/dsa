@@ -162,7 +162,19 @@ class ResearchAgent:
                     duration_s=round(time.monotonic() - started_at, 2),
                     timeout_seconds=timeout_seconds,
                 )
-            all_findings.append(finding)
+            # 只收下有内容的 finding。失败的子问题（以及「成功但没产出内容」的）
+            # 同样会走到这里，把它们一并计入会让「一条可用来源都没有」看起来像
+            # 收满了一轮：合成阶段拿到空白的 findings 块仍然照写一份完整报告，
+            # 而 `success=not report.get("error")` 判为成功、`findings_count>0`，
+            # 用户看到的是措辞笃定、无任何来源支撑的研究报告。
+            if str(finding.get("content") or "").strip():
+                all_findings.append(finding)
+            else:
+                logger.warning(
+                    "[ResearchAgent] sub-question produced no usable content: %s (error=%s)",
+                    str(question)[:60],
+                    finding.get("error"),
+                )
 
         # Phase 3: Synthesise
         if self._is_timed_out(started_at, timeout_seconds):
@@ -185,7 +197,13 @@ class ResearchAgent:
                 timeout_seconds=self._remaining_timeout_seconds(started_at, timeout_seconds),
             )
             if all_findings
-            else {"content": "No findings gathered.", "tokens": 0}
+            # 一条可用 finding 都没有：明确回失败，而不是拿空 findings 去让模型
+            # 编一份报告（`success` 取 `not report.get("error")`，这里必须带 error）。
+            else {
+                "content": "No findings gathered.",
+                "tokens": 0,
+                "error": "no_usable_findings",
+            }
         )
         tokens_used += report.get("tokens", 0)
         if report.get("timed_out"):

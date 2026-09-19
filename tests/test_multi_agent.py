@@ -3303,8 +3303,11 @@ class TestResearchAgentFilteredRegistry(unittest.TestCase):
         from src.agent.research import ResearchAgent
 
         agent = ResearchAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        # 子问题结果必须带 content：没有内容的 finding 现在不会被当作可用来源，
+        # 合成阶段根本不会启动（这正是另一组用例覆盖的行为），本用例要验证的是
+        # 「合成本身返回 error 时 success 必须为假」。
         with patch.object(agent, "_decompose_query", return_value={"questions": ["Q1"], "tokens": 3}), \
-             patch.object(agent, "_research_sub_question", return_value={"summary": "done", "tokens": 7}), \
+             patch.object(agent, "_research_sub_question", return_value={"content": "A1", "tokens": 7}), \
              patch.object(agent, "_synthesise_report", return_value={"content": "fallback", "tokens": 5, "error": "boom"}):
             result = agent.research("分析 600519")
 
@@ -4243,6 +4246,73 @@ class TestStrategyEngineE2E(unittest.TestCase):
         self.assertIsNone(result.consensus_opinion)
         # Non-skill opinions preserved
         self.assertEqual(len(result.non_skill_opinions), 2)
+
+
+# ============================================================
+# ResearchAgent: 合成必须以真实 finding 为前提
+# ============================================================
+
+class TestResearchAgentFindingsGate(unittest.TestCase):
+    """子问题全部失败时不得报告成功，也不得凭空合成报告。"""
+
+    @staticmethod
+    def _agent(sub_question_result):
+        from src.agent.research import ResearchAgent
+
+        agent = ResearchAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        agent._decompose_query = lambda *a, **k: {"questions": ["Q1", "Q2", "Q3"], "tokens": 0}
+        agent._research_sub_question = lambda question, *a, **k: dict(
+            sub_question_result, question=question
+        )
+        return agent
+
+    def test_all_sub_questions_failing_returns_failure_without_synthesising(self):
+        agent = self._agent({"content": "", "tokens": 0, "success": False, "error": "provider down"})
+        synthesised = []
+        agent._synthesise_report = lambda *a, **k: synthesised.append(a) or {"content": "编出来的报告"}
+
+        result = agent.research("分析 AI 算力产业链")
+
+        self.assertEqual(synthesised, [])
+        self.assertFalse(result.success)
+        self.assertEqual(result.findings_count, 0)
+        self.assertTrue(result.error)
+
+    def test_partial_success_synthesises_only_from_findings_with_content(self):
+        calls = {"n": 0}
+
+        def _sub_question(question, *a, **k):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                return {"question": question, "content": "找到一条真实来源", "tokens": 1, "success": True}
+            return {"question": question, "content": "", "tokens": 0, "success": False, "error": "provider down"}
+
+        agent = self._agent({"content": "", "tokens": 0, "success": False})
+        agent._research_sub_question = _sub_question
+        captured = {}
+
+        def _synthesise(query, findings, context, timeout_seconds=None):
+            captured["findings"] = list(findings)
+            return {"content": "报告", "tokens": 1}
+
+        agent._synthesise_report = _synthesise
+
+        result = agent.research("分析 AI 算力产业链")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.findings_count, 1)
+        self.assertEqual([f["content"] for f in captured["findings"]], ["找到一条真实来源"])
+
+    def test_content_less_success_is_not_counted_as_a_finding(self):
+        agent = self._agent({"content": "", "tokens": 0, "success": True})
+        synthesised = []
+        agent._synthesise_report = lambda *a, **k: synthesised.append(a) or {"content": "编出来的报告"}
+
+        result = agent.research("分析 AI 算力产业链")
+
+        self.assertEqual(synthesised, [])
+        self.assertFalse(result.success)
+        self.assertEqual(result.findings_count, 0)
 
 
 if __name__ == '__main__':
