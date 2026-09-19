@@ -67,6 +67,8 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
     "get_daily_history": "K线数据获取",
     "analyze_trend": "技术指标分析",
     "get_chip_distribution": "筹码分布分析",
+    "get_capital_flow": "资金流分析",
+    "get_portfolio_snapshot": "持仓快照获取",
     "search_stock_news": "新闻搜索",
     "search_comprehensive_intel": "综合情报搜索",
     "get_market_indices": "市场概览获取",
@@ -79,6 +81,7 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
     "get_skill_backtest_summary": "技能回测概览",
     "get_strategy_backtest_summary": "策略回测概览",
     "get_stock_backtest_summary": "个股回测数据",
+    "propose_alert": "告警提案生成",
 }
 
 
