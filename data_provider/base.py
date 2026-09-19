@@ -2761,9 +2761,15 @@ class DataFetcherManager:
                 logger.debug(f"[{fetcher.name}] 获取所属板块失败: {e}")
                 continue
         boards = boards_result if boards_result is not None else []
-        with self._belong_boards_cache_lock:
-            self._belong_boards_cache[cache_key] = (now_ts, boards)
-            self._prune_belong_boards_cache()
+        if boards:
+            # 只缓存真正拿到的结果。空结果在这里的含义是「所有源都没答上来」或
+            # 「源答了但为空」，与「该股确实没有板块」无法区分；按 24h TTL 缓存
+            # 会让一次限流/网络抖动把关联板块从当天所有报告里抹掉，且数据源恢复
+            # 后也不会再试（命中缓存直接返回空）。与纸面交易的 bar 缓存约定一致：
+            # 空结果不缓存。
+            with self._belong_boards_cache_lock:
+                self._belong_boards_cache[cache_key] = (now_ts, boards)
+                self._prune_belong_boards_cache()
         return boards
 
     @classmethod
