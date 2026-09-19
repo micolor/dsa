@@ -1832,3 +1832,277 @@ def test_desktop_backend_build_scripts_bundle_share_image_assets():
     for relative_path in ("scripts/build-backend.ps1", "scripts/build-backend-macos.sh"):
         content = (root / relative_path).read_text(encoding="utf-8")
         assert "src/assets/share_image" in content
+
+
+# --- 场外基金净值体检卡 -------------------------------------------------------
+#
+# 基金正文曾经被 `_stock_heading_entry` 当成单只股票解析：分享图带个股决策卡的
+# 标题、「评分 /100」「置信度」这些基金没有的信号，而净值、区间收益、持仓、
+# 资产配置、LLM 解读则整块丢失。下面这组用例把基金版式的入口契约固定下来。
+
+FUND_CODE = "006229"
+FUND_NAME = "中欧医疗创新股票A"
+
+
+def _fund_result(fund_llm=None, **profile_overrides):
+    """走真实的基金分析链路构造 AnalysisResult，不手写 dashboard 契约字段。"""
+    from data_provider.fund_fetcher import (
+        FundAssetAllocation,
+        FundHolding,
+        FundProfile,
+        NavRecord,
+    )
+    from src.services.fund_analysis import build_fund_report, map_fund_report_to_report_result
+
+    profile_kwargs = {
+        "code": FUND_CODE,
+        "name": FUND_NAME,
+        "fund_type": "股票型",
+        "nav_history": [
+            NavRecord(date="2026-09-18", unit_nav=1.2345, acc_nav=2.3456, change_pct=0.42)
+        ],
+        "holdings": [
+            FundHolding(rank=1, stock_code="300760", stock_name="迈瑞医疗", pct_of_nav=10.39,
+                        share_count=12.5, market_value=45600.0),
+            FundHolding(rank=2, stock_code="600276", stock_name="恒瑞医药", pct_of_nav=9.12,
+                        share_count=88.0, market_value=41200.0),
+        ],
+        "asset_allocation": FundAssetAllocation(report_date="2026-06-30", stock_pct=88.0,
+                                                bond_pct=0.0, cash_pct=9.5, net_asset=123.4),
+        "return_1m": 0.012,
+        "return_3m": -0.034,
+        "return_6m": 0.056,
+        "return_1y": 0.123,
+        "max_drawdown": -0.152,
+        "annual_volatility": 0.187,
+        "sharpe": 0.85,
+    }
+    profile_kwargs.update(profile_overrides)
+    report = build_fund_report(FundProfile(**profile_kwargs))
+    return map_fund_report_to_report_result(report, report_language="zh", fund_llm=fund_llm)
+
+
+def _fund_llm():
+    return {
+        "holdings_concentration": "前十大重仓占净值约 62%，集中度偏高。",
+        "analysis_summary": "净值波动主要由医药板块 beta 驱动。",
+        "operation_advice": "适合作为行业主题配置的一部分。",
+        "risk_warning": "行业集中度高，政策扰动会放大净值波动。",
+        "sentiment_score": 62,
+    }
+
+
+def _fund_aggregate_markdown(result):
+    """通知汇总版式（「基金体检 (N支)」），分享图直接吃这段正文。"""
+    from src.notification import NotificationService
+
+    notifier = object.__new__(NotificationService)
+    return NotificationService.generate_fund_aggregate(notifier, [result])
+
+
+# 历史单条记录的版式（HistoryService._generate_fund_markdown 的标题与结构）。
+FUND_HISTORY_MARKDOWN = """# 📊 中欧医疗创新股票A (006229) 基金净值体检
+
+> 分析日期: **2026-09-19** | 报告生成时间: 10:00:00
+
+---
+
+| 指标 | 数值 |
+|------|------|
+| 单位净值 | **1.2345** |
+| 风险等级 | **中** |
+
+---
+
+### 🧭 资产配置
+
+| 类别 | 占净值比例 |
+|------|-----------|
+| 股票 | **88.0%** |
+
+---
+"""
+
+
+def test_fund_share_image_uses_fund_layout_and_keeps_nav_metrics():
+    result = _fund_result(fund_llm=_fund_llm())
+    html = build_share_image_html(
+        _fund_aggregate_markdown(result),
+        generated_on=date(2026, 9, 19),
+        structured_payload=result.to_dict(),
+    )
+
+    assert 'class="poster fund"' in html
+    assert "基金净值体检" in html
+    assert '<span class="code">006229</span>' in html
+
+    # 确定性事实：净值 4 位小数、比率转百分比、持仓占净值比例原样展示。
+    assert "净值指标" in html
+    assert "最新净值" in html
+    assert "1.2345" in html
+    assert "风险等级" in html
+    assert "近1年" in html and "12.3%" in html
+    assert "最大回撤" in html and "-15.2%" in html
+    assert "年化波动" in html and "18.7%" in html
+    assert "夏普" in html and "0.85" in html
+    assert "资产配置" in html and "88.0%" in html
+    assert "前十大重仓" in html
+    assert "迈瑞医疗 (300760)" in html and "10.4%" in html
+
+    # LLM 增强层与 Web 卡片同源，未产出时整块不渲染（见下一条用例）。
+    assert "AI 解读" in html
+    assert "持仓集中度" in html
+    assert "综合解读" in html
+    assert "申赎建议" in html
+    assert "风险提示" in html
+    assert "情绪分 62" in html
+
+
+def test_fund_share_image_drops_stock_only_signals():
+    result = _fund_result(fund_llm=_fund_llm())
+    html = build_share_image_html(
+        _fund_aggregate_markdown(result),
+        generated_on=date(2026, 9, 19),
+        structured_payload=result.to_dict(),
+    )
+
+    # 基金只有每日净值、没有盘中买卖点，个股决策卡的信号一律不得出现。
+    assert "个股决策卡" not in html
+    assert "执行计划" not in html
+    assert "止损" not in html
+    assert "理想买入" not in html
+    assert "建仓" not in html
+    assert "仓位" not in html
+    # sentiment_score 对基金是固定中性值，画成「评分 /100」等于凭空造结论。
+    assert "评分" not in html
+    assert "置信度" not in html
+
+
+def test_fund_history_record_share_image_uses_fund_layout():
+    result = _fund_result(fund_llm=_fund_llm())
+    html = build_share_image_html(
+        FUND_HISTORY_MARKDOWN,
+        generated_on=date(2026, 9, 19),
+        structured_payload=result.to_dict(),
+    )
+
+    assert 'class="poster fund"' in html
+    assert "净值指标" in html and "1.2345" in html
+    assert "迈瑞医疗 (300760)" in html
+    assert "AI 解读" in html
+    assert "个股决策卡" not in html
+    assert "止损" not in html
+    assert "评分" not in html
+
+
+def test_fund_share_image_without_payload_renders_markdown_verbatim():
+    # 没有结构化载荷时宁可整段兜底渲染 Markdown，也不能把基金正文丢掉。
+    result = _fund_result(fund_llm=_fund_llm())
+    html = build_share_image_html(
+        _fund_aggregate_markdown(result),
+        generated_on=date(2026, 9, 19),
+    )
+
+    assert 'class="poster fund"' in html
+    assert 'class="report-fallback"' in html
+    assert "夏普 0.85" in html
+    assert "持仓集中度" in html
+    assert "个股决策卡" not in html
+    assert "止损" not in html
+
+
+def test_fund_share_image_omits_llm_block_when_absent():
+    html = build_share_image_html(
+        _fund_aggregate_markdown(_fund_result()),
+        generated_on=date(2026, 9, 19),
+        structured_payload=_fund_result().to_dict(),
+    )
+
+    assert 'class="poster fund"' in html
+    assert "净值指标" in html
+    assert "AI 解读" not in html
+    assert "持仓集中度" not in html
+
+
+def test_multi_fund_aggregate_keeps_generic_poster_and_all_funds():
+    from src.notification import NotificationService
+
+    first = _fund_result(fund_llm=_fund_llm())
+    second = _fund_result(code="110011", name="易方达中小盘混合")
+    notifier = object.__new__(NotificationService)
+    html = build_share_image_html(
+        NotificationService.generate_fund_aggregate(notifier, [first, second]),
+        generated_on=date(2026, 9, 19),
+    )
+
+    # 多只基金不能只画第一只：基金版式要求恰好一条基金标题。
+    assert 'class="poster dashboard"' in html
+    assert FUND_NAME in html
+    assert "易方达中小盘混合" in html
+
+
+def test_stock_report_named_with_fund_stays_stock_poster():
+    html = build_share_image_html(
+        "# 基金重仓股 600519 分析报告\n\n## 核心判断\n\n- 趋势偏多\n",
+        generated_on=date(2026, 9, 19),
+    )
+
+    assert 'class="poster stock"' in html
+    assert "个股决策卡" in html
+    assert "基金净值体检" not in html
+
+
+def test_fund_payload_marker_alone_selects_fund_layout():
+    result = _fund_result(fund_llm=_fund_llm())
+    html = build_share_image_html(
+        f"# {FUND_NAME} ({FUND_CODE})\n\n",
+        generated_on=date(2026, 9, 19),
+        structured_payload=result.to_dict(),
+    )
+
+    assert 'class="poster fund"' in html
+    assert "净值指标" in html
+    assert "1.2345" in html
+
+
+def test_fund_share_image_reports_missing_data_honestly():
+    result = _fund_result(
+        code="009999",
+        name="数据不足基金",
+        nav_history=[],
+        holdings=[],
+        asset_allocation=None,
+        return_1m=None,
+        return_3m=None,
+        return_6m=None,
+        return_1y=None,
+        max_drawdown=None,
+        annual_volatility=None,
+        sharpe=None,
+    )
+    html = build_share_image_html(
+        _fund_aggregate_markdown(result),
+        generated_on=date(2026, 9, 19),
+        structured_payload=result.to_dict(),
+    )
+
+    assert 'class="poster fund"' in html
+    assert "数据不足" in html
+    assert "止损" not in html
+    assert "评分" not in html
+
+
+def test_fund_share_image_english_chrome():
+    result = _fund_result(fund_llm=_fund_llm())
+    payload = dict(result.to_dict(), report_language="en")
+    html = build_share_image_html(
+        _fund_aggregate_markdown(result),
+        generated_on=date(2026, 9, 19),
+        structured_payload=payload,
+    )
+
+    assert 'class="poster fund"' in html
+    assert "NAV Metrics" in html
+    assert "Latest NAV" in html
+    assert "Max Drawdown" in html
+    assert "Top Holdings" in html

@@ -34,6 +34,10 @@ _MARKET_SCOPE_RE = re.compile(
     re.IGNORECASE,
 )
 _DASHBOARD_RE = re.compile(r"(?:决策仪表盘|decision\s+dashboard)", re.IGNORECASE)
+# 场外基金净值体检报告的标题标记。通知汇总用「基金体检」，历史单条报告用
+# 「基金净值体检」（见 `src/notification.py` 与 `HistoryService._generate_fund_markdown`），
+# 两种版式都要认出来，否则基金正文会被当成单只股票渲染。
+_FUND_RE = re.compile(r"(?:基金体检|基金净值体检|净值体检|fund\s+(?:nav\s+)?health\s+check)", re.IGNORECASE)
 _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+?)\s*$", re.MULTILINE)
 _QUOTE_RE = re.compile(r"^\s*>\s+(.+?)\s*$", re.MULTILINE)
 _DATE_RE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b")
@@ -63,6 +67,9 @@ _POSTER_TEXT = {
         "position": "仓位", "entry": "建仓", "risk_control": "风控", "position_advice": "持仓建议",
         "market_signal": "市场信号", "today_conclusion": "今日结论", "breadth": "市场宽度",
         "dimensions": "信号拆解", "leaders": "强势板块", "laggards": "弱势板块",
+        "fund_subtitle": "基金净值体检 · 净值、波动与持仓一图读懂", "fund_metrics": "净值指标",
+        "fund_advice": "净值建议", "fund_trend": "净值走势", "fund_allocation": "资产配置",
+        "fund_holdings": "前十大重仓", "fund_llm": "AI 解读", "llm_score": "情绪分",
         "focus_tag": "关注", "avoid_tag": "回避", "focus": "重点跟踪", "funds": "资金观察",
         "strategy": "明日策略", "risks": "风险提示", "tagline": "让股票研究更简单、更高效",
         "open_source": "开源项目 · GitHub", "xiaohongshu": "小红书",
@@ -80,6 +87,9 @@ _POSTER_TEXT = {
         "position": "Position", "entry": "Entry", "risk_control": "Risk Control", "position_advice": "Position Advice",
         "market_signal": "Market Signal", "today_conclusion": "Conclusion", "breadth": "Market Breadth",
         "dimensions": "Signal Breakdown", "leaders": "Leading Sectors", "laggards": "Lagging Sectors",
+        "fund_subtitle": "Fund NAV health check · NAV, risk, and holdings", "fund_metrics": "NAV Metrics",
+        "fund_advice": "NAV Guidance", "fund_trend": "NAV Trend", "fund_allocation": "Asset Allocation",
+        "fund_holdings": "Top Holdings", "fund_llm": "AI Commentary", "llm_score": "Sentiment",
         "focus_tag": "Watch", "avoid_tag": "Avoid", "focus": "Key Watchlist", "funds": "Fund Flow Watch",
         "strategy": "Next-session Plan", "risks": "Risk Alerts", "tagline": "Make stock research simpler and more efficient",
         "open_source": "Open Source · GitHub", "xiaohongshu": "Xiaohongshu",
@@ -97,6 +107,9 @@ _POSTER_TEXT = {
         "position": "포지션", "entry": "진입", "risk_control": "리스크 관리", "position_advice": "포지션 제안",
         "market_signal": "시장 신호", "today_conclusion": "오늘의 결론", "breadth": "시장 폭",
         "dimensions": "신호 분석", "leaders": "강세 섹터", "laggards": "약세 섹터",
+        "fund_subtitle": "펀드 순자산 점검 · 순자산, 리스크, 보유 종목", "fund_metrics": "순자산 지표",
+        "fund_advice": "순자산 제안", "fund_trend": "순자산 추세", "fund_allocation": "자산 배분",
+        "fund_holdings": "상위 보유 종목", "fund_llm": "AI 해석", "llm_score": "감정 점수",
         "focus_tag": "관찰", "avoid_tag": "회피", "focus": "주요 관찰", "funds": "자금 흐름",
         "strategy": "다음 거래일 전략", "risks": "리스크 경고", "tagline": "주식 리서치를 더 쉽고 효율적으로",
         "open_source": "오픈소스 · GitHub", "xiaohongshu": "샤오홍슈",
@@ -113,6 +126,11 @@ _POSTER_LABELS = {
         "行动窗口": "Action Window", "下次检查": "Next Check", "上涨": "Advancers", "下跌": "Decliners",
         "涨停": "Limit-up", "跌停": "Limit-down", "成交额": "Turnover", "赚钱效应": "Breadth Score",
         "指数强度": "Index Strength", "涨停结构": "Limit Structure",
+        "最新净值": "Latest NAV", "近1月": "1M Return", "近3月": "3M Return", "近6月": "6M Return",
+        "近1年": "1Y Return", "最大回撤": "Max Drawdown", "年化波动": "Annual Volatility",
+        "夏普": "Sharpe", "股票": "Stock", "债券": "Bond", "现金": "Cash", "净资产": "Net Assets",
+        "持仓集中度": "Holdings Concentration", "综合解读": "Overall View",
+        "申赎建议": "Subscribe/Redeem", "风险提示": "Risk Alerts",
     },
     "ko": {
         "当前/收盘": "현재/종가", "现价": "현재가", "涨跌幅": "등락률", "涨跌": "등락",
@@ -122,6 +140,11 @@ _POSTER_LABELS = {
         "行动窗口": "행동 구간", "下次检查": "다음 점검", "上涨": "상승", "下跌": "하락",
         "涨停": "상한가", "跌停": "하한가", "成交额": "거래대금", "赚钱效应": "시장 폭 점수",
         "指数强度": "지수 강도", "涨停结构": "상한가 구조",
+        "最新净值": "최신 순자산", "近1月": "1개월 수익률", "近3月": "3개월 수익률",
+        "近6月": "6개월 수익률", "近1年": "1년 수익률", "最大回撤": "최대 낙폭",
+        "年化波动": "연간 변동성", "夏普": "샤프 지수", "股票": "주식", "债券": "채권",
+        "现金": "현금", "净资产": "순자산", "持仓集中度": "보유 집중도",
+        "综合解读": "종합 해석", "申赎建议": "가입/환매 제안", "风险提示": "리스크 경고",
     },
 }
 _MARKET_LABEL_PATTERNS = (
@@ -224,6 +247,28 @@ class MarketPoster:
     catalysts: list[str] = field(default_factory=list)
     plan: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FundPoster:
+    """场外基金净值体检卡的数据。
+
+    字段只承载**确定性事实与已有解读**：净值、区间收益、回撤、波动、夏普、
+    持仓、资产配置，以及 LLM 增强层给出的解读。这里不产生任何股票式信号
+    （评分 / 买卖点 / 止损 / 仓位），因为基金没有盘中买卖点；``sentiment_score``
+    对基金是固定中性值，画成「评分 /100」会凭空造出一个投资结论。
+    """
+
+    title: str
+    language: str = "zh"
+    code: str = ""
+    trend: str = ""
+    advice: str = ""
+    metrics: list[tuple[str, str, str]] = field(default_factory=list)
+    allocation: list[tuple[str, str, str]] = field(default_factory=list)
+    holdings: list[tuple[str, str, str]] = field(default_factory=list)
+    llm: list[tuple[str, str]] = field(default_factory=list)
+    llm_score: str = ""
 
 
 @dataclass
@@ -889,6 +934,24 @@ def _is_market_review_title(title: str) -> bool:
     return bool(_MARKET_RE.search(_plain(title)))
 
 
+def _is_fund_report(
+    markdown_text: str,
+    structured_payload: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """判定这是否是一份场外基金净值体检报告。
+
+    ``dashboard.report_type == "fund"`` 是 ``pipeline`` / ``notification`` /
+    ``HistoryService`` 共用的权威标记，有载荷时以它为准；只有 Markdown 的
+    调用方（调试、外部集成）再退回标题识别。
+    """
+
+    dashboard = _nested_mapping(structured_payload, "dashboard")
+    if dashboard.get("report_type") == "fund":
+        return True
+    first_title = next((title for title, _body, _level in _extract_sections(markdown_text)), "")
+    return bool(_FUND_RE.search(_plain(first_title)))
+
+
 def _has_market_scope(title: str) -> bool:
     return bool(_MARKET_SCOPE_RE.search(_plain(title)))
 
@@ -1241,6 +1304,121 @@ def _stock_data_from_payload(
     poster.position_size = ""
     poster.entry_plan = ""
     poster.risk_control = ""
+    return poster
+
+
+def _fund_data(markdown_text: str) -> FundPoster:
+    """从 Markdown 还原基金卡的标题与代码。
+
+    净值指标 / 风险等级 / 持仓 / 资产配置 / LLM 解读一律留给结构化载荷：Markdown
+    是这些事实的渲染结果，反向解析等于给同一份数据再维护一套解析器，上游文案
+    一改就会静默漂移。没有载荷时 ``_fund_body`` 会把原始 Markdown 整段兜底渲染
+    出来，信息不会丢——只把正文里读得到的建议/走势再抄一遍反而会重复展示。
+    """
+
+    poster = FundPoster(title="基金净值体检")
+    headings = _stock_headings(markdown_text)
+    if headings:
+        poster.title, poster.code = headings[0]
+    else:
+        first_title = next((title for title, _body, _level in _extract_sections(markdown_text)), "")
+        entry = _stock_heading_entry(first_title)
+        if entry:
+            poster.title, poster.code = entry
+        else:
+            poster.title = _plain(first_title) or poster.title
+    poster.language = _poster_language(markdown_text)
+    return poster
+
+
+def _fund_data_from_payload(
+    payload: Mapping[str, Any],
+    markdown_text: str,
+) -> FundPoster:
+    """优先使用分析 JSON 契约，Markdown 仅作为标题的字段兜底。"""
+
+    poster = _fund_data(markdown_text)
+    poster.language = _poster_language(markdown_text, payload)
+    dashboard = _nested_mapping(payload, "dashboard")
+
+    poster.title = _clean_value(payload.get("name"), limit=30) or poster.title
+    poster.code = _clean_value(payload.get("code"), limit=16) or poster.code
+    poster.advice = _clean_value(payload.get("operation_advice"), limit=24) or poster.advice
+    poster.trend = _clean_value(payload.get("trend_prediction"), limit=16) or poster.trend
+    summary = _plain(payload.get("analysis_summary"))
+
+    # 颜色约定跟随标的所在市场（A 股/场外基金红涨绿跌），与个股卡一致。
+    up_tone = _stock_positive_tone(poster.code)
+    down_tone = _opposite_color(up_tone)
+
+    # 风险等级复用 ``build_fund_report`` 写进 summary 的既有结论，而不是在模板里
+    # 再算一遍 ``_risk_grade``：同一套阈值散落在后端、Web 卡片和海报三处，
+    # 迟早会出现同一只基金两个风险等级。
+    risk_match = re.search(r"风险等级\s*[:：]\s*([高中低]|数据不足)", summary)
+    metrics = _nested_mapping(dashboard, "metrics")
+    nav = _nav_text(dashboard.get("latest_nav"))
+    cards: list[tuple[str, str, str]] = []
+    if nav:
+        cards.append(("最新净值", nav, "secondary"))
+    if risk_match:
+        cards.append(("风险等级", risk_match.group(1), _tone_for_fund_risk(risk_match.group(1))))
+    for label, key in (
+        ("近1月", "return_1m"),
+        ("近3月", "return_3m"),
+        ("近6月", "return_6m"),
+        ("近1年", "return_1y"),
+        ("最大回撤", "max_drawdown"),
+    ):
+        text = _percent_text(metrics.get(key))
+        if text:
+            cards.append((label, text, _signed_tone(metrics.get(key), up_tone, down_tone)))
+    # 波动率没有方向：按正负上色会把「波动大」渲染成「涨得好」，所以用中性色。
+    volatility = _percent_text(metrics.get("annual_volatility"))
+    if volatility:
+        cards.append(("年化波动", volatility, "secondary"))
+    sharpe = _number_text(metrics.get("sharpe"))
+    if sharpe:
+        cards.append(("夏普", sharpe, _signed_tone(metrics.get("sharpe"), up_tone, down_tone)))
+    poster.metrics = cards
+
+    allocation = _nested_mapping(dashboard, "asset_allocation")
+    alloc_cards: list[tuple[str, str, str]] = []
+    for label, key in (("股票", "stock_pct"), ("债券", "bond_pct"), ("现金", "cash_pct")):
+        text = _percent_text(allocation.get(key), ratio=False)
+        if text:
+            alloc_cards.append((label, text, "secondary"))
+    net_asset = _number_text(allocation.get("net_asset"), suffix=" 亿")
+    if net_asset:
+        alloc_cards.append(("净资产", net_asset, "secondary"))
+    poster.allocation = alloc_cards
+
+    holdings = dashboard.get("holdings")
+    if isinstance(holdings, list):
+        rows: list[tuple[str, str, str]] = []
+        for item in holdings[:10]:
+            if not isinstance(item, Mapping):
+                continue
+            stock_name = _clean_value(item.get("stock_name"), limit=18)
+            stock_code = _clean_value(item.get("stock_code"), limit=12)
+            label = f"{stock_name} ({stock_code})" if stock_name and stock_code else (stock_name or stock_code)
+            if not label:
+                continue
+            rows.append((str(item.get("rank") or len(rows) + 1), label, _percent_text(item.get("pct_of_nav"), ratio=False)))
+        poster.holdings = rows
+
+    # LLM 增强层（可选）：字段与通知正文、Web 卡片同源，未产出时整块不渲染。
+    llm = _nested_mapping(dashboard, "llm")
+    poster.llm_score = _number_text(llm.get("sentiment_score"))
+    poster.llm = [
+        (label, text)
+        for label, key in (
+            ("持仓集中度", "holdings_concentration"),
+            ("综合解读", "analysis_summary"),
+            ("申赎建议", "operation_advice"),
+            ("风险提示", "risk_warning"),
+        )
+        if (text := _compact_text(llm.get(key), limit=120))
+    ]
     return poster
 
 
@@ -1739,6 +1917,63 @@ def _tone_for_trend(trend: str) -> str:
     return "primary"
 
 
+def _tone_for_fund_trend(trend: str) -> str:
+    """基金走势用「上行/震荡/下行」，与股票 LLM 的看多/看空用词不同。"""
+
+    if "上行" in trend:
+        return "positive"
+    if "下行" in trend:
+        return "negative"
+    return "primary"
+
+
+def _tone_for_fund_risk(risk: str) -> str:
+    if risk == "高":
+        return "negative"
+    if risk == "中":
+        return "warning"
+    if risk == "低":
+        return "positive"
+    return "secondary"
+
+
+def _signed_tone(value: object, up_tone: str, down_tone: str) -> str:
+    try:
+        return up_tone if float(value) >= 0 else down_tone
+    except (TypeError, ValueError):
+        return "secondary"
+
+
+def _nav_text(value: object) -> str:
+    """单位净值是净值价格，保留四位小数（与 ``HistoryService._fund_nav`` 一致）。"""
+
+    if value is None or isinstance(value, bool):
+        return ""
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return _clean_value(value, limit=18)
+
+
+def _percent_text(value: object, *, ratio: bool = True) -> str:
+    """渲染百分比指标。
+
+    ``ratio=True``（默认）表示入参是小数比例（0.1234 → 12.34%），用于
+    ``dashboard.metrics``；``ratio=False`` 表示入参本身已是百分数
+    （88.0 → 88.0%），用于 ``asset_allocation`` 与持仓占比。
+    与 ``notification`` / ``history_service`` 一致：非数值时原样回显，
+    不把非法值伪装成一个看起来正常的百分比。
+    """
+
+    if value is None or isinstance(value, bool):
+        return ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _clean_value(value, limit=18)
+    return f"{number * 100:.1f}%" if ratio else f"{number:.1f}%"
+
+
 def _stock_positive_tone(code: str) -> str:
     normalized = (code or "").strip().upper()
     red_up_market = bool(
@@ -1829,6 +2064,65 @@ def _stock_body(data: StockPoster, fallback_html: str) -> str:
     structured = any((signal_row, conclusion, snapshot, sniper, technical, watch, insights, positions))
     fallback = f'<section class="report-fallback"><article class="report-content">{fallback_html}</article></section>' if not structured else ""
     return f"{signal_row}{conclusion}{snapshot}{sniper}{technical}{watch}{insights}{positions}{fallback}"
+
+
+def _fund_body(data: FundPoster, fallback_html: str) -> str:
+    """场外基金净值体检卡。
+
+    只呈现净值事实与既有解读，不出现个股卡的信号行（评分 / 买卖点 / 止损 / 仓位）：
+    基金没有盘中买卖点，``sentiment_score`` 对基金又是固定中性值，照搬个股版式
+    会凭空造出一个投资结论。没有任何结构化字段时退回完整 Markdown，避免为一份
+    载荷缺失的报告渲染出一张几乎空白的卡。
+    """
+
+    language = data.language
+    metrics = _section_html(
+        _poster_text(language, "fund_metrics"),
+        "▥",
+        f'<div class="fund-metric-grid">{_metric_cards(data.metrics, language=language)}</div>',
+    ) if data.metrics else ""
+    guidance_content = ""
+    if data.advice:
+        guidance_content += f'<div class="conclusion">{_escape(data.advice)}</div>'
+    if data.trend:
+        guidance_content += (
+            '<div class="position-box"><div class="position-row">'
+            f'<span class="pill {_tone_for_fund_trend(data.trend)}">{_escape(_poster_text(language, "fund_trend"))}</span>'
+            f'<p>{_escape(data.trend)}</p></div></div>'
+        )
+    guidance = (
+        _section_html(_poster_text(language, "fund_advice"), "◎", guidance_content)
+        if guidance_content else ""
+    )
+    allocation = _section_html(
+        _poster_text(language, "fund_allocation"),
+        "◫",
+        f'<div class="metric-grid">{_metric_cards(data.allocation, language=language)}</div>',
+    ) if data.allocation else ""
+    holding_rows = "".join(
+        f'<div class="ranking-row"><b>{_escape(rank)}</b><span>{_escape(label)}</span>'
+        f'<strong>{_escape(value)}</strong></div>'
+        for rank, label, value in data.holdings
+    )
+    holdings = (
+        _section_html(_poster_text(language, "fund_holdings"), "◆", f'<div class="ranking">{holding_rows}</div>')
+        if holding_rows else ""
+    )
+    llm_cards = "".join(
+        f'<div class="fund-llm-card"><span>{_escape(_poster_label(language, label))}</span>'
+        f'<p>{_escape(value)}</p></div>'
+        for label, value in data.llm
+    )
+    llm_title = _poster_text(language, "fund_llm")
+    if data.llm_score:
+        llm_title = f"{llm_title}（{_poster_text(language, 'llm_score')} {data.llm_score}）"
+    llm = (
+        _section_html(llm_title, "✦", f'<div class="fund-llm-grid">{llm_cards}</div>')
+        if llm_cards else ""
+    )
+    structured = any((metrics, guidance, allocation, holdings, llm))
+    fallback = f'<section class="report-fallback"><article class="report-content">{fallback_html}</article></section>' if not structured else ""
+    return f"{metrics}{guidance}{allocation}{holdings}{llm}{fallback}"
 
 
 def _market_body(data: MarketPoster, fallback_html: str, markdown_text: str) -> str:
@@ -2043,7 +2337,10 @@ def build_share_image_html(
         for title, _body, level in candidate_market_titles
     )
     is_single_stock = len(stock_headings) == 1
-    report_kind = "market" if is_market else "stock" if is_single_stock else "dashboard"
+    # 基金必须恰好一条：多只基金的汇总正文（「基金体检 (N支)」）仍按多股报告
+    # 兜底渲染，避免把第一只基金当成整份报告、丢掉后面几支。
+    is_fund = is_single_stock and _is_fund_report(markdown_text, structured_payload)
+    report_kind = "market" if is_market else "fund" if is_fund else "stock" if is_single_stock else "dashboard"
 
     body_markdown = _HEADING_RE.sub("", markdown_text, count=1).strip()
     fallback_html = _render_markdown_fragment(body_markdown)
@@ -2068,6 +2365,16 @@ def build_share_image_html(
             language = data.language
             subtitle = data.summary or _poster_text(language, "market_subtitle")
             content = _market_body(data, fallback_html, markdown_text)
+    elif report_kind == "fund":
+        data = (
+            _fund_data_from_payload(structured_payload, markdown_text)
+            if isinstance(structured_payload, Mapping)
+            else _fund_data(markdown_text)
+        )
+        title = data.title
+        language = data.language
+        subtitle = _poster_text(language, "fund_subtitle")
+        content = _fund_body(data, fallback_html)
     elif report_kind == "stock":
         data = (
             _stock_data_from_payload(structured_payload, markdown_text, generated)
@@ -2111,8 +2418,8 @@ def build_share_image_html(
     .signal-row {{ display:table; width:100%; margin:0 0 26px; border-spacing:14px 0; table-layout:fixed; }} .signal-row>div {{ display:table-cell; height:88px; padding:14px 20px; border:1px solid #cad8ec; border-radius:16px; vertical-align:middle; background:rgba(255,255,255,.92); }} .signal-row .action-chip {{ width:24%; color:#fff; text-align:center; font-size:38px; font-weight:850; background:#1974ed; box-shadow:0 10px 24px rgba(25,116,237,.22); }} .signal-row .action-chip.positive{{background:linear-gradient(135deg,#118a55,#19b66f)}} .signal-row .action-chip.negative{{background:linear-gradient(135deg,#e63b45,#ff5a52)}} .signal-score span,.signal-trend span{{margin-right:14px;font-weight:750}} .signal-score strong{{color:#0da15d;font-size:41px}} .signal-score.warning strong{{color:#f59e0b}} .signal-score.negative strong{{color:#ed343d}} .signal-score small{{color:#53627b;font-size:20px}} .signal-trend strong{{color:#1768e8;font-size:30px}} .signal-trend>small{{display:block;margin-top:3px;color:#64748b;font-size:15px}} .signal-trend.positive strong{{color:#0a9c58}} .signal-trend.negative strong{{color:#ed343d}}
     .poster-section {{ margin:0 10px 25px; }} .poster-section h2 {{ margin:0 0 12px; font-size:29px; line-height:1.3; }} .poster-section h2 b {{ display:inline-block; width:34px; color:#176ff2; font-family:Arial,sans-serif; }}
     .conclusion {{ padding:16px 24px; border:1.5px solid #72a8ff; border-radius:14px; color:#13294e; background:linear-gradient(90deg,#f9fcff,#eff6ff); font-size:25px; font-weight:600; }}
-    .metric-grid {{ display:table; width:100%; border-spacing:12px 0; table-layout:fixed; }} .metric {{ display:table-cell; height:112px; padding:14px 12px; border:1px solid #d0dced; border-radius:16px; text-align:center; vertical-align:middle; background:rgba(255,255,255,.92); }} .metric span {{ display:block; margin-bottom:5px; color:#233653; font-weight:700; }} .metric strong {{ display:block; color:#10254b; font-size:31px; line-height:1.25; overflow-wrap:break-word; word-break:normal; }} .metric.primary strong{{color:#1768e8}} .metric.up strong,.metric.positive strong,.metric.buy strong,.metric.green strong{{color:#0a9c58}} .metric.down strong,.metric.negative strong,.metric.stop strong,.metric.red strong{{color:#ed343d}} .metric.hot strong{{color:#ff4a36}} .metric.secondary strong{{color:#1768e8}} .metric.target strong{{color:#ff8a00}} .sniper-grid .metric{{height:112px}} .sniper-grid .metric strong{{font-size:29px}} .technical-grid .metric strong{{font-size:26px}}
-    .watch-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}} .watch-card{{min-height:78px;padding:12px 16px;border:1px solid #d2deef;border-left:4px solid #1768e8;border-radius:13px;background:linear-gradient(145deg,#f7faff,#fff)}} .watch-card.warning{{border-left-color:#f59e0b}} .watch-card.secondary{{border-left-color:#6d5dfc}} .watch-card span{{display:block;color:#52647f;font-size:16px;font-weight:750}} .watch-card p{{margin:4px 0 0;color:#152a4d;font-size:18px;font-weight:650;line-height:1.35}} .two-column {{ display:table; width:100%; border-spacing:12px 0; table-layout:fixed; }} .insight {{ display:table-cell; width:50%; padding:15px 20px; border:1px solid #d5e1f0; border-radius:15px; background:#fff; vertical-align:top; }} .insight.positive{{background:linear-gradient(145deg,#f1fff7,#fff)}} .insight.negative{{background:linear-gradient(145deg,#fff4f4,#fff)}} .insight h3{{margin:0 0 6px;color:#0a9c58;font-size:23px}} .insight.negative h3{{color:#ed343d}} .insight ul{{font-size:19px}} ul{{margin:4px 0;padding-left:25px}} li{{margin:5px 0}}
+    .metric-grid {{ display:table; width:100%; border-spacing:12px 0; table-layout:fixed; }} .metric {{ display:table-cell; height:112px; padding:14px 12px; border:1px solid #d0dced; border-radius:16px; text-align:center; vertical-align:middle; background:rgba(255,255,255,.92); }} .metric span {{ display:block; margin-bottom:5px; color:#233653; font-weight:700; }} .metric strong {{ display:block; color:#10254b; font-size:31px; line-height:1.25; overflow-wrap:break-word; word-break:normal; }} .metric.primary strong{{color:#1768e8}} .metric.up strong,.metric.positive strong,.metric.buy strong,.metric.green strong{{color:#0a9c58}} .metric.down strong,.metric.negative strong,.metric.stop strong,.metric.red strong{{color:#ed343d}} .metric.hot strong{{color:#ff4a36}} .metric.warning strong{{color:#f59e0b}} .metric.secondary strong{{color:#1768e8}} .metric.target strong{{color:#ff8a00}} .sniper-grid .metric{{height:112px}} .sniper-grid .metric strong{{font-size:29px}} .technical-grid .metric strong{{font-size:26px}}
+    .watch-grid,.fund-llm-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}} .watch-card,.fund-llm-card{{min-height:78px;padding:12px 16px;border:1px solid #d2deef;border-left:4px solid #1768e8;border-radius:13px;background:linear-gradient(145deg,#f7faff,#fff)}} .watch-card.warning,.fund-llm-card.warning{{border-left-color:#f59e0b}} .watch-card.secondary,.fund-llm-card.secondary{{border-left-color:#6d5dfc}} .watch-card span,.fund-llm-card span{{display:block;color:#52647f;font-size:16px;font-weight:750}} .watch-card p,.fund-llm-card p{{margin:4px 0 0;color:#152a4d;font-size:18px;font-weight:650;line-height:1.35}} .fund-metric-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}} .fund-metric-grid .metric{{display:block}} .two-column {{ display:table; width:100%; border-spacing:12px 0; table-layout:fixed; }} .insight {{ display:table-cell; width:50%; padding:15px 20px; border:1px solid #d5e1f0; border-radius:15px; background:#fff; vertical-align:top; }} .insight.positive{{background:linear-gradient(145deg,#f1fff7,#fff)}} .insight.negative{{background:linear-gradient(145deg,#fff4f4,#fff)}} .insight h3{{margin:0 0 6px;color:#0a9c58;font-size:23px}} .insight.negative h3{{color:#ed343d}} .insight ul{{font-size:19px}} ul{{margin:4px 0;padding-left:25px}} li{{margin:5px 0}}
     .position-box {{ overflow:hidden; border:1px solid #d5e1f0; border-radius:15px; background:#fff; }} .position-row {{ display:table; width:100%; padding:10px 18px; border-bottom:1px solid #e5ecf5; }} .position-row:last-child{{border:0}} .position-row .pill,.position-row p{{display:table-cell;vertical-align:middle}} .position-row .pill{{width:92px;padding:5px 10px;border-radius:8px;color:#fff;text-align:center;font-size:18px;font-weight:750;background:#357dea}} .position-row .pill.warning{{background:#f2a20c}} .position-row .pill.positive{{background:#13a365}} .position-row .pill.negative{{background:#eb3e47}} .position-row p{{margin:0;padding-left:16px}}
     .market-signal {{ display:table; width:calc(100% - 20px); min-height:154px; margin:0 10px 24px; padding:20px 27px; border:1px solid #bfd4f4; border-radius:22px; background:linear-gradient(135deg,#fff 0%,#f1f7ff 58%,#ecfff6 100%); box-shadow:0 12px 34px rgba(18,71,153,.08); table-layout:fixed; }} .signal-main,.market-label,.signal-guidance{{display:table-cell;vertical-align:middle}} .signal-main{{width:25%}} .market-signal span{{display:block;font-weight:750}} .market-signal strong{{color:#1768e8;font-size:74px;line-height:1.05}} .market-signal small{{font-size:30px}} .market-label{{width:19%;padding:9px 12px;border:1px solid #23ad69;border-radius:10px;color:#0d9958;text-align:center;font-size:23px;font-weight:800;background:#f1fff7}} .signal-guidance{{width:56%;padding-left:28px;color:#233653}} .signal-guidance span{{color:#1768e8;font-size:18px;letter-spacing:1px}} .signal-guidance p{{margin:6px 0 0;font-size:23px;font-weight:700;line-height:1.45}}
     .index-grid {{ display:table; width:100%; margin:0 0 24px; border-spacing:10px 0; table-layout:fixed; }} .index-card{{display:table-cell;padding:16px 18px;border:1px solid #d0dced;border-radius:18px;background:linear-gradient(160deg,#fff,#f6f9ff);box-shadow:0 8px 22px rgba(25,78,153,.05)}} .index-card span,.index-card small{{display:block}} .index-card span{{font-weight:750}} .index-card strong{{display:block;margin:8px 0 0;font-size:35px}} .index-card strong.red{{color:#ed3f36}} .index-card strong.green{{color:#0a9c58}} .index-card small{{color:#3d506f;font-size:19px}}
@@ -2125,7 +2432,7 @@ def build_share_image_html(
 <body>
   <main class="poster {report_kind}">
     <header class="poster-header"><div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>DSA</strong><em>|</em> {_escape(_poster_text(language, "brand"))}</div><div class="meta"><span class="date-chip">{_escape(stamp)}</span></div></header>
-    <section class="hero"><h1>{_escape(title)}{f'<span class="code">{_escape(data.code)}</span>' if report_kind == 'stock' and data.code else ''}</h1><p>{_escape(subtitle)}</p></section>
+    <section class="hero"><h1>{_escape(title)}{f'<span class="code">{_escape(data.code)}</span>' if report_kind in ('stock', 'fund') and data.code else ''}</h1><p>{_escape(subtitle)}</p></section>
     {content}
     {_footer(poster_branding, source_line, language)}
   </main>

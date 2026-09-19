@@ -1,6 +1,6 @@
 # 分享图片模板与数据填充
 
-分享图片用于把个股分析和市场复盘转换为适合社交平台传播的 1080px 长图。个股和大盘使用两套独立的信息结构，但共用 DSA 品牌、仓库标识 `ZhuLinsen/daily_stock_analysis` 和风险声明。GitHub 区不放二维码；小红书区域由部署配置决定，未配置时整块隐藏，避免 fork 或私有部署默认宣传维护者账号。
+分享图片用于把个股分析、市场复盘和场外基金净值体检转换为适合社交平台传播的 1080px 长图。个股、大盘和基金使用三套独立的信息结构，但共用 DSA 品牌、仓库标识 `ZhuLinsen/daily_stock_analysis` 和风险声明。GitHub 区不放二维码；小红书区域由部署配置决定，未配置时整块隐藏，避免 fork 或私有部署默认宣传维护者账号。
 
 ## 运行时如何填充
 
@@ -17,6 +17,12 @@
   -> MarketAnalyzer 生成 market_review_payload + 稳定 Markdown
   -> share_image 优先读取 payload，Markdown 兼容回退
   -> 市场复盘卡 HTML
+  -> wkhtmltoimage / markdown-to-file / Playwright 输出 PNG
+
+场外基金 AnalysisResult（dashboard.report_type == "fund"）
+  -> AnalysisResult.to_dict() 结构化 JSON + 通知/历史版式 Markdown
+  -> share_image 优先读取 JSON，Markdown 整段兜底渲染
+  -> 基金净值体检卡 HTML
   -> wkhtmltoimage / markdown-to-file / Playwright 输出 PNG
 ```
 
@@ -64,6 +70,22 @@ npx playwright install chromium
 | 持仓建议 | `core_conclusion.position_advice` | 只区分未持仓和已持仓，仓位、建仓、风控长文保留在完整报告 |
 
 模板支持项目当前的中文、英文和韩文报告标签，海报栏目、指标标签和底部声明跟随报告语言。一个“决策仪表盘”只有一只股票时会自动使用个股卡；包含多只股票时保留多股报告布局，避免错误地把第一只股票当成整份报告。`强烈买入`、`Strong Buy` 等复合动作会保留完整动作标签。
+
+## 基金卡字段映射
+
+场外基金走独立的“基金净值体检卡”版式。判据是 `dashboard.report_type == "fund"`（与 `pipeline.py`、`notification`、`HistoryService` 共用的同一个标记），或正文首标题命中“基金体检 / 基金净值体检”；**且**正文里恰好只有一条基金标题——多只基金的汇总正文（`基金体检 (N支)`）仍走多股报告布局，否则会丢掉第 2 只之后的基金。基金卡不产生任何股票式信号：标题是“基金净值体检”，不渲染“评分 / 100”“置信度”这类个股卡的框架性结论。
+
+| 图片区域 | 项目字段 / 生成来源 | 填充规则 |
+| --- | --- | --- |
+| 基金名称、代码 | `AnalysisResult.name`、`AnalysisResult.code` | 直接读取结构化字段，Markdown 标题仅作回退 |
+| 净值指标 | `dashboard.latest_nav`、`dashboard.metrics` | 单位净值 4 位小数（与 `HistoryService._fund_nav` 一致）；`return_*` / `max_drawdown` 为比率，×100 后保留 1 位小数；`annual_volatility` 没有方向，固定用中性色，不按正负上色 |
+| 风险等级 | 正文 summary 里的“风险等级:中/高/低/数据不足” | 复用 `build_fund_report` 已写下的既有结论，不在模板里重算阈值；`中` 用警示色，其余按高低取正负色 |
+| 净值建议 | `operation_advice`、`trend_prediction` | 申赎倾向与走势各一行，不换算成买卖点 |
+| 资产配置 | `dashboard.asset_allocation` | `stock_pct` / `bond_pct` / `cash_pct` / `net_asset` 已是百分比或亿元，不再 ×100 |
+| 前十大重仓 | `dashboard.holdings` | 最多 10 行，`名称 (代码)` + `pct_of_nav`（已是百分比） |
+| AI 解读 | `dashboard.llm` | 持仓集中度 / 综合解读 / 申赎建议 / 风险提示，与通知正文、历史 Markdown、Web 卡片同源；未产出时整块不渲染 |
+
+没有结构化 payload 时（例如直接喂一段 Markdown 调试），基金卡把原始 Markdown 整段兜底渲染出来，不做反向解析——净值、回撤这些事实由 `build_fund_report` 确定性算出，在模板里再解析一遍等于维护第二套会漂移的契约。
 
 ## 大盘卡字段映射
 
