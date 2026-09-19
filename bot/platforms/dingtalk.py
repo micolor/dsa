@@ -53,23 +53,31 @@ class DingtalkPlatform(BotPlatform):
     def verify_request(self, headers: Dict[str, str], body: bytes) -> bool:
         """
         验证钉钉请求签名
-        
+
         钉钉签名算法：
         1. 获取 timestamp 和 sign
         2. 计算：base64(hmac_sha256(timestamp + "\n" + app_secret))
         3. 比对签名
+
+        验证失败一律拒绝（fail-closed）：未配置 app_secret、或请求缺少
+        timestamp/sign 都返回 False，与 Discord 适配器一致。此前这两种情况
+        直接放行，等于「没有密钥就不校验」——任何知道回调地址的人都能驱动
+        机器人。钉钉的 `handle_challenge` 恒返回 None，URL 验证不经过这里，
+        因此收紧不影响回调地址的首次校验。
         """
         if not self._app_secret:
-            logger.warning("[DingTalk] 未配置 app_secret，跳过签名验证")
-            return True
-        
-        timestamp = headers.get('timestamp', '')
-        sign = headers.get('sign', '')
-        
+            logger.warning("[DingTalk] 未配置 app_secret，拒绝请求")
+            return False
+
+        # HTTP 头名大小写不敏感，先归一化，避免合法的签名请求被误判为缺少签名
+        normalized_headers = {str(key).lower(): value for key, value in headers.items()}
+        timestamp = normalized_headers.get('timestamp', '')
+        sign = normalized_headers.get('sign', '')
+
         if not timestamp or not sign:
-            logger.warning("[DingTalk] 缺少签名参数")
-            return True  # 可能是不需要签名的请求
-        
+            logger.warning("[DingTalk] 缺少 timestamp/sign，拒绝请求")
+            return False
+
         # 验证时间戳（1小时内有效）
         try:
             request_time = int(timestamp)

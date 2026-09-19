@@ -215,6 +215,18 @@ async def dingtalk_webhook(request: Request):
     return handle_dingtalk_webhook(headers, body)
 ```
 
+### DingTalk callback signature verification
+
+`DingtalkPlatform.verify_request` **fails closed**: a missing `dingtalk_app_secret`, or a
+request without `timestamp` / `sign` headers, is rejected outright (`handle_webhook` returns
+403) — the same contract as the Discord adapter. So before wiring up the DingTalk callback you
+must set `DINGTALK_APP_SECRET` and turn on signing in the DingTalk robot; otherwise every
+callback is rejected. A timestamp outside the 1-hour window, or a non-numeric one, is rejected
+too, and header names are matched case-insensitively per the HTTP spec.
+
+DingTalk's `handle_challenge` always returns `None` (DingTalk has no URL-verification
+handshake), so these checks do not affect the callback URL's initial availability check.
+
 ---
 
 ## 7. Configuration

@@ -224,15 +224,36 @@ class CommandDispatcher:
 
 ## 六、Webhook 路由
 
-在 [api/v1/router.py](../api/v1/router.py) 中注册路由：
+各平台的 handler 函数都在 `bot/handler.py`。这些路由**尚未挂载**到 FastAPI 应用，需要自行接入。
+
+| 路由 | 方法 | 状态 | 说明 |
+| --- | --- | --- | --- |
+| `/bot/dingtalk` | POST | **可用** | `DingtalkPlatform` 已登记在 `ALL_PLATFORMS` |
+| `/bot/feishu` | POST | 仅 Stream | 用 `feishu_stream.py`；`ALL_PLATFORMS` 里没有 Webhook 适配器 |
+| `/bot/wecom` | POST | 未实现 | 有 handler，无平台适配器 |
+| `/bot/telegram` | POST | 未实现 | 有 handler，无平台适配器 |
+
+在 FastAPI 应用里挂载钉钉 Webhook：
 
 ```python
-# Webhook 路由
-/bot/feishu      # POST - 飞书事件回调
-/bot/dingtalk    # POST - 钉钉事件回调
-/bot/wecom       # POST - 企业微信事件回调 （开发中）
-/bot/telegram    # POST - Telegram 更新回调 （开发中）
+from bot.handler import handle_dingtalk_webhook
+
+@app.post("/bot/dingtalk")
+async def dingtalk_webhook(request: Request):
+    headers = dict(request.headers)
+    body = await request.body()
+    return handle_dingtalk_webhook(headers, body)
 ```
+
+### 钉钉回调的签名校验
+
+`DingtalkPlatform.verify_request` **fail-closed**：未配置 `dingtalk_app_secret`、或请求缺少
+`timestamp` / `sign` 头，都直接拒绝（`handle_webhook` 返回 403），与 Discord 适配器一致。
+也就是说，接入钉钉回调前必须配置 `DINGTALK_APP_SECRET`，并让钉钉机器人开启加签，否则回调一律
+403。`timestamp` 超出 1 小时窗口或非数字同样拒绝；请求头名按 HTTP 规范大小写不敏感匹配。
+
+钉钉的 `handle_challenge` 恒返回 `None`（钉钉不用 URL 验证握手），因此这些校验不影响回调地址的
+首次可用性检查。
 
 ## 配置
 
