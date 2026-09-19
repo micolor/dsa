@@ -201,7 +201,7 @@ def eastmoney_patch():
         # 处理 Headers：确保不破坏业务代码传入的 headers。必须复制一份再改——
         # efinance 把自己的模块级常量 headers 按引用传进来（28 处调用点），就地写入
         # 会把它的 UA / Cookie 永久改掉，也会影响复用同一个 dict 的其它请求。
-        headers = kwargs.get("headers", {})
+        headers = dict(kwargs.get("headers") or {})
         headers["User-Agent"] = user_agent
         nid = _get_nid(user_agent)
         if nid:
