@@ -179,6 +179,7 @@ const AlertsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
   const rulesRequestIdRef = useRef(0);
   const triggersRequestIdRef = useRef(0);
+  const eventsRequestIdRef = useRef(0);
   const notificationsRequestIdRef = useRef(0);
   const triggersLoadedRef = useRef(false);
   const notificationsLoadedRef = useRef(false);
@@ -253,9 +254,12 @@ const AlertsPage: React.FC = () => {
   }, [triggersPage]);
 
   const loadEvents = useCallback(async () => {
-    const requestId = triggersRequestIdRef.current + 1;
-    triggersRequestIdRef.current = requestId;
-    const isLatestRequest = () => triggersRequestIdRef.current === requestId;
+    // 「事件」与「触发历史」各自一个序号：两者都调 listTriggers，共用序号时并发的那次会被
+    // 判为过期，既不写列表也不关自己的 loading，而首次加载开关已置真、重试入口又只在
+    // 「非加载中且有数据」时渲染 —— 那个 Tab 就永久停在转圈，只能刷新整页。
+    const requestId = eventsRequestIdRef.current + 1;
+    eventsRequestIdRef.current = requestId;
+    const isLatestRequest = () => eventsRequestIdRef.current === requestId;
     setEventsLoading(true);
     try {
       // 事件较稀疏，拉取最新一页（接口 page_size 上限 100）后在客户端折叠出事件项，

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AlertsPage from '../AlertsPage';
 
@@ -127,6 +127,52 @@ describe('AlertsPage', () => {
     });
     expect(listTriggers).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
     expect(listNotifications).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+  });
+
+  it('does not leave the history tab stuck loading when events load at the same time', async () => {
+    // loadTriggers 与 loadEvents 共用 triggersRequestIdRef：并发时后发的请求把 ref 推到更大
+    // 的号，先发的响应回来后被判为过期——既不写列表，也不关自己的 loading。而首次加载开关
+    // 已置真、分页入口又只在「非加载中且有数据」时渲染，于是该 Tab 永久停在转圈，只能刷新整页。
+    let resolveHistory!: (value: unknown) => void;
+    let resolveEvents!: (value: unknown) => void;
+    const historyPromise = new Promise((resolve) => { resolveHistory = resolve; });
+    const eventsPromise = new Promise((resolve) => { resolveEvents = resolve; });
+    listTriggers.mockImplementation((params: { pageSize?: number }) => (
+      params?.pageSize === 100 ? eventsPromise : historyPromise
+    ));
+
+    render(<AlertsPage />);
+    await screen.findByText('茅台价格突破');
+
+    fireEvent.click(screen.getByRole('button', { name: '触发历史' }));
+    fireEvent.click(screen.getByRole('button', { name: '事件' }));
+
+    await act(async () => {
+      resolveHistory({
+        items: [{
+          id: 10,
+          ruleId: 1,
+          target: '600519',
+          observedValue: 1801,
+          threshold: 1800,
+          reason: '600519 price above 1800',
+          dataSource: 'realtime_quote',
+          dataTimestamp: '2026-05-18T09:30:00',
+          triggeredAt: '2026-05-18T09:30:01',
+          status: 'triggered',
+        }],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      });
+      resolveEvents({ items: [], total: 0, page: 1, pageSize: 100 });
+      await Promise.all([historyPromise, eventsPromise]);
+    });
+
+    // 切回「历史」：首次加载开关已置真，不会重新请求，只能靠刚才那次过期的响应把状态收尾。
+    fireEvent.click(screen.getByRole('button', { name: '触发历史' }));
+
+    expect(await screen.findByText('600519 price above 1800')).toBeInTheDocument();
   });
 
   it('runs a dry-run test and renders only declared response fields', async () => {
