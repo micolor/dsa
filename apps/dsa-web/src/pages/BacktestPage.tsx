@@ -450,16 +450,29 @@ const BacktestPage: React.FC = () => {
     const init = async () => {
       // Get latest performance (unfiltered returns most recent summary)
       const perfId = ++perfRequestRef.current;
-      const overall = await backtestApi.getOverallPerformance();
-      if (!mountedRef.current || perfId !== perfRequestRef.current) return;
-      setOverallPerf(overall);
-      // Use the summary's eval_window_days to filter results consistently
-      const windowDays = overall?.evalWindowDays;
-      if (windowDays && !evalDays) {
-        setEvalDays(String(windowDays));
+      setIsLoadingPerf(true);
+      try {
+        const overall = await backtestApi.getOverallPerformance();
+        if (!mountedRef.current || perfId !== perfRequestRef.current) return;
+        setOverallPerf(overall);
+        // Use the summary's eval_window_days to filter results consistently
+        const windowDays = overall?.evalWindowDays;
+        if (windowDays && !evalDays) {
+          setEvalDays(String(windowDays));
+        }
+        setAppliedWindowDays(windowDays ?? null);
+        fetchResults(1, undefined, windowDays, undefined, undefined, 'all');
+      } catch (err) {
+        // 和 fetchPerformance 走同一条错误路径：没有 try 的话这里的 rejection
+        // 无人接管，页面只剩「暂无指标 / 暂无结果」两个空态，看起来像历史数据为空。
+        if (!mountedRef.current || perfId !== perfRequestRef.current) return;
+        console.error('Failed to fetch overall performance:', err);
+        setPageError(getParsedApiError(err));
+      } finally {
+        if (mountedRef.current && perfId === perfRequestRef.current) {
+          setIsLoadingPerf(false);
+        }
       }
-      setAppliedWindowDays(windowDays ?? null);
-      fetchResults(1, undefined, windowDays, undefined, undefined, 'all');
     };
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -721,7 +734,7 @@ const BacktestPage: React.FC = () => {
         {/* Left sidebar - Performance */}
         <aside className="flex max-h-[38vh] flex-col gap-3 overflow-y-auto lg:max-h-none lg:w-72 lg:flex-shrink-0">
           {isLoadingPerf ? (
-            <Loading className="py-8" />
+            <Loading label={text.loadingMetrics} className="py-8" />
           ) : overallPerf && overallPerf.completedCount > 0 ? (
             <PerformanceCard metrics={overallPerf} title={text.overallPerformance} language={language} />
           ) : (

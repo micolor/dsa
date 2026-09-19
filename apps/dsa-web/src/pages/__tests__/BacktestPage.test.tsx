@@ -222,6 +222,33 @@ describe('BacktestPage', () => {
     expect(screen.queryByText('窗口收益')).not.toBeInTheDocument();
   });
 
+  it('surfaces an error when the initial performance load fails', async () => {
+    mockGetOverallPerformance.mockRejectedValueOnce(new Error('backend exploded'));
+
+    render(<BacktestPage />);
+
+    // 初始加载的失败必须走和其它请求同一条错误呈现路径：否则只会留下
+    // 「暂无指标 / 暂无结果」两个空态，用户会以为历史回测是空的。
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('backend exploded');
+  });
+
+  it('shows the performance loading state while the initial load is in flight', async () => {
+    let resolvePerf: (value: typeof basePerformance) => void = () => {};
+    mockGetOverallPerformance.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePerf = resolve;
+    }));
+
+    render(<BacktestPage />);
+
+    // 左侧指标区在初始请求期间应该显示加载态，而不是先闪一下「暂无指标」。
+    expect(screen.getByText('正在加载指标...')).toBeInTheDocument();
+    resolvePerf(basePerformance);
+    await waitFor(() => {
+      expect(screen.queryByText('正在加载指标...')).not.toBeInTheDocument();
+    });
+  });
+
   it('filters results with stock code, window, phase, and analysis date range when clicking Filter', async () => {
     render(<BacktestPage />);
 
