@@ -1314,6 +1314,32 @@ describe('PortfolioPage FX refresh', () => {
     );
   });
 
+  it('submits a manual trade only once when the submit button is clicked twice', async () => {
+    // 三个录入表单都没有 in-flight 状态，提交按钮只按「是否选了账户」禁用，
+    // 所以双击（或在选股输入框里连按回车）会把同一笔交易发两次。
+    createTrade.mockImplementation(() => new Promise(() => {}));
+
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    await changeSelect(0, 'Main (#1)');
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', includeRealtime: true }));
+
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    fireEvent.change(screen.getByTestId('trade-symbol'), { target: { value: '600519.SH' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('成交价（必填）'), { target: { value: '1800.5' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('数量（必填）'), { target: { value: '100' } });
+
+    const submit = within(dialog).getByRole('button', { name: '提交交易' });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(createTrade).toHaveBeenCalled());
+    expect(createTrade).toHaveBeenCalledTimes(1);
+  });
+
   it('点击持仓行可在事件记录聚焦该股票的交易事件', async () => {
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [makePosition({ symbol: 'HK00700' })] }));
 

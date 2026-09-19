@@ -345,6 +345,11 @@ const PortfolioPage: React.FC = () => {
   const snapshotRequestRef = useRef(0);
   const eventsRequestRef = useRef(0);
   const [positionAnalysisLoadingKey, setPositionAnalysisLoadingKey] = useState<string | null>(null);
+  // 三个录入表单各自「正在提交」的状态：手动录入不带 trade_uid，后端没有去重键可用，
+  // 双击提交（或在选股输入框里连按回车）会把同一笔记录写两遍，所以必须由前端锁住按钮。
+  const [tradeSubmitting, setTradeSubmitting] = useState(false);
+  const [cashSubmitting, setCashSubmitting] = useState(false);
+  const [corporateSubmitting, setCorporateSubmitting] = useState(false);
   const [positionAnalysisMessage, setPositionAnalysisMessage] = useState<string | null>(null);
   // 持仓表格排序 + 只看亏损筛选。
   const [positionSort, setPositionSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({
@@ -1000,6 +1005,10 @@ const PortfolioPage: React.FC = () => {
       setWriteWarning('请先在右上角选择具体账户，再进行录入或导入提交。');
       return;
     }
+    if (tradeSubmitting) {
+      return;
+    }
+    setTradeSubmitting(true);
     try {
       setWriteWarning(null);
       await portfolioApi.createTrade({
@@ -1019,6 +1028,8 @@ const PortfolioPage: React.FC = () => {
       void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
+    } finally {
+      setTradeSubmitting(false);
     }
   };
 
@@ -1028,6 +1039,10 @@ const PortfolioPage: React.FC = () => {
       setWriteWarning('请先在右上角选择具体账户，再进行录入或导入提交。');
       return;
     }
+    if (cashSubmitting) {
+      return;
+    }
+    setCashSubmitting(true);
     try {
       setWriteWarning(null);
       await portfolioApi.createCashLedger({
@@ -1043,6 +1058,8 @@ const PortfolioPage: React.FC = () => {
       void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
+    } finally {
+      setCashSubmitting(false);
     }
   };
 
@@ -1052,6 +1069,10 @@ const PortfolioPage: React.FC = () => {
       setWriteWarning('请先在右上角选择具体账户，再进行录入或导入提交。');
       return;
     }
+    if (corporateSubmitting) {
+      return;
+    }
+    setCorporateSubmitting(true);
     try {
       setWriteWarning(null);
       await portfolioApi.createCorporateAction({
@@ -1068,6 +1089,8 @@ const PortfolioPage: React.FC = () => {
       void refreshPortfolioData();
     } catch (err) {
       setError(getParsedApiError(err));
+    } finally {
+      setCorporateSubmitting(false);
     }
   };
 
@@ -2240,7 +2263,7 @@ const PortfolioPage: React.FC = () => {
           </div>
           <p className="text-xs text-secondary-text">手续费和税费可留空，系统将按 0 处理。</p>
           <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交交易</Button>
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId || tradeSubmitting} isLoading={tradeSubmitting}>提交交易</Button>
             <Button type="button" variant="outline" size="lg" onClick={() => setTradeModalOpen(false)}>关闭</Button>
           </div>
         </form>
@@ -2271,7 +2294,7 @@ const PortfolioPage: React.FC = () => {
           <input className={PORTFOLIO_INPUT_CLASS} placeholder={`币种（可选，默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
             onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value }))} />
           <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交资金流水</Button>
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId || cashSubmitting} isLoading={cashSubmitting}>提交资金流水</Button>
             <Button type="button" variant="outline" size="lg" onClick={() => setCashModalOpen(false)}>关闭</Button>
           </div>
         </form>
@@ -2309,7 +2332,7 @@ const PortfolioPage: React.FC = () => {
               onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
           )}
           <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId}>提交企业行为</Button>
+            <Button type="submit" variant="primary" size="lg" className="flex-1" disabled={!writableAccountId || corporateSubmitting} isLoading={corporateSubmitting}>提交企业行为</Button>
             <Button type="button" variant="outline" size="lg" onClick={() => setCorpModalOpen(false)}>关闭</Button>
           </div>
         </form>
