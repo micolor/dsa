@@ -287,7 +287,7 @@ const ChatPage: React.FC = () => {
   // Set page title
   useEffect(() => {
     document.title = t('chat.pageTitle');
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     isMountedRef.current = true;

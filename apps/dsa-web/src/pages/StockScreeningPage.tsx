@@ -40,6 +40,7 @@ import { AppPage, Badge, Button, EmptyState, InlineAlert, Select } from '../comp
 import { DashboardPanelHeader } from '../components/dashboard/DashboardPanelHeader';
 import { CandidateListItem } from '../components/screening/CandidateListItem';
 import { formatNumber } from '../components/screening/candidateFormat';
+import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { useScreeningTaskStore } from '../stores/screeningTaskStore';
 
 const SCREEN_TASK_STORAGE_KEY = 'dsa.screening.activeScreenTask.v1';
@@ -799,6 +800,7 @@ HotspotCard.displayName = 'HotspotCard';
 
 const StockScreeningPage: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useUiLanguage();
   const [restoredTask] = useState<PersistedScreenTask | null>(() => readPersistedScreenTask());
   const [formPrefs] = useState<ScreenFormPrefs | null>(() => readScreenFormPrefs());
   const [restoredResult] = useState<ScreeningScreenResponse | null>(() => readScreenResult());
@@ -816,6 +818,12 @@ const StockScreeningPage: React.FC = () => {
   useEffect(() => {
     persistScreenFormPrefs({ market, strategy, maxResults });
   }, [market, strategy, maxResults]);
+
+  // 页面正文目前仍是中文硬编码（尚未接入 i18n），标题仍按全局语言设置走，
+  // 与其它页面保持一致；等正文国际化的那一轮再一起收进来。
+  useEffect(() => {
+    document.title = t('screening.pageTitle');
+  }, [t]);
 
   useEffect(() => {
     // Reset in setup: under React <StrictMode> dev double-mounting the cleanup

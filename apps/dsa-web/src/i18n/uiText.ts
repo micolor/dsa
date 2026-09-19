@@ -114,6 +114,7 @@ const zh = {
   'usage.noRecentCalls': '暂无最近调用记录',
   'usage.period.all': '全部',
   'usage.period.month': '本月',
+  'usage.pageTitle': '模型用量 - DSA',
   'usage.period.today': '今日',
   'usage.promptTokens': 'Prompt tokens',
   'usage.promptTokensHint': '输入上下文消耗',
@@ -753,6 +754,7 @@ const zh = {
   'report.removeFromWatchlist': '从自选删除',
   'report.watchlist': '自选',
 
+  'screening.pageTitle': '选股 - DSA',
   'settings.actionSuccess': '操作成功',
   'settings.noChangesToSave': '当前没有可保存的修改。',
   'settings.configUpdated': '配置已更新',
@@ -1264,6 +1266,7 @@ const en: Record<UiTextKey, string> = {
   'usage.noRecentCalls': 'No recent call records',
   'usage.period.all': 'All',
   'usage.period.month': 'This month',
+  'usage.pageTitle': 'Token Usage - DSA',
   'usage.period.today': 'Today',
   'usage.promptTokens': 'Prompt tokens',
   'usage.promptTokensHint': 'Input context consumption',
@@ -1889,6 +1892,7 @@ const en: Record<UiTextKey, string> = {
   'report.removeFromWatchlist': 'Remove from watchlist',
   'report.watchlist': 'Watchlist',
 
+  'screening.pageTitle': 'Screening - DSA',
   'settings.actionSuccess': 'Success',
   'settings.noChangesToSave': 'There are no changes to save.',
   'settings.configUpdated': 'Configuration updated',

@@ -108,6 +108,10 @@ const TokenUsagePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const requestSeqRef = useRef(0);
 
+  useEffect(() => {
+    document.title = t('usage.pageTitle');
+  }, [t]);
+
   const loadDashboard = useCallback(async () => {
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
