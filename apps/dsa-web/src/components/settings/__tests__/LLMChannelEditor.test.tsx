@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LLMChannelEditor } from '../LLMChannelEditor';
 
@@ -495,6 +495,57 @@ describe('LLMChannelEditor', () => {
     expect(messages.length).toBeGreaterThanOrEqual(3);
     expect(testLLMChannel).not.toHaveBeenCalled();
     expect(discoverLLMChannelModels).not.toHaveBeenCalled();
+  });
+
+  it('does not attach an in-flight test result to the channel that shifts into its row', async () => {
+    let resolveTest: (value: unknown) => void = () => {};
+    testLLMChannel.mockReturnValueOnce(new Promise((resolve) => {
+      resolveTest = resolve;
+    }));
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'alpha,middle,omega' },
+          { key: 'LLM_ALPHA_PROTOCOL', value: 'openai' },
+          { key: 'LLM_ALPHA_BASE_URL', value: 'https://alpha.example.com/v1' },
+          { key: 'LLM_ALPHA_ENABLED', value: 'true' },
+          { key: 'LLM_ALPHA_API_KEY', value: 'sk-alpha' },
+          { key: 'LLM_ALPHA_MODELS', value: 'alpha-model' },
+          { key: 'LLM_MIDDLE_PROTOCOL', value: 'openai' },
+          { key: 'LLM_MIDDLE_BASE_URL', value: 'https://middle.example.com/v1' },
+          { key: 'LLM_MIDDLE_ENABLED', value: 'true' },
+          { key: 'LLM_MIDDLE_API_KEY', value: 'sk-middle' },
+          { key: 'LLM_MIDDLE_MODELS', value: 'middle-model' },
+          { key: 'LLM_OMEGA_PROTOCOL', value: 'openai' },
+          { key: 'LLM_OMEGA_BASE_URL', value: 'https://omega.example.com/v1' },
+          { key: 'LLM_OMEGA_ENABLED', value: 'true' },
+          { key: 'LLM_OMEGA_API_KEY', value: 'sk-omega' },
+          { key: 'LLM_OMEGA_MODELS', value: 'omega-model' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    const rowHeader = (name: string) => screen.getByText(name).closest('[role="button"]') as HTMLElement;
+
+    // 展开中间一行并发起测试（响应暂不返回）
+    fireEvent.click(rowHeader('middle'));
+    fireEvent.click(await screen.findByRole('button', { name: '测试连接' }));
+    await waitFor(() => expect(testLLMChannel).toHaveBeenCalledTimes(1));
+
+    // 测试在途时删掉第一行，omega 的行号从 2 变成 1（即被测试那一行的旧行号）
+    fireEvent.click(screen.getAllByRole('button', { name: '✕' })[0]);
+
+    await act(async () => {
+      resolveTest({ success: true, resolvedModel: 'middle-model', latencyMs: 10 });
+    });
+
+    // 结果必须落到发起测试的渠道上；按行号存放会把它盖到从未测试过的 omega 上
+    expect(screen.getByText('omega').closest('[role="button"]')).not.toHaveTextContent('连接正常');
+    expect(screen.getByText('middle').closest('[role="button"]')).toHaveTextContent('连接正常');
   });
 
   it('keeps pure non-Hermes route in Agent and Vision runtime selects', async () => {

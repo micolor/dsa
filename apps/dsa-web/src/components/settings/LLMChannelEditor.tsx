@@ -161,7 +161,7 @@ interface ChannelRowProps {
   onRemove: (index: number) => void;
   onToggleExpand: (index: number) => void;
   onToggleKeyVisibility: (index: number, nextVisible: boolean) => void;
-  onTest: (channel: ChannelConfig, index: number) => void;
+  onTest: (channel: ChannelConfig) => void;
   onDiscoverModels: (channel: ChannelConfig) => void;
   onToggleCapability: (channel: ChannelConfig, capability: LLMCapabilityCheck) => void;
   onCheckCapabilities: (channel: ChannelConfig) => void;
@@ -768,7 +768,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               size="sm"
               className="px-3 text-[11px] shadow-none"
               disabled={busy}
-              onClick={() => onTest(channel, index)}
+              onClick={() => onTest(channel)}
             >
               {testState?.status === 'loading' ? '测试中...' : '测试连接'}
             </Button>
@@ -1662,7 +1662,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   >(null);
   const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
-  const [testStates, setTestStates] = useState<Record<number, ChannelTestState>>({});
+  const [testStates, setTestStates] = useState<Record<string, ChannelTestState>>({});
   const [discoveryStates, setDiscoveryStates] = useState<Record<string, ChannelDiscoveryState>>({});
   const [capabilityStates, setCapabilityStates] = useState<Record<string, ChannelCapabilityState>>({});
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
@@ -1679,6 +1679,8 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   const discoveryRequestIdRef = useRef(0);
   const capabilityNonceRef = useRef<Record<string, number>>({});
   const capabilityRequestIdRef = useRef(0);
+  const testNonceRef = useRef<Record<string, number>>({});
+  const testRequestIdRef = useRef(0);
 
   useEffect(() => {
     if (prevChannelsRef.current === channelsFingerprint && prevRuntimeRef.current === runtimeFingerprint) {
@@ -1699,6 +1701,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     setExpandedRows({});
     discoveryNonceRef.current = {};
     capabilityNonceRef.current = {};
+    testNonceRef.current = {};
     if (!preserveSaveFeedback) {
       setSaveMessage(null);
       setSaveWarnings([]);
@@ -1830,11 +1833,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       return updated;
     }));
     setTestStates((previous) => {
-      if (!(index in previous)) {
+      if (!currentChannel || !(currentChannel.id in previous)) {
         return previous;
       }
       const next = { ...previous };
-      delete next[index];
+      delete next[currentChannel.id];
+      // 改动渠道配置后，在途的测试结果不再代表当前配置，nonce 一并作废。
+      delete testNonceRef.current[currentChannel.id];
       return next;
     });
     if (field !== 'models' && field !== 'enabled') {
@@ -1874,7 +1879,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     const removedChannelId = channels[index]?.id || '';
     setChannels((previous) => previous.filter((_, rowIndex) => rowIndex !== index));
     setVisibleKeys({});
-    setTestStates({});
+    setTestStates((previous) => {
+      if (!removedChannelId || !(removedChannelId in previous)) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[removedChannelId];
+      return next;
+    });
     setDiscoveryStates((previous) => {
       if (!removedChannelId) {
         return previous;
@@ -1896,6 +1908,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       delete nextNonce[removedChannelId];
       discoveryNonceRef.current = nextNonce;
       delete capabilityNonceRef.current[removedChannelId];
+      delete testNonceRef.current[removedChannelId];
     }
     setExpandedRows({});
   };
@@ -1934,6 +1947,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     setCapabilityStates({});
     discoveryNonceRef.current = {};
     capabilityNonceRef.current = {};
+    testNonceRef.current = {};
     setExpandedRows((prev) => ({ ...prev, [channels.length]: true }));
     setIsCollapsed(false);
   };
@@ -2045,18 +2059,26 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     }
   };
 
-  const handleTest = async (channel: ChannelConfig, index: number) => {
+  const handleTest = async (channel: ChannelConfig) => {
     if (hasRuntimeOnlyMaskedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel))) {
       setTestStates((previous) => ({
         ...previous,
-        [index]: { status: 'error', text: RUNTIME_ONLY_HERMES_SECRET_MESSAGE },
+        [channel.id]: { status: 'error', text: RUNTIME_ONLY_HERMES_SECRET_MESSAGE },
       }));
       return;
     }
 
+    // 与模型发现 / 能力检测一致：按 channel.id 存放并带 nonce。
+    // 用数组下标存放时，删除别的渠道会让下标整体平移，在途响应就会落到
+    // 从未测试过的渠道上，把它的状态点显示成「连接正常」。
+    const requestId = testRequestIdRef.current + 1;
+    testRequestIdRef.current = requestId;
+    testNonceRef.current[channel.id] = requestId;
+    const nonce = requestId;
+
     setTestStates((previous) => ({
       ...previous,
-      [index]: { status: 'loading', text: '测试中...' },
+      [channel.id]: { status: 'loading', text: '测试中...' },
     }));
 
     try {
@@ -2076,19 +2098,23 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         : buildLlmFailureText(result);
       const hint = result.success ? undefined : buildLlmTestHint(result);
 
+      if (testNonceRef.current[channel.id] !== nonce) return;
+
       setTestStates((previous) => ({
         ...previous,
-        [index]: {
+        [channel.id]: {
           status: result.success ? 'success' : 'error',
           text,
           hint,
         },
       }));
     } catch (error: unknown) {
+      if (testNonceRef.current[channel.id] !== nonce) return;
+
       const parsed = getParsedApiError(error);
       setTestStates((previous) => ({
         ...previous,
-        [index]: { status: 'error', text: parsed.message || '测试失败' },
+        [channel.id]: { status: 'error', text: parsed.message || '测试失败' },
       }));
     }
   };
@@ -2363,7 +2389,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                 busy={busy}
                 visibleKey={Boolean(visibleKeys[index])}
                 expanded={Boolean(expandedRows[index])}
-                testState={testStates[index]}
+                testState={testStates[channel.id]}
                 discoveryState={discoveryStates[channel.id]}
                 capabilityState={capabilityStates[channel.id]}
                 modelProviderPrefixes={modelProviderPrefixSet}
@@ -2371,7 +2397,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                 onRemove={removeChannel}
                 onToggleExpand={toggleExpand}
                 onToggleKeyVisibility={toggleKeyVisibility}
-                onTest={(ch, idx) => void handleTest(ch, idx)}
+                onTest={(ch) => void handleTest(ch)}
                 onDiscoverModels={(channel) => void handleDiscoverModels(channel)}
                 onToggleCapability={toggleCapability}
                 onCheckCapabilities={(channel) => void handleCapabilityCheck(channel)}
