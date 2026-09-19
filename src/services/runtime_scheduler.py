@@ -244,6 +244,10 @@ class RuntimeSchedulerService:
         self._enabled = False
         self._last_run_at: Optional[str] = None
         self._last_success_at: Optional[str] = None
+        # 补跑至多递归一层：嵌套的那次运行结束后再判一次缺口，缺口的基准应当是
+        # 「上一次成功」。没有这个闸门时，一个异常配置或将来改动就可能把它变成
+        # 无限递归（每一层都成功、都满足判据）。
+        self._backfill_in_progress = False
         self._last_error: Optional[str] = None
         self._last_failed_at: Optional[str] = None
         self._consecutive_failures: int = 0
@@ -319,12 +323,15 @@ class RuntimeSchedulerService:
                 xp_lock.release()
             if result is False:
                 raise RuntimeError("runtime scheduled analysis reported failure")
+            # 先把「上一次成功时间」取出来：下面这行会立刻把它覆盖成 now，
+            # 而补跑判据要的正是「距离上次成功过了多久」。
+            previous_success_at = self._last_success_at
             self._last_success_at = datetime.now().isoformat()
             self._last_error = None
             self._last_failed_at = None
             self._consecutive_failures = 0
             self._last_failure_alert_date = None
-            self._maybe_trigger_backfill(stock_codes)
+            self._maybe_trigger_backfill(stock_codes, previous_success_at)
         except Exception as exc:  # noqa: BLE001 - scheduled runs must not kill API process.
             self._last_error = str(exc)
             self._last_failed_at = datetime.now().isoformat()
@@ -333,19 +340,36 @@ class RuntimeSchedulerService:
             self._send_failure_alert("analyze")
             self._schedule_retry_if_needed()
 
-    def _maybe_trigger_backfill(self, stock_codes: Optional[List[str]]) -> None:
+    def _maybe_trigger_backfill(
+        self,
+        stock_codes: Optional[List[str]],
+        previous_success_at: Optional[str] = None,
+    ) -> None:
+        """缺口基准是「上一次成功时间」，由调用方在覆盖它之前取出并传入。
+
+        ``_run_analysis_locked`` 的成功分支在调本方法之前就会把
+        ``self._last_success_at`` 写成本次成功时间，因此在这里读实例字段算出的
+        gap 恒为 0 或 ±1，判据 ``gap > max_days``（默认 1）永远不成立，补跑形同
+        虚设。``previous_success_at`` 为 None 时回落到实例字段，兼容直接调用。
+        """
         try:
             config = self._reload_config()
             if not getattr(config, "runtime_backfill_enabled", True):
                 return
-            if not self._last_success_at:
+            last_success_iso = previous_success_at or self._last_success_at
+            if not last_success_iso:
                 return
-            gap = self._trading_day_gap_since(self._last_success_at)
-            max_days = getattr(config, "runtime_backfill_max_days", 1)
-            if gap is not None and gap > max_days:
+            gap = self._trading_day_gap_since(last_success_iso)
+            # 负数配置会让判据在 gap=0 时也成立并把补跑递归下去，这里夹到非负。
+            max_days = max(0, int(getattr(config, "runtime_backfill_max_days", 1) or 0))
+            if gap is not None and gap > max_days and not self._backfill_in_progress:
                 logger.info("检测到跨发行日缺口（gap=%d），触发一次自动补跑", gap)
                 # 直接在已持有 _run_lock 的成功分支内重跑：必须走 _run_analysis_locked，走 _run_analysis_once 会因 _run_lock 非重入而死路
-                self._run_analysis_locked(stock_codes)
+                self._backfill_in_progress = True
+                try:
+                    self._run_analysis_locked(stock_codes)
+                finally:
+                    self._backfill_in_progress = False
         except Exception:  # noqa: BLE001 - backfill is best-effort; never break a successful run
             logger.warning("自动补跑检查异常（已忽略）", exc_info=True)
 
