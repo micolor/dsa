@@ -60,6 +60,17 @@ _VALID_CONFIDENCE = frozenset({"high", "medium", "low"})
 # LLM sometimes returns JSON field names or markdown labels as "code"; filter these out
 _FAKE_CODES = frozenset({"CODE", "NAME", "HIGH", "LOW", "MEDIUM", "CONFIDENCE", "JSON"})
 
+# 兜底扫描只用这两个形态，而不是在整段原文上做 IGNORECASE 的字母扫描：
+# - 数字串就是明确的代码形态，命中什么算什么；
+# - 字母代码必须是原文里的大写，并且前后不能挨着词字符或点号——前者挡掉
+#   「could / not / image」这类小写英文单词，后者挡掉 `600519.SH` / `00700.HK`
+#   里被当成独立代码的交易所后缀（SH / SZ / HK）。
+_DIGIT_CODE_RE = re.compile(r"\b([0-9]{5,6})\b")
+_LETTER_CODE_RE = re.compile(r"(?<![\w.])[A-Z]{1,5}(?:\.[A-Z])?(?![\w.])")
+# 一个数字代码都没有、却出现 ≥2 个连续小写字母时，这段响应是自然语言
+# （例如「没有在图中找到股票代码」），不是代码清单。
+_PROSE_RE = re.compile(r"[a-z]{2,}")
+
 ALLOWED_MIME = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 VISION_API_TIMEOUT = 60  # seconds; avoid long blocks on network/API issues
@@ -137,9 +148,18 @@ def _parse_codes_from_text(text: str) -> List[str]:
     except json.JSONDecodeError:
         pass
 
-    # 兜底：查找 5-6 位数字及美股代码
-    for m in re.finditer(r"\b([0-9]{5,6}|[A-Z]{1,5}(\.[A-Z])?)\b", text, re.IGNORECASE):
-        c = _normalize_code(m.group(1))
+    # 兜底：只扫明确的代码形态。数字串先扫；字母代码仅在「这段文本不是自然语言」
+    # 时才算数。不这么判的话，模型回答一句「I could not find any stock codes in
+    # this image.」会产出 I / COULD / NOT / FIND / ANY / STOCK / CODES / IN /
+    # THIS / IMAGE 一整串假美股代码，`{"codes": [...]}` 这类对象响应也会把
+    # 字段名 CODES / NAMES 当成代码——这些假代码会被用户勾选后进入分析队列。
+    digit_matches = [m.group(1) for m in _DIGIT_CODE_RE.finditer(text)]
+    letter_matches: List[str] = []
+    if digit_matches or not _PROSE_RE.search(text):
+        letter_matches = [m.group(0) for m in _LETTER_CODE_RE.finditer(text)]
+
+    for raw in digit_matches + letter_matches:
+        c = _normalize_code(raw)
         if c and c not in seen and c not in _FAKE_CODES:
             seen.add(c)
             result.append(c)

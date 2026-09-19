@@ -384,6 +384,39 @@ class TestParseCodesFromText:
         assert "512880" in codes
 
 
+class TestLegacyFallbackDoesNotInventCodes:
+    """兜底扫描不得把自然语言与 JSON 字段名当成股票代码。
+
+    `_parse_items_from_text` 解析不出对象数组时会回落到 `_parse_codes_from_text`，
+    后者原先用 `re.IGNORECASE` 的 `[A-Z]{1,5}` 在**整段原文**上扫字母，而
+    `_normalize_code` 认任何 1–5 个字母为合法美股代码。于是模型答一句
+    「没找到代码」或返回 `{"codes": [...]}` 这种对象时，用户拿到的是一串
+    I / COULD / NOT / STOCK / CODES / NAMES 之类的假代码。
+    """
+
+    def test_prose_refusal_yields_no_codes(self):
+        assert _parse_codes_from_text("I could not find any stock codes in this image.") == []
+        assert _parse_items_from_text("I could not find any stock codes in this image.") == []
+        assert _parse_items_from_text("Sorry, I could not identify any tickers.") == []
+
+    def test_json_object_response_is_not_swept_for_field_names(self):
+        items = _parse_items_from_text('{"codes": ["600519"], "names": ["贵州茅台"]}')
+        assert [i[0] for i in items] == ["600519"]
+
+    def test_exchange_suffix_is_not_returned_as_a_code(self):
+        assert _parse_codes_from_text("600519.SH") == ["600519"]
+        assert "SH" not in _parse_codes_from_text("600519.SH")
+        assert "HK" not in _parse_codes_from_text("持仓里有 00700.HK")
+
+    def test_mixed_separators_still_yield_the_real_codes(self):
+        items = _parse_items_from_text("关注 600519、300750 和 AAPL。")
+        assert [i[0] for i in items] == ["600519", "300750", "AAPL"]
+
+    def test_uppercase_only_list_without_any_digit_code_still_parses(self):
+        # 纯美股清单不含数字代码，但也没有成句的小写英文，仍要能解析出来。
+        assert _parse_codes_from_text("AAPL, MSFT") == ["AAPL", "MSFT"]
+
+
 class TestParseItemsFromText:
     def test_parses_new_format(self):
         text = '[{"code":"600519","name":"贵州茅台","confidence":"high"},{"code":"00700","name":"腾讯控股","confidence":"medium"}]'
