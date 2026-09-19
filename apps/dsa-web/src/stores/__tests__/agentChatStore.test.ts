@@ -608,6 +608,63 @@ describe('agentChatStore.startStream', () => {
   });
 });
 
+describe('agentChatStore.stopStream', () => {
+  // 服务端确认取消后，如果这条 SSE 一直不结束（后端卡在收尾、连接半死），
+  // stopping 会永远停在 true：停止按钮 disabled、「正在停止…」永不消失，
+  // 而分析其实还在跑。这里守住「本地必须能自己了断」。
+  it('gives up on a cancel the server accepted but never finishes', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const acceptedReceived = createDeferred<void>();
+    vi.mocked(agentApi.chatStream).mockResolvedValue(new Response(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    vi.mocked(agentApi.cancelChatStream).mockResolvedValue({
+      accepted: true,
+      request_id: 'request-stuck-cancel',
+    });
+
+    const streamPromise = useAgentChatStore.getState().startStream(
+      {
+        message: '分析 AAPL',
+        session_id: 'session-test',
+        request_id: 'request-stuck-cancel',
+      },
+      { onAccepted: () => acceptedReceived.resolve() },
+    );
+    streamController.enqueue(encoder.encode(
+      `${accepted('request-stuck-cancel', 'session-test', 'codex_app_server')}\n`,
+    ));
+    await acceptedReceived.promise;
+    // 让读循环真正挂到未决的 read 上。
+    await Promise.resolve();
+
+    vi.useFakeTimers();
+    try {
+      await useAgentChatStore.getState().stopStream();
+      expect(useAgentChatStore.getState().stopping).toBe(true);
+
+      // 服务端一直不发结束事件：本地必须在有限时间内解除停止态。
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const state = useAgentChatStore.getState();
+      expect(state.stopping).toBe(false);
+      expect(state.loading).toBe(false);
+      expect(state.abortController).toBeNull();
+      expect(state.chatError).not.toBeNull();
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+    // 流本身永远不结束，这里不 await，只确保没有未处理的拒绝。
+    void streamPromise.catch(() => {});
+  });
+});
+
 describe('agentChatStore.switchSession', () => {
   it('clears transient loading state when switching sessions during a stream', async () => {
     const ac = new AbortController();

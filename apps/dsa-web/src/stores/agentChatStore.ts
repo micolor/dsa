@@ -156,9 +156,55 @@ const getInitialSessionId = (): string =>
     : generateUUID();
 
 export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set, get) => {
+  /**
+   * 服务端确认取消后，等它把结束事件推回来的宽限时间。
+   *
+   * 取消被接受后本地会继续读这条 SSE（等后端的收尾事件），但如果后端卡住、
+   * 连接半死，事件永远不来，`stopping` 就会停在 true：停止按钮一直 disabled、
+   * 文案一直显示「正在停止…」，而分析实际还在跑。超过这个时限就由本地了断。
+   */
+  const SERVER_CANCEL_WATCHDOG_MS = 20_000;
+
+  let cancelWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearCancelWatchdog = () => {
+    if (cancelWatchdogTimer !== null) {
+      clearTimeout(cancelWatchdogTimer);
+      cancelWatchdogTimer = null;
+    }
+  };
+
+  const armCancelWatchdog = (requestId: string) => {
+    clearCancelWatchdog();
+    cancelWatchdogTimer = setTimeout(() => {
+      cancelWatchdogTimer = null;
+      const current = get();
+      // 流已经自己结束了、或已经换成了别的请求：什么都不用做。
+      if (current.activeRequestId !== requestId || !current.loading) {
+        return;
+      }
+      current.abortController?.abort();
+      set({
+        loading: false,
+        progressSteps: [],
+        abortController: null,
+        activeRequestId: null,
+        serverCancellation: false,
+        stopping: false,
+        chatError: createParsedApiError({
+          title: '停止超时',
+          message: '已向服务端发出停止请求，但这次回复没有在限定时间内结束，已断开本地连接。',
+          rawMessage: `cancel accepted for ${requestId}, but the stream did not finish within ${SERVER_CANCEL_WATCHDOG_MS}ms`,
+          category: 'upstream_timeout',
+        }),
+      });
+    }, SERVER_CANCEL_WATCHDOG_MS);
+  };
+
   const deliverServerCancellation = async (requestId: string): Promise<void> => {
     try {
       await agentApi.cancelChatStream(requestId);
+      armCancelWatchdog(requestId);
     } catch {
       const current = get();
       if (current.activeRequestId === requestId && current.loading) {
@@ -248,6 +294,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     if (targetSessionId === sessionId && messages.length > 0) return;
 
     abortController?.abort();
+    clearCancelWatchdog();
     set({
       messages: [],
       selectedSkillIds: null,
@@ -285,6 +332,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   startNewChat: () => {
     // Abort any in-flight stream so the old request does not keep running
     get().abortController?.abort();
+    clearCancelWatchdog();
     const newId = generateUUID();
     set({
       sessionId: newId,
@@ -319,6 +367,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     if (get().loading) return;
     const { abortController: prevAc, sessionId: storeSessionId } = get();
     prevAc?.abort();
+    clearCancelWatchdog();
 
     const ac = new AbortController();
     const requestId = payload.request_id || generateUUID();
@@ -631,6 +680,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
       }
     } finally {
+      clearCancelWatchdog();
       if (ownsStream()) {
         set({
           loading: false,
