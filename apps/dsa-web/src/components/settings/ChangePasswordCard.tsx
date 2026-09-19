@@ -4,7 +4,7 @@ import type { ParsedApiError } from '../../api/error';
 import { isParsedApiError } from '../../api/error';
 import { useAuth } from '../../hooks';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
-import { Button, Input } from '../common';
+import { AutoDismissToast, Button, Input } from '../common';
 import { SettingsAlert } from './SettingsAlert';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
@@ -49,7 +49,6 @@ export const ChangePasswordCard: React.FC = () => {
         setCurrentPassword('');
         setNewPassword('');
         setNewPasswordConfirm('');
-        setTimeout(() => setSuccess(false), 4000);
       } else {
         setError(result.error ?? t('settings.changePasswordFailure'));
       }
@@ -118,7 +117,10 @@ export const ChangePasswordCard: React.FC = () => {
             : <SettingsAlert title={t('settings.changePasswordFailure')} message={error} variant="error" className="!mt-3" />
           : null}
         {success ? (
-          <SettingsAlert title={t('settings.changePasswordSuccess')} message={t('settings.changePasswordSuccessMessage')} variant="success" />
+          // 计时交给 AutoDismissToast，成功提示和全局提示共享同一套「悬停暂停、移开重新计时」语义。
+          <AutoDismissToast active={success} onDismiss={() => setSuccess(false)} delayMs={4000}>
+            <SettingsAlert title={t('settings.changePasswordSuccess')} message={t('settings.changePasswordSuccessMessage')} variant="success" />
+          </AutoDismissToast>
         ) : null}
 
         <Button type="submit" variant="primary" isLoading={isSubmitting}>
