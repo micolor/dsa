@@ -153,6 +153,7 @@ class PortfolioImportService:
         records: List[Dict[str, Any]] = []
         skipped = 0
         errors: List[str] = []
+        content_occurrences: Dict[str, int] = {}
 
         for idx, row in df.iterrows():
             normalized = self._normalize_trade_row(row=row, parser_spec=parser_spec)
@@ -160,10 +161,16 @@ class PortfolioImportService:
                 skipped += 1
                 continue
             try:
-                # Keep a stable line-level marker so repeated imports of the same
-                # file remain idempotent, while identical split fills on separate
-                # CSV lines do not collapse into one dedup key.
+                # 区分因子是「该内容在本文件内第几次出现」，不是绝对行号。行号对
+                # 「同一文件原样重导」稳定，但券商重新导出必然改变行位置（顶部多一行
+                # 查询区间说明、删掉一行已撤销成交、按日期重排、只导出其中一段），
+                # 整份文件的 hash 会一起变，`has_trade_dedup_hash` 判不出重复，同一批
+                # 成交被重复入账。序号对上述所有重排稳定，且仍能区分同字段的合法分笔。
                 normalized["_source_line_number"] = int(idx) + 2
+                content_key = self._dedup_content_key(normalized)
+                ordinal = content_occurrences.get(content_key, 0) + 1
+                content_occurrences[content_key] = ordinal
+                normalized["_duplicate_ordinal"] = ordinal
                 normalized["dedup_hash"] = self._build_dedup_hash(normalized)
                 records.append(normalized)
             except Exception as exc:  # pragma: no cover - defensive path
@@ -431,8 +438,9 @@ class PortfolioImportService:
         return None
 
     @staticmethod
-    def _build_dedup_hash(record: Dict[str, Any]) -> str:
-        payload = "|".join(
+    def _dedup_content_key(record: Dict[str, Any]) -> str:
+        """成交的业务内容，不含任何位置因子。"""
+        return "|".join(
             [
                 str(record.get("trade_date") or ""),
                 str(record.get("symbol") or ""),
@@ -442,7 +450,15 @@ class PortfolioImportService:
                 f"{float(record.get('fee', 0.0)):.8f}",
                 f"{float(record.get('tax', 0.0)):.8f}",
                 str(record.get("currency") or ""),
-                str(record.get("_source_line_number") or record.get("source_line_number") or ""),
             ]
         )
+
+    @classmethod
+    def _build_dedup_hash(cls, record: Dict[str, Any]) -> str:
+        # 位置因子用「本文件内第几次出现」：同一文件原样重导、以及重排后的重导
+        # 都得到同一个 hash；同字段的合法分笔成交仍不会被折叠成一条。
+        occurrence = record.get("_duplicate_ordinal")
+        if occurrence is None:
+            occurrence = record.get("_source_line_number") or record.get("source_line_number") or ""
+        payload = f"{cls._dedup_content_key(record)}|{occurrence}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()

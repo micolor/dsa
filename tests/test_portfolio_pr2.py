@@ -266,6 +266,44 @@ class PortfolioPr2TestCase(unittest.TestCase):
         self.assertEqual(second_commit["inserted_count"], 0)
         self.assertEqual(second_commit["duplicate_count"], 2)
 
+    def test_import_dedups_when_reexport_shifts_row_positions(self) -> None:
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        header = "成交日期,证券代码,买卖标志,成交数量,成交均价,手续费,印花税\n"
+        original = (
+            header
+            + "2026-01-02,600519,买入,10,100,1,0\n"
+            + "2026-01-05,000001,买入,20,15,1,1\n"
+        )
+        # 券商重新导出：顶部多出一笔更早的成交，原有两行整体下移。
+        # 去重因子若取绝对行号，这两行的 hash 会一起变，整份对账单重复入账。
+        reexported = header + "2025-12-31,600519,买入,5,90,1,0\n" + original[len(header):]
+
+        first = self.import_service.commit_trade_records(
+            account_id=aid,
+            broker="huatai",
+            records=self.import_service.parse_trade_csv(
+                broker="huatai", content=original.encode("utf-8"))["records"],
+        )
+        second = self.import_service.commit_trade_records(
+            account_id=aid,
+            broker="huatai",
+            records=self.import_service.parse_trade_csv(
+                broker="huatai", content=reexported.encode("utf-8"))["records"],
+        )
+
+        self.assertEqual(first["inserted_count"], 2)
+        self.assertEqual(second["inserted_count"], 1)
+        self.assertEqual(second["duplicate_count"], 2)
+
+        trades = self.service.list_trade_events(account_id=aid, page_size=50)["items"]
+        self.assertEqual(len(trades), 3)
+        # 600519 只入账两次（1 月 2 日的 10 股与 12 月 31 日的 5 股），没有被重复累加
+        self.assertEqual(
+            sorted(item["quantity"] for item in trades if item["symbol"] == "600519"),
+            [5.0, 10.0],
+        )
+
     def test_import_oversell_counts_failed_not_duplicate(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
         aid = account["id"]
