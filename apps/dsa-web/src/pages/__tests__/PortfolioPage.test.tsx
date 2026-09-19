@@ -1014,6 +1014,32 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByText('已提交 HK00700 分析任务：task-portfolio-1')).toBeInTheDocument();
   });
 
+  it('keeps each position submitting independently while its analysis request is in flight', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({ positions: [
+      { symbol: '600519', market: 'cn', currency: 'CNY', quantity: 1, avgCost: 1500, totalCost: 1500, lastPrice: 1600, marketValueBase: 1600, unrealizedPnlBase: 100, unrealizedPnlPct: 6.67, valuationCurrency: 'CNY', priceSource: 'history_close', priceDate: '2026-06-17', priceStale: false, priceAvailable: true },
+      { symbol: 'AAPL', market: 'us', currency: 'USD', quantity: 2, avgCost: 180, totalCost: 360, lastPrice: 190, marketValueBase: 380, unrealizedPnlBase: 20, unrealizedPnlPct: 5.56, valuationCurrency: 'USD', priceSource: 'history_close', priceDate: '2026-06-17', priceStale: false, priceAvailable: true },
+    ] }));
+    analyzePosition.mockImplementation(() => new Promise(() => {}));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    const cnRow = screen.getByText('600519').closest('tr') as HTMLTableRowElement;
+    const usRow = screen.getByText('AAPL').closest('tr') as HTMLTableRowElement;
+
+    fireEvent.click(within(cnRow).getByRole('button', { name: '分析' }));
+    await waitFor(() => expect(within(cnRow).getByRole('button', { name: '提交中' })).toBeDisabled());
+
+    // 第二行提交时不能把第一行的「提交中」清掉：第一行的请求其实还在途，
+    // 清掉之后按钮重新可点，用户会重复提交同一个持仓的分析。
+    fireEvent.click(within(usRow).getByRole('button', { name: '分析' }));
+
+    expect(within(cnRow).getByRole('button', { name: '提交中' })).toBeDisabled();
+    expect(within(usRow).getByRole('button', { name: '提交中' })).toBeDisabled();
+  });
+
+
   it('prefers disabled feedback over empty-pair feedback when refresh is disabled', async () => {
     refreshFx.mockResolvedValueOnce({
       asOf: '2026-03-19',

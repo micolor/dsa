@@ -344,7 +344,9 @@ const PortfolioPage: React.FC = () => {
   // 只让最新一次请求生效，避免慢响应覆盖新数据或提前清除加载态。
   const snapshotRequestRef = useRef(0);
   const eventsRequestRef = useRef(0);
-  const [positionAnalysisLoadingKey, setPositionAnalysisLoadingKey] = useState<string | null>(null);
+  // 按行 key 记录在途的分析提交：单值会在提交第二行时把第一行的「提交中」清掉，
+  // 第一行的按钮重新可点，用户会重复提交同一个持仓的分析。
+  const [positionAnalysisLoadingKeys, setPositionAnalysisLoadingKeys] = useState<Record<string, true>>({});
   // 三个录入表单各自「正在提交」的状态：手动录入不带 trade_uid，后端没有去重键可用，
   // 双击提交（或在选股输入框里连按回车）会把同一笔记录写两遍，所以必须由前端锁住按钮。
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
@@ -905,7 +907,7 @@ const PortfolioPage: React.FC = () => {
   const handleAnalyzePosition = async (row: FlatPosition) => {
     if (isFundSymbol(row.symbol)) return;
     const key = `${row.accountId}-${row.symbol}-${row.market}`;
-    setPositionAnalysisLoadingKey(key);
+    setPositionAnalysisLoadingKeys((previous) => ({ ...previous, [key]: true }));
     setPositionAnalysisMessage(null);
     setError(null);
     try {
@@ -918,7 +920,14 @@ const PortfolioPage: React.FC = () => {
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
-      setPositionAnalysisLoadingKey(null);
+      setPositionAnalysisLoadingKeys((previous) => {
+        if (!(key in previous)) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
     }
   };
 
@@ -1664,7 +1673,7 @@ const PortfolioPage: React.FC = () => {
                 <tbody>
                   {displayPositionRows.map((row) => {
                     const rowKey = `${row.accountId}-${row.symbol}-${row.market}`;
-                    const analyzing = positionAnalysisLoadingKey === rowKey;
+                    const analyzing = Boolean(positionAnalysisLoadingKeys[rowKey]);
                     const signal = signalByPositionKey.get(rowKey);
                     const stockName = getStockName(row.symbol);
                     const stopLoss = stopLossByPositionKey.get(`${row.accountId}-${row.symbol}`);
@@ -2474,10 +2483,10 @@ const PortfolioPage: React.FC = () => {
                 variant="primary"
                 size="lg"
                 className="flex-1"
-                disabled={positionAnalysisLoadingKey === `${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`}
+                disabled={Boolean(positionAnalysisLoadingKeys[`${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`])}
                 onClick={() => void handleAnalyzePosition(positionDetailRow)}
               >
-                {positionAnalysisLoadingKey === `${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}` ? '提交中...' : '提交分析'}
+                {positionAnalysisLoadingKeys[`${positionDetailRow.accountId}-${positionDetailRow.symbol}-${positionDetailRow.market}`] ? '提交中...' : '提交分析'}
               </Button>
               <Button type="button" variant="outline" size="lg" onClick={() => setPositionDetailRow(null)}>关闭</Button>
             </div>
