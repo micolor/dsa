@@ -117,7 +117,14 @@ export const getCandidateReason = (item: ScreeningCandidate) => {
 };
 
 export const getSignal = (item: ScreeningCandidate) => {
-  const rawSignal = item.raw.action ?? item.raw.signal ?? item.raw.recommendation;
+  // raw 在类型上是必填，但恢复选股结果副本时是原样 JSON.parse 回来的，运行时并不保证
+  // 它存在或是个对象；这里直接读 raw.action 会抛错，而抛在渲染期会把整页换成
+  // 「页面加载失败」。缺 raw 时退化成默认信号。
+  const raw = item.raw;
+  if (typeof raw !== 'object' || raw === null) {
+    return '观察';
+  }
+  const rawSignal = raw.action ?? raw.signal ?? raw.recommendation;
   return typeof rawSignal === 'string' && rawSignal.trim() ? rawSignal : '观察';
 };
 

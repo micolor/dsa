@@ -155,12 +155,28 @@ const clearPersistedScreenResult = () => {
 type ScreenResultScope = { strategy: string | null; market: string | null };
 
 /**
+ * 候选列表按「不可信输入」收敛。
+ *
+ * `ScreeningScreenResponse` 上的字段类型只是编译期断言：副本是原样 `JSON.parse` 回来的，
+ * 服务端响应也可能缺字段。渲染链路（`.map` / `llmWatchItems.join` / `raw.action`）默认
+ * 每个候选都是对象，所以入口处统一收口——非数组按空列表处理，数组里的非对象元素丢掉。
+ */
+const toScreenCandidates = (value: unknown): ScreeningCandidate[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is ScreeningCandidate => typeof item === 'object' && item !== null)
+    : [];
+
+/**
  * 读取上次的选股结果副本。
  *
  * 结果区只写「选股结果 / N 条候选」，不标注产出它的策略，所以恢复时要自己核对归属：
  * 副本里的 strategy / market 与当前表单不一致就丢弃（老载荷缺这两个字段时不拦，
  * 免得历史数据整块失效）。切换策略会清空结果，只清内存不清副本的话，刷新后旧结果
  * 会复活并被当成当前策略的候选。
+ *
+ * candidates 不是数组的副本没有可用内容（旧载荷 / 被外部改写 / 写了一半），整块丢弃：
+ * 留下它只会让结果区按「0 条候选」渲染，或者更糟——在候选上取值把整页打成
+ * 「页面加载失败」。
  */
 const readScreenResult = (scope: ScreenResultScope): ScreeningScreenResponse | null => {
   if (typeof window === 'undefined') {
@@ -172,13 +188,16 @@ const readScreenResult = (scope: ScreenResultScope): ScreeningScreenResponse | n
       return null;
     }
     const parsed = JSON.parse(raw) as ScreeningScreenResponse;
+    if (!Array.isArray(parsed?.candidates)) {
+      return null;
+    }
     if (scope.strategy && parsed.strategy && parsed.strategy !== scope.strategy) {
       return null;
     }
     if (scope.market && parsed.market && parsed.market !== scope.market) {
       return null;
     }
-    return parsed;
+    return { ...parsed, candidates: toScreenCandidates(parsed.candidates) };
   } catch {
     return null;
   }
@@ -922,7 +941,7 @@ const StockScreeningPage: React.FC = () => {
   const isScreeningEnabled = enabled && available;
 
   const applyScreenResult = useCallback((result: ScreeningScreenResponse) => {
-    const nextCandidates = result.candidates || [];
+    const nextCandidates = toScreenCandidates(result.candidates);
     setScreenMeta(result);
     setCandidates(nextCandidates);
     setExpandedCode(nextCandidates[0]?.code ?? null);

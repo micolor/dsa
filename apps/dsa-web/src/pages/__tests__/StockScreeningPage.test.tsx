@@ -1099,6 +1099,50 @@ describe('StockScreeningPage', () => {
     window.localStorage.clear();
   });
 
+  // 副本是原样 JSON.parse 回来的，没有任何形状校验，所以「恢复」这条路径上
+  // 候选必须按最宽松的输入来兜：少字段的老载荷不能把整页打崩（RouteErrorBoundary
+  // 会把整个页面换成「页面加载失败」）。
+  it('renders a restored candidate that is missing raw instead of crashing the page', async () => {
+    getScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
+    window.localStorage.setItem(
+      'dsa.screening.lastResult.v1',
+      JSON.stringify({
+        enabled: true,
+        candidates: [{ rank: 1, code: '000001', name: '缺 raw 的股票', score: 88.5 }],
+        candidateCount: 1,
+        strategy: 'dual_low',
+        market: 'cn',
+      }),
+    );
+
+    expect(() => render(<StockScreeningPage />)).not.toThrow();
+    window.localStorage.clear();
+
+    expect(await screen.findByText('缺 raw 的股票')).toBeInTheDocument();
+    // 首个候选默认展开，而 candidateFormat.getSignal 会读 raw.action —— 没有 raw 时退化成默认信号。
+    expect(screen.getByText('观察')).toBeInTheDocument();
+  });
+
+  it('ignores a restored payload whose candidates are not candidate objects', async () => {
+    getScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
+    window.localStorage.setItem(
+      'dsa.screening.lastResult.v1',
+      JSON.stringify({
+        enabled: true,
+        candidates: 'not-an-array',
+        candidateCount: 1,
+        strategy: 'dual_low',
+        market: 'cn',
+      }),
+    );
+
+    expect(() => render(<StockScreeningPage />)).not.toThrow();
+    window.localStorage.clear();
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    expect(screen.queryByText('选股结果')).not.toBeInTheDocument();
+  });
+
   it('hands a screening candidate to DSA analysis with mapped skills', async () => {
     getStrategies.mockResolvedValueOnce({
       enabled: true,
