@@ -58,7 +58,13 @@ EXTRACT_PROMPT = """请分析这张股票市场截图或图片，提取其中所
 _VALID_CONFIDENCE = frozenset({"high", "medium", "low"})
 
 # LLM sometimes returns JSON field names or markdown labels as "code"; filter these out
-_FAKE_CODES = frozenset({"CODE", "NAME", "HIGH", "LOW", "MEDIUM", "CONFIDENCE", "JSON"})
+_FAKE_CODES = frozenset({
+    "CODE", "NAME", "HIGH", "LOW", "MEDIUM", "CONFIDENCE", "JSON",
+    # 交易所代号本身不是股票代码：裸的 HK / SH / SZ 会被 1–5 个字母的美股规则接受，
+    # 而它们只可能来自 00700.HK / 600519.SH 这类写法被拆开（`stock_scope` 里
+    # 的 `_EXCHANGE_TOKEN_CANDIDATES` 出于同一原因拒绝这几个词）。
+    "HK", "SH", "SZ", "BJ", "SS",
+})
 
 # 兜底扫描只用这两个形态，而不是在整段原文上做 IGNORECASE 的字母扫描：
 # - 数字串就是明确的代码形态，命中什么算什么；
@@ -111,6 +117,14 @@ def _normalize_code(raw: str) -> Optional[str]:
     # US stocks: 1-5 letters, optionally with . (e.g. BRK.B)
     if re.match(r"^[A-Z]{1,5}(\.[A-Z])?$", s):
         return s
+    # 港股：截图里常按原文写成 00700.HK / HK00700，模型也常照抄；统一成 5 位纯数字码
+    # （与 5 位数字分支的输出形态一致），否则整条 item 会走到下面的 return None 被静默丢弃。
+    if s.endswith(".HK"):
+        base = s[: -len(".HK")].strip()
+        if base.isdigit() and 1 <= len(base) <= 5:
+            return base.zfill(5)
+    if s.startswith("HK") and s[2:].isdigit() and 1 <= len(s[2:]) <= 5:
+        return s[2:].zfill(5)
     # 尝试去除 SH/SZ 后缀
     for suffix in (".SH", ".SZ", ".SS"):
         if s.endswith(suffix):
@@ -205,6 +219,11 @@ def _parse_items_from_text(text: str) -> List[Tuple[str, Optional[str], str]]:
                 continue
             code = _normalize_code(code_raw)
             if not code or code in seen or code in _FAKE_CODES:
+                # 记一条日志：解析不出来就整条丢弃（含 name/confidence），
+                # 不记的话用户只看到「图里没有这只票」，无从判断是模型没认出
+                # 还是代码形态不被支持（例如 .HK 后缀）。
+                if not code:
+                    logger.debug("[ImageExtractor] 丢弃无法归一化的代码: %r", code_raw)
                 continue
             seen.add(code)
             name = item.get("name")

@@ -26,6 +26,7 @@ from src.services.image_stock_extractor import (
     _resolve_vision_model,
     _get_api_keys_for_model,
     _call_litellm_vision,
+    _normalize_code,
     _parse_codes_from_text,
     _parse_items_from_text,
     extract_stock_codes_from_image,
@@ -382,6 +383,35 @@ class TestParseCodesFromText:
         assert "HIGH" not in codes
         assert "159887" in codes
         assert "512880" in codes
+
+
+class TestNormalizeHKCodes:
+    """`.HK` / `HK` 前缀写法要归一化成代码，而不是被静默丢弃。
+
+    截图里的港股常按原文写成 `00700.HK`，模型也常照抄；`_normalize_code` 原先
+    只剥 `.SH`/`.SZ`/`.SS` 后缀、不认 `HK` 前缀，带 `.HK` 的代码走到最后
+    `return None`，而 `_parse_items_from_text` 对 `code is None` 的条目直接
+    `continue`，整条 item（含 name / confidence）消失，用户以为图里没有港股。
+    """
+
+    def test_hk_forms_normalize_to_five_digits(self):
+        assert _normalize_code("00700.HK") == "00700"
+        assert _normalize_code("hk00700") == "00700"
+        assert _normalize_code("HK00700") == "00700"
+        assert _normalize_code("700.HK") == "00700"
+        assert _normalize_code("00700") == "00700"
+
+    def test_hk_item_is_not_dropped_from_the_object_array(self):
+        text = (
+            '[{"code":"00700.HK","name":"腾讯控股","confidence":"high"},'
+            '{"code":"600519","name":"贵州茅台","confidence":"high"}]'
+        )
+        items = _parse_items_from_text(text)
+        assert [(i[0], i[1]) for i in items] == [("00700", "腾讯控股"), ("600519", "贵州茅台")]
+
+    def test_bare_exchange_token_is_not_a_stock_code(self):
+        assert _normalize_code("00700") != "HK"
+        assert _parse_codes_from_text('["HK","159887","SH","512880"]') == ["159887", "512880"]
 
 
 class TestLegacyFallbackDoesNotInventCodes:
