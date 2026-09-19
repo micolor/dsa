@@ -15,7 +15,12 @@ import logging
 from typing import List, Optional
 
 from src.agent.agents.base_agent import BaseAgent
-from src.agent.protocols import AgentContext, AgentOpinion, normalize_decision_signal
+from src.agent.protocols import (
+    AgentContext,
+    AgentOpinion,
+    normalize_decision_signal,
+    normalize_model_number,
+)
 from src.report_language import normalize_report_language
 
 logger = logging.getLogger(__name__)
@@ -270,11 +275,11 @@ should sum to 100; all-zero means no effective signal and must not be faked.
                 dashboard.get("decision_type", "hold")
             )
             ctx.set_data("final_dashboard", dashboard)
-            try:
-                _raw_score = dashboard.get("sentiment_score", 50) or 50
-                _score = float(_raw_score)
-            except (TypeError, ValueError):
-                _score = 50.0
+            # 这里不能夹到 [0, 100]：越界分数要让 `confidence` 落在 0-1 之外，
+            # 从而被 AgentOpinion 标成 `confidence_input_valid=False` 并排除在
+            # 采样之外（runtime_facts._valid_skill_confidence），夹成 0.0 等于把
+            # 一个伪造出来的置信度混进样本。只修 `or 50` 把合法的 0 抬成 50 的问题。
+            _score = normalize_model_number(dashboard.get("sentiment_score"), default=50.0)
             return AgentOpinion(
                 agent_name=self.agent_name,
                 signal=dashboard.get("decision_type", "hold"),

@@ -20,7 +20,7 @@ import logging
 from typing import Optional
 
 from src.agent.agents.base_agent import BaseAgent
-from src.agent.protocols import AgentContext, AgentOpinion
+from src.agent.protocols import AgentContext, AgentOpinion, normalize_model_number
 from src.agent.runner import try_parse_json
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,11 @@ from your search results. Do NOT invent risks.
         return AgentOpinion(
             agent_name=self.agent_name,
             signal=_risk_to_signal(parsed.get("risk_level", "none")),
-            confidence=float(parsed.get("risk_score", 50)) / 100.0,
+            # 50 分只是缺失时的中性回落，`risk_score: null` / `"高"` 同样落到它。
+            # 直接 float() 会抛错并被 BaseAgent.run 吞掉，连带丢掉整个风险 stage。
+            confidence=normalize_model_number(
+                parsed.get("risk_score"), default=50.0, minimum=0.0, maximum=100.0
+            ) / 100.0,
             reasoning=parsed.get("reasoning", ""),
             raw_data=parsed,
         )

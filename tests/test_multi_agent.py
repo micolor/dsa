@@ -1037,9 +1037,133 @@ class TestPortfolioAgentPostProcess(unittest.TestCase):
         self.assertEqual(op.signal, "hold")
         self.assertAlmostEqual(op.confidence, 0.3)
 
+    def test_non_numeric_risk_score_does_not_lose_the_stage(self):
+        """模型把分数写成字符串/null 时不能抛错——抛错会被 BaseAgent.run 吞掉并丢掉整个 stage。"""
+        agent = self._make_agent()
+        cases = [
+            ("8", "sell"),
+            ("3", "buy"),
+            ("high", "hold"),
+            (None, "hold"),
+        ]
+
+        for value, expected_signal in cases:
+            with self.subTest(portfolio_risk_score=value):
+                ctx = AgentContext()
+                data = {"portfolio_risk_score": value, "summary": "x"}
+
+                op = agent.post_process(ctx, json.dumps(data))
+
+                self.assertIsNotNone(op)
+                self.assertEqual(op.signal, expected_signal)
+                self.assertEqual(ctx.data.get("portfolio_assessment"), data)
+
+
+class TestRiskAgentPostProcess(unittest.TestCase):
+    """RiskAgent.post_process must degrade one number, not fail the risk stage."""
+
+    def _make_agent(self):
+        from src.agent.agents.risk_agent import RiskAgent
+        return RiskAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+
+    def test_non_numeric_risk_score_keeps_the_risk_opinion(self):
+        agent = self._make_agent()
+        cases = [
+            (None, 0.5),
+            ("高", 0.5),
+            ("-", 0.5),
+            ("80", 0.8),
+            (30, 0.3),
+        ]
+
+        for value, expected_confidence in cases:
+            with self.subTest(risk_score=value):
+                ctx = AgentContext()
+                payload = {
+                    "risk_level": "low",
+                    "risk_score": value,
+                    "flags": [],
+                    "veto_buy": False,
+                    "reasoning": "ok",
+                }
+
+                op = agent.post_process(ctx, json.dumps(payload))
+
+                self.assertIsNotNone(op)
+                self.assertAlmostEqual(op.confidence, expected_confidence)
+
+    def test_out_of_range_risk_score_is_clamped(self):
+        agent = self._make_agent()
+        for value, expected_confidence in ((250, 1.0), (-40, 0.0)):
+            with self.subTest(risk_score=value):
+                payload = {
+                    "risk_level": "high",
+                    "risk_score": value,
+                    "flags": [],
+                    "veto_buy": True,
+                    "reasoning": "ok",
+                }
+
+                op = agent.post_process(AgentContext(), json.dumps(payload))
+
+                self.assertIsNotNone(op)
+                self.assertAlmostEqual(op.confidence, expected_confidence)
+
 
 class TestDecisionAgentPostProcess(unittest.TestCase):
     """Test DecisionAgent dashboard normalization behaviour."""
+
+    def test_zero_sentiment_score_is_not_replaced_by_the_default(self):
+        """`sentiment_score: 0`（最看空）不能被 `or 50` 抬成 50% 置信度。"""
+        from src.agent.agents.decision_agent import DecisionAgent
+
+        agent = DecisionAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        dashboard = {
+            "decision_type": "sell",
+            "sentiment_score": 0,
+            "analysis_summary": "Maximally bearish",
+        }
+
+        opinion = agent.post_process(AgentContext(query="test"), json.dumps(dashboard))
+
+        self.assertIsNotNone(opinion)
+        self.assertEqual(opinion.confidence, 0.0)
+        self.assertTrue(opinion.confidence_input_valid)
+
+    def test_unusable_sentiment_score_falls_back_to_the_default(self):
+        """缺失或非数值的 sentiment_score 回落到 50%，而不是让 post_process 抛错。"""
+        from src.agent.agents.decision_agent import DecisionAgent
+
+        agent = DecisionAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        for value in (None, "xx", "-", {"a": 1}):
+            with self.subTest(sentiment_score=value):
+                dashboard = {
+                    "decision_type": "hold",
+                    "sentiment_score": value,
+                    "analysis_summary": "s",
+                }
+
+                opinion = agent.post_process(AgentContext(query="test"), json.dumps(dashboard))
+
+                self.assertIsNotNone(opinion)
+                self.assertEqual(opinion.confidence, 0.5)
+
+    def test_out_of_range_sentiment_score_stays_sample_invalid(self):
+        """超范围分数仍要被 `confidence_input_valid` 标成不可采样，别夹成 0 混进样本。"""
+        from src.agent.agents.decision_agent import DecisionAgent
+
+        agent = DecisionAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        dashboard = {
+            "decision_type": "sell",
+            "sentiment_score": -30,
+            "analysis_summary": "s",
+        }
+
+        opinion = agent.post_process(AgentContext(query="test"), json.dumps(dashboard))
+
+        self.assertIsNotNone(opinion)
+        self.assertFalse(opinion.confidence_input_valid)
+
 
     def test_normalizes_strong_decision_type_to_legacy_enum(self):
         from src.agent.agents.decision_agent import DecisionAgent

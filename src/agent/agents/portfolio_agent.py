@@ -26,7 +26,7 @@ import logging
 from typing import Optional
 
 from src.agent.agents.base_agent import BaseAgent
-from src.agent.protocols import AgentContext, AgentOpinion
+from src.agent.protocols import AgentContext, AgentOpinion, normalize_model_number
 from src.agent.runner import try_parse_json
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,12 @@ class PortfolioAgent(BaseAgent):
         # Store portfolio assessment in context
         ctx.data["portfolio_assessment"] = data
 
-        risk_score = data.get("portfolio_risk_score", 5)
+        # 模型常把分数写成 `"8"` / `null` / `"high"`；直接拿去做整数比较会抛 TypeError，
+        # 被 BaseAgent.run 吞掉后整个持仓 stage 丢失（连下面那条 0.3 置信度的 hold
+        # 兜底都拿不到）。1-10 是 prompt 里声明的量纲，越界值夹到端点。
+        risk_score = normalize_model_number(
+            data.get("portfolio_risk_score"), default=5.0, minimum=1.0, maximum=10.0
+        )
         signal = "hold"
         if risk_score <= 3:
             signal = "buy"

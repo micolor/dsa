@@ -109,6 +109,38 @@ def normalize_decision_signal(signal: Any, default: str = "hold") -> str:
     return _CANONICAL_DECISION_SIGNAL_MAP.get(normalized, default)
 
 
+def normalize_model_number(
+    value: Any,
+    default: float,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+) -> float:
+    """Coerce a model-reported numeric field without failing the whole stage.
+
+    模型对 prompt 里的数值槽位并不守约：`null`、`"-"`、`"高"`、被引号包住的
+    `"8"` 都很常见，而这些字段是 `AgentOpinion.confidence` 的输入。直接
+    `float(...)` 会在 agent 的 ``post_process`` 里抛 TypeError/ValueError，异常被
+    ``BaseAgent.run`` 的通用 ``except Exception`` 吞掉后，丢的不是一个数字而是
+    **整个 stage**：没有 opinion，下游的风险否决/降级于是静默失效，流水线却照常
+    输出一份看起来完整的结论。这里只让这一个数字降级：缺失或无法解析取
+    ``default``（缺失与非法取值不该有不同含义），再按需夹到
+    ``[minimum, maximum]``。``bool`` 视为非法取值——它不是模型给出的分数。
+    """
+    if value is None or isinstance(value, bool):
+        return float(default)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not math.isfinite(number):
+        return float(default)
+    if minimum is not None:
+        number = max(float(minimum), number)
+    if maximum is not None:
+        number = min(float(maximum), number)
+    return number
+
+
 class StageStatus(str, Enum):
     """Lifecycle status of a pipeline stage."""
     PENDING = "pending"
