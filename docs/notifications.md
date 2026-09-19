@@ -103,6 +103,7 @@ Discord 长报告发送复用现有分片链路：单条 `content` 运行时不�
 | `SLACK_CHANNEL_ID` | minimal | slack | Secret | - |
 | `NOTIFICATION_REPORT_CHANNELS` | advanced | routing | Variable or Secret | - |
 | `NOTIFICATION_ALERT_CHANNELS` | advanced | routing | Variable or Secret | - |
+| `NOTIFICATION_EVENT_CHANNELS` | advanced | routing | Variable or Secret | - |
 | `NOTIFICATION_SYSTEM_ERROR_CHANNELS` | advanced | routing | Variable or Secret | - |
 | `NOTIFICATION_DEDUP_TTL_SECONDS` | advanced | noise | Variable or Secret | `0` |
 | `NOTIFICATION_COOLDOWN_SECONDS` | advanced | noise | Variable or Secret | `0` |
@@ -217,12 +218,13 @@ CUSTOM_WEBHOOK_BODY_TEMPLATE={"group_id":123456789,"message":$content_json}
 
 ## 通知路由策略
 
-P3 新增三类通知路由配置：
+P3 新增四类通知路由配置（与 `src/notification_routing.py` 的 `NOTIFICATION_ROUTE_CONFIGS` 一一对应）：
 
 | 路由类型 | 配置 key | 当前生产者 |
 | --- | --- | --- |
 | `report` | `NOTIFICATION_REPORT_CHANNELS` | 单股推送、聚合日报、大盘复盘、合并推送、飞书文档成功链接 |
 | `alert` | `NOTIFICATION_ALERT_CHANNELS` | EventMonitor 触发通知 |
+| `event` | `NOTIFICATION_EVENT_CHANNELS` | 事件型事实通知（龙虎榜、资金流、公告）与模拟盘实时成交推送（`PAPER_NOTIFY_ENABLED`） |
 | `system_error` | `NOTIFICATION_SYSTEM_ERROR_CHANNELS` | 预留能力；当前不新增自动系统错误生产者 |
 
 配置值为逗号分隔渠道枚举：`wechat,dingtalk,feishu,telegram,email,pushover,ntfy,gotify,pushplus,serverchan3,custom,discord,slack,astrbot`。
