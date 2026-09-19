@@ -839,6 +839,27 @@ describe('DecisionSignalsPage', () => {
     expect(screen.getByLabelText('来源报告 ID')).toHaveValue(3001);
   });
 
+  it('resets the source report id deep link instead of re-reading it from the URL', async () => {
+    // 深链参数只用于首次预填。「重置」的语义是回到全量列表，若仍从 window.location.search
+    // 重新取值，?sourceReportId= 会被原样注入回来：输入框、chip、以及 toListParams 的
+    // 短路分支（忽略其它筛选、强制 sourceType='analysis'）全部保留，重置对该筛选完全无效。
+    window.history.pushState({}, '', '/decision-signals?sourceReportId=3001');
+    renderPage();
+
+    await waitFor(() => {
+      expect(decisionSignalsApi.list).toHaveBeenCalledWith(expect.objectContaining({ sourceReportId: 3001 }));
+    });
+
+    const filterForm = screen.getByRole('button', { name: '筛选' }).closest('form');
+    fireEvent.click(within(filterForm as HTMLElement).getByRole('button', { name: '重置' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(decisionSignalsApi.list).mock.calls.at(-1)?.[0]?.sourceReportId).toBeUndefined();
+    });
+    expect(window.location.search).not.toContain('sourceReportId');
+    expect((screen.getByLabelText('来源报告 ID') as HTMLInputElement).value).toBe('');
+  });
+
   it('renders decision signal enum filter labels in Chinese', async () => {
     renderPage();
     await screen.findByText('贵州茅台');

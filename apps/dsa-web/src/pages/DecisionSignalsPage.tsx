@@ -215,6 +215,30 @@ function getInitialFilters(search = typeof window === 'undefined' ? '' : window.
   };
 }
 
+/**
+ * 摘掉 URL 上的深链筛选参数。
+ *
+ * `?sourceReportId=`（以及 `source_report_id`）只在首次进入时用于预填筛选，见
+ * ``getInitialFilters``。用户重置或移除该筛选后，URL 上如果还留着它，下次
+ * ``resetFilters`` 或重新挂载就会把它原样注入回来——输入框、chip、以及
+ * ``toListParams`` 的短路分支（忽略其它筛选、强制 ``sourceType: 'analysis'``）
+ * 全都会复活，「重置」对这个筛选就完全无效。本页直接读 ``window.location.search``、
+ * 不走 router，所以也用 ``replaceState`` 就地改写（不新增历史记录）。
+ */
+function clearSourceReportIdParam() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('sourceReportId');
+    url.searchParams.delete('source_report_id');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // URL 不可解析时忽略：深链预填只是便利功能，不影响页面其余部分。
+  }
+}
+
 function toListParams(
   filters: ListFilters,
   page: number,
@@ -913,12 +937,19 @@ const DecisionSignalsPage: React.FC = () => {
   };
 
   const resetFilters = useCallback(() => {
-    setFilters(getInitialFilters());
-    setAppliedFilters(getInitialFilters());
+    // 「重置」的语义是回到全量列表，因此不能再走 getInitialFilters()——那会连 URL 上的
+    // ?sourceReportId= 一起读回来，让重置对该筛选无效。同时把深链参数摘掉，
+    // 否则重新挂载（离开再返回、刷新）又会把它注入回来。
+    clearSourceReportIdParam();
+    setFilters(DEFAULT_LIST_FILTERS);
+    setAppliedFilters(DEFAULT_LIST_FILTERS);
     setPage(1);
   }, []);
 
   const removeFilter = useCallback((key: keyof ListFilters) => {
+    if (key === 'sourceReportId') {
+      clearSourceReportIdParam();
+    }
     setFilters((current) => ({ ...current, [key]: '' }));
     setAppliedFilters((current) => ({ ...current, [key]: '' }));
     setPage(1);
