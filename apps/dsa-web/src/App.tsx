@@ -8,6 +8,7 @@ import {
   StandaloneRouteBoundary,
 } from './components/layout/RouteBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ToastHostProvider } from './contexts/ToastHostContext';
 import { UiLanguageProvider, useUiLanguage } from './contexts/UiLanguageContext';
 import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
@@ -104,11 +105,14 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <UiLanguageProvider>
-      <Router>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </Router>
+      {/* 提示容器挂在 Router 之外，登录页与加载/错误早返回分支也才共用同一个右上角区域。 */}
+      <ToastHostProvider>
+        <Router>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </Router>
+      </ToastHostProvider>
     </UiLanguageProvider>
   );
 };
