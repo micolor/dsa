@@ -11,6 +11,7 @@
 4. GET /api/v1/stocks/{code}/history 历史行情接口
 """
 
+import asyncio
 import logging
 from typing import Optional
 import re
@@ -280,7 +281,11 @@ async def parse_import(request: Request) -> ExtractFromImageResponse:
                 detail={"error": "too_large", "message": "文本内容超过 100KB 上限"},
             )
         try:
-            items = parse_import_from_text(text)
+            # 解析本身完全同步：逐行名称解析会做一次 AkShare 网络请求，并对全量
+            # 5000+ 名称跑两轮 difflib 比对。本服务是单进程单事件循环，直接在
+            # `async def` 里调用等于让 /health、SSE 分析和所有其它请求排队等它——
+            # 100KB 文本上限按实测约相当于 50 秒级阻塞，2MB 文件上限更高。
+            items = await asyncio.to_thread(parse_import_from_text, text)
         except ValueError as e:
             text_bytes = len(text.encode("utf-8"))
             logger.warning(
@@ -333,7 +338,7 @@ async def parse_import(request: Request) -> ExtractFromImageResponse:
             )
         filename = getattr(file, "filename", None) or ""
         try:
-            items = parse_import_from_bytes(data, filename=filename)
+            items = await asyncio.to_thread(parse_import_from_bytes, data, filename=filename)
         except ValueError as e:
             ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
             logger.warning(
