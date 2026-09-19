@@ -85,6 +85,11 @@ logger = logging.getLogger(__name__)
 VALID_MODES = ("quick", "standard", "full", "specialist")
 NON_CRITICAL_BASE_STAGES = frozenset({"intel", "risk"})
 
+# 各模式下唯一产出用户可见答复的阶段：decision 始终是 `_build_agent_chain` 的收尾
+# 阶段（战法阶段会被插在它之前），`_resolve_final_output` 也只取它的 dashboard /
+# response text。因此只有它允许把模型原文推流给客户端。
+FINAL_ANSWER_STAGES = frozenset({"decision"})
+
 
 @dataclass
 class OrchestratorResult:
@@ -343,7 +348,9 @@ class AgentOrchestrator:
                     timeout_seconds = min(timeout_seconds, agent_limit)
                 else:
                     timeout_seconds = agent_limit
-        run_kwargs = {"progress_callback": progress_callback}
+        run_kwargs = {
+            "progress_callback": self._stage_progress_callback(agent.agent_name, progress_callback),
+        }
         if (
             timeout_seconds is not None
             and timeout_seconds > 0
@@ -351,6 +358,29 @@ class AgentOrchestrator:
         ):
             run_kwargs["timeout_seconds"] = timeout_seconds
         return agent.run(ctx, **run_kwargs)
+
+    @staticmethod
+    def _stage_progress_callback(
+        agent_name: str,
+        progress_callback: Optional[Callable],
+    ) -> Optional[Callable]:
+        """Drop model text streaming for stages whose output is not the answer.
+
+        中间阶段（技术面 / 情报 / 风险 / 战法）的流式内容是模型的中间推理和原始
+        JSON，前端会把它们实时拼进回答气泡，用户看到的就是一大堆英文和 JSON。
+        这些阶段仍然照常上报工具调用、阶段进度等事件，只有 ``content_delta`` 被丢弃。
+        """
+        if progress_callback is None:
+            return None
+        if agent_name in FINAL_ANSWER_STAGES:
+            return progress_callback
+
+        def forward(event: Any) -> None:
+            if isinstance(event, dict) and event.get("type") == "content_delta":
+                return
+            progress_callback(event)
+
+        return forward
 
     # -----------------------------------------------------------------
     # Public interface (mirrors AgentExecutor)
