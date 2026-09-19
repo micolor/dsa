@@ -1,10 +1,14 @@
 name: Docker Manual Publish
 
+# 手动重发某个已发布版本（典型场景：基础镜像 CVE，需要在不改代码的前提下重建镜像）。
+# 与 docker-publish.yml 一样，只接受已存在的 semver release tag，并**先检出该 tag**
+# 再构建：镜像里跑的代码必须与它挂的版本号一致。`latest` 只在该 tag 仍是最新
+# release 时才发布，避免把旧版本盖回 latest。
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag version (e.g., v1.0.0, latest)'
+        description: 'Release tag to publish (semver, e.g. v3.29.0)'
         required: true
         default: 'v1.0.0'
 
@@ -32,12 +36,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate release inputs
+      - name: Resolve release ref
+        id: release_ref
         run: |
-          if [[ "${{ inputs.image_tag }}" =~ [[:space:]] ]]; then
-            echo "image_tag must not contain spaces"
+          set -euo pipefail
+          RELEASE_TAG="${{ inputs.image_tag }}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "image_tag must be a release tag like v3.29.0 (got: ${RELEASE_TAG})" >&2
             exit 1
           fi
+          git fetch --tags --force
+          if ! git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "tag ${RELEASE_TAG} 不存在，拒绝构建：镜像里必须是该版本已发布的代码" >&2
+            exit 1
+          fi
+          git checkout "$RELEASE_TAG"
+          HEAD_REVISION="$(git rev-parse --short=12 HEAD)"
+          NEWEST_TAG="$(git tag -l 'v*.*.*' | sort -V | tail -1)"
+          PUBLISH_LATEST=false
+          if [[ "$RELEASE_TAG" == "$NEWEST_TAG" ]]; then
+            PUBLISH_LATEST=true
+          fi
+          echo "publishing ${RELEASE_TAG} (${HEAD_REVISION}); publish_latest=${PUBLISH_LATEST} (newest release tag: ${NEWEST_TAG})"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "revision=${HEAD_REVISION}" >> "$GITHUB_OUTPUT"
+          echo "publish_latest=${PUBLISH_LATEST}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -72,7 +95,7 @@ jobs:
           images: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}
           tags: |
             type=raw,value=${{ inputs.image_tag }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.release_ref.outputs.publish_latest }}
           flavor: |
             latest=false
 
@@ -83,13 +106,16 @@ jobs:
           images: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}
           tags: |
             type=raw,value=${{ inputs.image_tag }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.release_ref.outputs.publish_latest }}
           flavor: |
             latest=false
 
       - name: Pre-publish docker smoke
         run: |
-          docker build -t stock-analysis:manual -f docker/Dockerfile .
+          docker build \
+            --build-arg DSA_WEB_VERSION="${{ steps.release_ref.outputs.version }}" \
+            --build-arg DSA_WEB_REVISION="${{ steps.release_ref.outputs.revision }}" \
+            -t stock-analysis:manual -f docker/Dockerfile .
           docker run --rm stock-analysis:manual python -c "
           from src.config import get_config; print('ok-config')
           from src.storage import DatabaseManager; print('ok-storage')
@@ -111,6 +137,9 @@ jobs:
             ${{ steps.meta-ghcr.outputs.tags }}
             ${{ steps.meta-dockerhub.outputs.tags }}
           labels: ${{ steps.meta-ghcr.outputs.labels }}
+          build-args: |
+            DSA_WEB_VERSION=${{ steps.release_ref.outputs.version }}
+            DSA_WEB_REVISION=${{ steps.release_ref.outputs.revision }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -120,7 +149,12 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- GHCR: \`${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Docker Hub: \`${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tags: ${{ inputs.image_tag }}, latest" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source ref: \`${{ inputs.image_tag }}\` (\`${{ steps.release_ref.outputs.revision }}\`)" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.release_ref.outputs.publish_latest }}" == "true" ]]; then
+            echo "- Tags: ${{ inputs.image_tag }}, latest" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Tags: ${{ inputs.image_tag }} (未更新 latest：该 tag 不是最新 release)" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "- Platforms: linux/amd64, linux/arm64" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Pull commands" >> "$GITHUB_STEP_SUMMARY"

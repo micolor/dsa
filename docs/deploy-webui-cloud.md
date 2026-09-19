@@ -156,6 +156,7 @@ http://your-domain.com:8000
 先区分两件事：
 
 1. **Docker 镜像发布版本**：看你部署时使用的镜像 tag，例如 `ghcr.io/zhulinsen/daily_stock_analysis:v3.12.0`。仓库的 Docker 发布由 `.github/workflows/docker-publish.yml` 按 `v*.*.*` Git tag 触发，所以 Docker 版本应以镜像 tag / GitHub Releases 为准。
+   维护者需要在不改代码的前提下重建某个已发布版本时（例如基础镜像出了 CVE），可以手动触发 Actions 里的 **Docker Manual Publish**（`.github/workflows/ghcr-dockerhub.yml`），填入已存在的 release tag。该 workflow 会先校验 tag 格式与存在性，再 `git checkout` 到那个 tag 后构建，所以镜像里的代码与它挂的版本号一致；只有当你填的 tag 仍是最新 release 时才会同时更新 `latest`。
 2. **当前页面加载的前端构建**：看 WebUI “系统设置”页里的版本信息卡片，用来确认浏览器拿到的静态资源是否已经更新。
 
 也就是说，**“系统设置”里的版本信息更适合判断前端是否重建成功，不等同于 Docker 镜像发布版本**。

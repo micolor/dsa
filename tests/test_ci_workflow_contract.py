@@ -137,3 +137,36 @@ def test_backend_filter_covers_mixed_changes_and_shared_web_assets() -> None:
     assert backend_output(["apps/dsa-web/src/App.tsx", "docs/CHANGELOG.md"]) is True
     assert backend_output(["apps/dsa-web/public/stocks.index.json"]) is True
     assert backend_output(["apps/dsa-web/public/runtime/new-asset.json"]) is True
+
+
+def test_manual_docker_publish_builds_the_requested_release_tag() -> None:
+    """手动发布必须检出 image_tag 指向的那份代码，且不得无条件覆盖 `latest`。
+
+    修复前该 workflow 只在分派时选中的 ref（默认分支）上构建，却把产物打成
+    调用方填写的版本号并同时推送 `latest`，于是「重建某个已发布版本」会发布
+    主干上未发布的代码，`latest` 也会被悄悄挪到没有任何 Release 的提交上。
+    """
+    manual = _workflow(".github/workflows/ghcr-dockerhub.yml")
+    job = manual["jobs"]["build-and-push"]
+    steps = job["steps"]
+    by_name = {step.get("name"): step for step in steps}
+    names = [step.get("name") for step in steps]
+
+    resolve = by_name["Resolve release ref"]
+    assert 'git checkout "$RELEASE_TAG"' in resolve["run"]
+    assert r"^v[0-9]+\.[0-9]+\.[0-9]+$" in resolve["run"]
+    assert "refs/tags/${RELEASE_TAG}" in resolve["run"]
+
+    # 检出必须在冒烟与构建之前，否则验证的与发布的是两份代码
+    assert names.index("Resolve release ref") < names.index("Pre-publish docker smoke")
+    assert names.index("Resolve release ref") < names.index(
+        "Build and push multi-arch images"
+    )
+
+    for meta_step_name in (
+        "Extract metadata for GHCR",
+        "Extract metadata for Docker Hub",
+    ):
+        tags = by_name[meta_step_name]["with"]["tags"]
+        assert "type=raw,value=latest,enable=" in tags
+        assert all(line.strip() != "type=raw,value=latest" for line in tags.splitlines())
