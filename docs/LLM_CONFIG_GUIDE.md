@@ -299,6 +299,7 @@ Hermes 是保留渠道名，只支持本机 loopback `/v1` OpenAI-compatible gen
 - 该兼容逻辑只增强“失败时保留后端真实错误原因”和“未配置 LLM 时给出更具体诊断”，**不会**静默删除、清空、迁移或改写你现有的 `GEMINI_*` / `OPENAI_*` / `ANTHROPIC_*` / `LITELLM_*` 配置。
 - 如果当前环境没有任何有效 Agent 模型链路，问股页面会继续按失败语义返回，并直接展示后端真实配置诊断；补齐任一有效模型来源后即可恢复，无需额外执行配置迁移脚本。
 - 推荐的新配置方式仍然是显式设置 `LITELLM_MODEL` / `AGENT_LITELLM_MODEL` 或使用 `LLM_CHANNELS`；legacy provider keys 目前保留为兼容回退路径，方便旧 `.env`、本地 macOS 开发环境和历史部署平滑继续运行。
+- 问股流式接口（`POST /api/v1/agent/chat/stream`）的消费侧等待时限由同一个 `AGENT_ORCHESTRATOR_TIMEOUT_S` 预算派生（预算 + 30 秒收尾余量），不再是一个固定值，整轮预算自己的终态事件因此总是先到。`AGENT_ORCHESTRATOR_TIMEOUT_S=0` 关闭预算时不再叠加二次上限，与 Codex 分支「后端独占截止时间」的约定一致；默认 LiteLLM Agent 仍不支持中途停止，二次上限只是运行时长已超出自身预算后的兜底。
 
 ### 问股可见对话上下文压缩
 

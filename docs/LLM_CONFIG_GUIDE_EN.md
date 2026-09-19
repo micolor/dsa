@@ -292,6 +292,7 @@ LITELLM_MODEL=openai/hermes-agent
 - This fix only improves two things: preserving the backend's real failure reason and returning a more specific diagnostic when no usable Agent LLM is configured. It does **not** silently delete, clear, migrate, or rewrite your existing `GEMINI_*`, `OPENAI_*`, `ANTHROPIC_*`, or `LITELLM_*` settings.
 - If the current environment has no valid Agent model path at all, the ask-stock page still returns a failure and now surfaces the backend's real configuration diagnosis. As soon as you restore any valid model source, the flow recovers without running any migration step.
 - The recommended forward path is still to configure `LITELLM_MODEL` / `AGENT_LITELLM_MODEL` explicitly or move to `LLM_CHANNELS`; legacy provider keys remain a compatibility fallback for older `.env` files, local macOS development, and existing deployments.
+- The wait limit on the consuming side of the streaming ask-stock endpoint (`POST /api/v1/agent/chat/stream`) is derived from the same `AGENT_ORCHESTRATOR_TIMEOUT_S` budget (budget + a 30-second tail margin) rather than a fixed value, so the turn budget's own terminal event always arrives first. With `AGENT_ORCHESTRATOR_TIMEOUT_S=0` no second limit is added, matching the Codex branch's "backend owns the only deadline" contract. The default LiteLLM Agent still cannot be interrupted mid-turn; the derived limit is only a backstop for a turn that has already outrun its own budget.
 
 ### Ask-Stock Visible Chat Context Compression
 

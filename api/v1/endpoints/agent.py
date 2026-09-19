@@ -6,6 +6,7 @@ Agent API endpoints.
 import asyncio
 import json
 import logging
+import math
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
@@ -384,6 +385,41 @@ def _select_agent_chat_backend(config) -> str:
     return evaluation["backend"]
 
 
+# Margin added on top of the runtime budget before the API gives up.  It only
+# covers delivering the runtime's own terminal event (plus the runtime's
+# cooperative budget check granularity); it is not a second budget.
+_STREAM_WAIT_GRACE_SECONDS = 30.0
+
+
+def _resolve_stream_wait_timeout(executor) -> Optional[float]:
+    """Derive the API-side per-event wait limit from the runtime's own budget.
+
+    The pipeline enforces ``agent_orchestrator_timeout_s`` (``AgentChatExecutor``
+    hands it to the runner as ``max_wall_clock_seconds``) and emits its own
+    terminal event when that budget expires.  A second, hardcoded API-side limit
+    races that deadline: under the 600s default a 300s limit fired first, the
+    stream emitted "分析超时" and ended, while the worker thread — which the
+    LiteLLM backend cannot cancel — kept running and later persisted an
+    assistant message the user never saw arrive, so reloading the session showed
+    a reply out of nowhere.
+
+    The limit therefore follows the same budget plus a small margin, so the
+    runtime's own outcome wins whenever it reaches one and the API deadline
+    remains only as a backstop for a worker stuck past its own budget.  ``0``
+    disables the runtime budget by design on the LiteLLM path; a disabled budget
+    leaves nothing to derive a deadline from, so no second limit is imposed —
+    the same contract as the Codex branch, where the backend owns the only
+    deadline.
+    """
+    try:
+        budget_s = float(getattr(executor, "timeout_seconds", None))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(budget_s) or budget_s <= 0:
+        return None
+    return budget_s + _STREAM_WAIT_GRACE_SECONDS
+
+
 async def _run_research_in_background(
     agent,
     question: str,
@@ -579,6 +615,7 @@ async def agent_chat_stream(
         try:
             try:
                 executor = await asyncio.to_thread(_build_executor, config, skills or None)
+                stream_wait_timeout = _resolve_stream_wait_timeout(executor)
                 turn = await asyncio.to_thread(
                     executor.prepare_turn,
                     message=request.message,
@@ -619,8 +656,19 @@ async def agent_chat_stream(
                         # terminal event before process cleanup finishes.
                         event = await queue.get()
                     else:
-                        event = await asyncio.wait_for(queue.get(), timeout=300.0)
+                        event = await asyncio.wait_for(queue.get(), timeout=stream_wait_timeout)
                 except asyncio.TimeoutError:
+                    # The runtime's own budget did not produce a terminal event in
+                    # time.  This backend cannot cancel its worker, so the pipeline
+                    # may still finish and persist its own message afterwards; record
+                    # it, since the user's stream has already ended by then.
+                    logger.warning(
+                        "agent stream wait limit expired after %ss for session %s; "
+                        "the %s worker is still running and may persist its result",
+                        stream_wait_timeout,
+                        session_id,
+                        backend_id,
+                    )
                     event = {"type": "error", "message": "分析超时", "error_code": "timeout"}
                     yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
                     break

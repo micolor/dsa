@@ -744,3 +744,82 @@ def test_codex_chat_availability_does_not_make_research_available() -> None:
          pytest.raises(Exception) as exc_info:
         asyncio.run(agent_endpoint.agent_research(agent_endpoint.ResearchRequest(question="why")))
     assert getattr(exc_info.value, "status_code", None) == 400
+
+
+# --- API-side stream wait limit must be derived from the runtime budget ---
+#
+# The pipeline enforces its own deadline (`agent_orchestrator_timeout_s`, default
+# 600s) and emits a terminal event when it expires.  A hardcoded API-side 300s
+# fired first on the default config: the stream emitted "分析超时" while the
+# worker thread kept running and later persisted an assistant message the user
+# never saw arrive.
+
+
+@pytest.mark.parametrize("budget, expected", [(600, 630.0), (300, 330.0), (60, 90.0)])
+def test_stream_wait_limit_is_derived_from_the_runtime_budget(budget: float, expected: float) -> None:
+    executor = SimpleNamespace(timeout_seconds=budget)
+    assert agent_endpoint._resolve_stream_wait_timeout(executor) == expected
+    assert agent_endpoint._resolve_stream_wait_timeout(executor) > budget
+
+
+@pytest.mark.parametrize(
+    "executor",
+    [
+        SimpleNamespace(timeout_seconds=0),
+        SimpleNamespace(timeout_seconds=None),
+        SimpleNamespace(),
+        SimpleNamespace(timeout_seconds="not-a-number"),
+        SimpleNamespace(timeout_seconds=-5),
+    ],
+)
+def test_runtime_without_a_budget_leaves_no_api_side_deadline(executor: object) -> None:
+    assert agent_endpoint._resolve_stream_wait_timeout(executor) is None
+
+
+def test_litellm_stream_wait_limit_follows_the_runtime_budget() -> None:
+    executor = _executor(_result(backend="litellm"))
+    executor.timeout_seconds = 600
+    observed: list = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(awaitable, timeout=None):
+        observed.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    with patch("api.v1.endpoints.agent.asyncio.wait_for", side_effect=recording_wait_for), \
+         patch("api.v1.endpoints.agent.asyncio.to_thread", side_effect=_immediate_to_thread), \
+         patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config()), \
+         patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+        events = asyncio.run(
+            _collect_stream_events(
+                agent_endpoint.ChatRequest(message="question", session_id="litellm-budget")
+            )
+        )
+
+    assert [event["type"] for event in events] == ["accepted", "done"]
+    assert observed[0] == 630.0
+
+
+def test_codex_stream_keeps_no_api_side_deadline() -> None:
+    # Codex owns its backend deadline; a second API timeout would race it.
+    executor = _executor(_result(backend="codex_app_server"))
+    executor.timeout_seconds = 600
+    observed: list = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(awaitable, timeout=None):
+        observed.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    with patch("api.v1.endpoints.agent.asyncio.wait_for", side_effect=recording_wait_for), \
+         patch("api.v1.endpoints.agent.asyncio.to_thread", side_effect=_immediate_to_thread), \
+         patch("api.v1.endpoints.agent.get_config", return_value=_codex_config()), \
+         patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+        events = asyncio.run(
+            _collect_stream_events(
+                agent_endpoint.ChatRequest(message="question", session_id="codex-budget")
+            )
+        )
+
+    assert [event["type"] for event in events] == ["accepted", "done"]
+    assert observed == []
