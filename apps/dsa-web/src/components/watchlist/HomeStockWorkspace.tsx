@@ -529,7 +529,10 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                   <select
                     value={activeListId}
                     onChange={(event) => void handleSwitchList(event.target.value)}
-                    className="h-8 w-full truncate rounded-lg border border-subtle bg-base/40 px-2 text-xs text-secondary-text"
+                    // 列表还在加载时不允许再切：切换中的多次点击只会让「显示」和「写入目标」
+                    // 更难对齐，用户也没有理由在结果没回来前再切一次。
+                    disabled={watchlistLoading}
+                    className="h-8 w-full truncate rounded-lg border border-subtle bg-base/40 px-2 text-xs text-secondary-text disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={t('watchlist.listSwitcherLabel')}
                   >
                     {watchlistOptions.map((option) => (

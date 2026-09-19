@@ -71,13 +71,20 @@ export function useWatchlist(): UseWatchlistReturn {
     [activeListId],
   );
 
+  // 只有最后一次发出的 codes 请求可以写状态：切换列表时旧列表的响应可能更慢，
+  // 落地时 activeListId 已经指向新列表，界面就会变成「表头是新列表、行内容是旧列表」，
+  // 而增删按 activeListName 写入，显示与写入目标随之静默分叉。
+  const codesSeqRef = useRef(0);
+
   // 返回是否成功：调用方需要区分「拉到了空列表」和「请求失败」。
   // 此前这里是静默 catch，导致切换列表失败时界面停留在「新列表名 + 上一个列表的股票」，
   // 新建列表失败时还会提示「已创建」。
   const refreshCodes = useCallback(async (listName?: string): Promise<boolean> => {
+    codesSeqRef.current += 1;
+    const seq = codesSeqRef.current;
     try {
       const result = await systemConfigApi.getWatchlist(listName);
-      if (mountedRef.current) {
+      if (mountedRef.current && seq === codesSeqRef.current) {
         setCodes(result);
       }
       return true;
@@ -159,6 +166,8 @@ export function useWatchlist(): UseWatchlistReturn {
     setIsActioning(true);
     try {
       const result = await systemConfigApi.addToWatchlist(stockCode, activeListName);
+      // 认领序号：增删的结果是当前列表的最新真相，不能被更早发出的列表读取覆盖。
+      codesSeqRef.current += 1;
       if (mountedRef.current) {
         setCodes(result);
         showMessage(t('watchlist.addedMessage', { code: stockCode }));
@@ -180,6 +189,8 @@ export function useWatchlist(): UseWatchlistReturn {
     setIsActioning(true);
     try {
       const result = await systemConfigApi.removeFromWatchlist(stockCode, activeListName);
+      // 认领序号：增删的结果是当前列表的最新真相，不能被更早发出的列表读取覆盖。
+      codesSeqRef.current += 1;
       if (mountedRef.current) {
         setCodes(result);
         showMessage(t('watchlist.removedMessage', { code: stockCode }));
@@ -204,22 +215,29 @@ export function useWatchlist(): UseWatchlistReturn {
     }
   }, [codes, removeFromWatchlist, addToWatchlist]);
 
+  // 连续切换时只认最后一次：先切换的那次既不能回滚激活列表（会把用户刚选的列表改回去），
+  // 也不能结束加载态（新列表还在路上）。
+  const switchSeqRef = useRef(0);
+
   const onSwitchList = useCallback(async (listId: string) => {
     if (listId === activeListId) return;
     const previousListId = activeListId;
     setActiveListId(listId);
     setIsLoading(true);
+    switchSeqRef.current += 1;
+    const switchSeq = switchSeqRef.current;
+    const isLatestSwitch = () => mountedRef.current && switchSeqRef.current === switchSeq;
     const listName = listId === DEFAULT_WATCHLIST_ID ? undefined : listId;
     try {
       const ok = await refreshCodes(listName);
-      if (!ok && mountedRef.current) {
+      if (!ok && isLatestSwitch()) {
         // 回滚激活列表：否则用户看到的是新列表名配着上一个列表的内容，
         // 比单纯的失败更难理解。
         setActiveListId(previousListId);
         showMessage(t('watchlist.actionFailed'));
       }
     } finally {
-      if (mountedRef.current) {
+      if (isLatestSwitch()) {
         setIsLoading(false);
       }
     }

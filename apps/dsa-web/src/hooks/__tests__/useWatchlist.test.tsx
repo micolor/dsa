@@ -143,6 +143,56 @@ describe('useWatchlist', () => {
     expect(mockAddToWatchlist).toHaveBeenCalledWith('600519', 'long');
   });
 
+  // 切换列表时若旧列表的响应更慢，它会在 activeListId 已指向新列表之后落地，
+  // 于是「表头是新列表、行内容是旧列表」——而增删是按 activeListName 写入的，
+  // 显示与写入目标静默分叉。
+  it('ignores a slower list switch that lands after a newer one', async () => {
+    let resolveSlowList: ((codes: string[]) => void) | undefined;
+    mockGetWatchlist.mockImplementation((listName?: string) => {
+      if (listName === 'slow') {
+        return new Promise<string[]>((resolve) => {
+          resolveSlowList = resolve;
+        });
+      }
+      if (listName === 'fast') {
+        return Promise.resolve(['600519']);
+      }
+      return Promise.resolve([]);
+    });
+    mockGetWatchlistLists.mockResolvedValue([
+      { key: 'WATCHLIST_SLOW', name: 'slow', count: 1 },
+      { key: 'WATCHLIST_FAST', name: 'fast', count: 1 },
+    ]);
+
+    const { result } = renderHook(() => useWatchlist());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    let slowSwitch: Promise<void> | undefined;
+    act(() => {
+      slowSwitch = result.current.onSwitchList('slow');
+    });
+    await act(async () => {
+      await result.current.onSwitchList('fast');
+    });
+
+    expect(result.current.activeListId).toBe('fast');
+    expect(result.current.watchlistCodes).toEqual(['600519']);
+
+    // slow 的响应迟到：不得覆盖 fast 的内容，也不得把激活列表回滚成 slow，
+    // 更不得把新列表的加载态提前结束。
+    await act(async () => {
+      resolveSlowList?.(['000001']);
+      await slowSwitch;
+    });
+
+    expect(result.current.activeListId).toBe('fast');
+    expect(result.current.watchlistCodes).toEqual(['600519']);
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('creating a list optimistically inserts it and switches to it', async () => {
     mockGetWatchlist.mockResolvedValueOnce([]);
 
