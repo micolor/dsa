@@ -1025,6 +1025,80 @@ describe('StockScreeningPage', () => {
     expect(screen.getByLabelText('策略')).toHaveTextContent('资金热度');
   });
 
+  it('drops the persisted screening result when the strategy changes', async () => {
+    // 本页把表单偏好与上次结果都写进 localStorage，同一文件里的用例会互相看到对方的
+    // 副本；先清干净再显式声明起始策略，否则「切换策略」可能是一次空操作。
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      'dsa.screening.formPrefs.v1',
+      JSON.stringify({ market: 'cn', strategy: 'dual_low', maxResults: 3 }),
+    );
+    getStrategies.mockResolvedValueOnce({
+      enabled: true,
+      strategies: [
+        { id: 'dual_low', name: '双低选股', description: 'desc', category: '价值' },
+        { id: 'capital_heat', name: '资金热度', description: 'desc', category: '动量' },
+      ],
+      strategyCount: 2,
+    });
+    getScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
+    screenStocks.mockResolvedValueOnce({
+      enabled: true,
+      candidates: [{ rank: 1, code: '000001', name: '旧策略股票', score: 88.5, reason: 'old result', raw: {} }],
+      candidateCount: 1,
+      strategy: 'dual_low',
+      market: 'cn',
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+    expect(await screen.findByText('旧策略股票')).toBeInTheDocument();
+    expect(window.localStorage.getItem('dsa.screening.lastResult.v1')).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText('策略'));
+    fireEvent.click(await screen.findByRole('option', { name: '资金热度' }));
+
+    expect(screen.queryByText('旧策略股票')).not.toBeInTheDocument();
+    // 内存里清了还不够：副本不清，刷新后旧结果会复活成「当前策略的候选」。
+    expect(window.localStorage.getItem('dsa.screening.lastResult.v1')).toBeNull();
+    window.localStorage.clear();
+  });
+
+  it('does not restore a persisted screening result that belongs to another strategy', async () => {
+    getStrategies.mockResolvedValueOnce({
+      enabled: true,
+      strategies: [
+        { id: 'dual_low', name: '双低选股', description: 'desc', category: '价值' },
+        { id: 'capital_heat', name: '资金热度', description: 'desc', category: '动量' },
+      ],
+      strategyCount: 2,
+    });
+    getScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
+    window.localStorage.setItem(
+      'dsa.screening.formPrefs.v1',
+      JSON.stringify({ market: 'cn', strategy: 'capital_heat', maxResults: 3 }),
+    );
+    window.localStorage.setItem(
+      'dsa.screening.lastResult.v1',
+      JSON.stringify({
+        enabled: true,
+        candidates: [{ rank: 1, code: '000001', name: '别的策略的股票', score: 88.5, reason: 'stale', raw: {} }],
+        candidateCount: 1,
+        strategy: 'dual_low',
+        market: 'cn',
+      }),
+    );
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('策略')).toHaveTextContent('资金热度');
+    expect(screen.queryByText('别的策略的股票')).not.toBeInTheDocument();
+    window.localStorage.clear();
+  });
+
   it('hands a screening candidate to DSA analysis with mapped skills', async () => {
     getStrategies.mockResolvedValueOnce({
       enabled: true,

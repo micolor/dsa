@@ -143,7 +143,26 @@ const persistScreenResult = (result: ScreeningScreenResponse) => {
   }
 };
 
-const readScreenResult = (): ScreeningScreenResponse | null => {
+const clearPersistedScreenResult = () => {
+  try {
+    window.localStorage.removeItem(SCREEN_RESULT_STORAGE_KEY);
+  } catch {
+    // localStorage 删除失败时静默忽略。
+  }
+};
+
+/** 当前表单的策略与市场，用来核对本地结果副本属于谁。 */
+type ScreenResultScope = { strategy: string | null; market: string | null };
+
+/**
+ * 读取上次的选股结果副本。
+ *
+ * 结果区只写「选股结果 / N 条候选」，不标注产出它的策略，所以恢复时要自己核对归属：
+ * 副本里的 strategy / market 与当前表单不一致就丢弃（老载荷缺这两个字段时不拦，
+ * 免得历史数据整块失效）。切换策略会清空结果，只清内存不清副本的话，刷新后旧结果
+ * 会复活并被当成当前策略的候选。
+ */
+const readScreenResult = (scope: ScreenResultScope): ScreeningScreenResponse | null => {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -152,7 +171,14 @@ const readScreenResult = (): ScreeningScreenResponse | null => {
     if (!raw) {
       return null;
     }
-    return JSON.parse(raw) as ScreeningScreenResponse;
+    const parsed = JSON.parse(raw) as ScreeningScreenResponse;
+    if (scope.strategy && parsed.strategy && parsed.strategy !== scope.strategy) {
+      return null;
+    }
+    if (scope.market && parsed.market && parsed.market !== scope.market) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -809,7 +835,12 @@ const StockScreeningPage: React.FC = () => {
   const { t } = useUiLanguage();
   const [restoredTask] = useState<PersistedScreenTask | null>(() => readPersistedScreenTask());
   const [formPrefs] = useState<ScreenFormPrefs | null>(() => readScreenFormPrefs());
-  const [restoredResult] = useState<ScreeningScreenResponse | null>(() => readScreenResult());
+  const [restoredResult] = useState<ScreeningScreenResponse | null>(() =>
+    readScreenResult({
+      strategy: formPrefs?.strategy ?? restoredTask?.strategy ?? null,
+      market: formPrefs?.market ?? restoredTask?.market ?? null,
+    }),
+  );
   const [enabled, setEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
   const [statusChecked, setStatusChecked] = useState(false);
@@ -902,6 +933,9 @@ const StockScreeningPage: React.FC = () => {
     setCandidates([]);
     setScreenMeta(null);
     setExpandedCode(null);
+    // 副本也要一起清，否则刷新或重新进入本页时旧结果会从 localStorage 复活，
+    // 而表单已是新策略，界面上就出现一份当前策略从未产出过的候选名单。
+    clearPersistedScreenResult();
   };
 
   const loadHotspotDetail = useCallback(async (
