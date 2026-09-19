@@ -1783,7 +1783,9 @@ const PortfolioPage: React.FC = () => {
           {/* 固定预留图表高度，避免数据加载后图表出现时卡片被撑高。 */}
           <div className="mb-2 h-12">
             {hasDrawdownTrend ? (
-              <ResponsiveContainer width="100%" height="100%">
+              /* 高度由 h-12 固定，宽度未知传 0（与 recharts 默认的 -1 同样是「测到之前不渲染」），
+                 只为消掉 recharts 每次挂载都打一条的 dev-only width(-1) 告警。 */
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 48 }}>
                 <AreaChart data={drawdownSeries}>
                   <defs>
                     <linearGradient id="drawdownFill" x1="0" y1="0" x2="0" y2="1">
@@ -2392,7 +2394,9 @@ const PortfolioPage: React.FC = () => {
                 <div className="rounded-xl border border-border/60 bg-elevated/30 p-3">
                   <div className="mb-2 text-sm font-semibold">价格趋势（近 30 天）</div>
                   <div className="h-24">
-                    <ResponsiveContainer width="100%" height="100%">
+                    {/* 高度由 h-24 固定，宽度未知传 0（与 recharts 默认的 -1 同样是「测到之前不渲染」），
+                        只为消掉 recharts 每次挂载都打一条的 dev-only width(-1) 告警。 */}
+                    <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 96 }}>
                       <AreaChart data={priceHistory}>
                         <defs>
                           <linearGradient id="priceHistoryFill" x1="0" y1="0" x2="0" y2="1">

@@ -34,7 +34,10 @@ export const EquityCurveChart: React.FC<Props> = ({ points, language }) => {
 
   return (
     <div className="h-64 min-h-64 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      {/* 高度由布局固定给出（h-64 = 256px），宽度要等 ResizeObserver 测量后才知道，
+          因此宽度传 0 表示「尺寸未知」——效果与 recharts 自己的默认值 -1 一样（测到之前
+          不渲染图表），但不会每次挂载都往控制台打一条 dev-only 的 width(-1) 告警。 */}
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 256 }}>
         <AreaChart data={points} margin={{ top: 12, right: 12, bottom: 8, left: 4 }}>
           <defs>
             <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
