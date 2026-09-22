@@ -265,7 +265,7 @@ class AskCommand(BotCommand):
             def _on_progress(event: Any) -> None:
                 if not isinstance(event, dict):
                     return
-                if event.get("type") != "alert_proposal":
+                if event.get("type") != "action_proposal":
                     return
                 summary = event.get("summary")
                 if isinstance(summary, str) and summary.strip():

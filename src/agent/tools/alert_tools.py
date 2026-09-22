@@ -1,11 +1,12 @@
 """Agent tool for proposing alert rules for user confirmation.
 
 The ``propose_alert`` tool is **read-only**: it validates a well-formed alert
-proposal (matching the backend ``AlertRuleCreateRequest`` contract) and returns it
-so the runner can surface it as an ``alert_proposal`` SSE event. The actual rule is
-created only after the user confirms, via the existing ``POST /api/v1/alerts/rules``
-endpoint (triggered from the web client). This keeps the "confirm before create"
-semantics and reuses the existing validation, permission and notification paths.
+proposal (matching the backend ``AlertRuleCreateRequest`` contract) and returns a
+``{"kind": "alert", "summary": ..., "proposal": ...}`` envelope so the runner can
+surface it as an ``action_proposal`` SSE event. The actual rule is created only after
+the user confirms, via the existing ``POST /api/v1/alerts/rules`` endpoint (triggered
+from the web client). This keeps the "confirm before create" semantics and reuses the
+existing validation, permission and notification paths.
 """
 
 from typing import Any, Dict
@@ -143,7 +144,7 @@ def _handle_propose_alert(
     if str(reason or "").strip():
         summary = f"{summary}（{reason}）"
 
-    return {"proposal": proposal, "summary": summary}
+    return {"kind": "alert", "summary": summary, "proposal": proposal}
 
 
 propose_alert_tool = ToolDefinition(

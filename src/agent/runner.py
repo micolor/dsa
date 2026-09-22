@@ -612,24 +612,38 @@ def run_agent_loop(
 # Internal tool execution
 # ============================================================
 
-_ALERT_PROPOSAL_TOOL_NAME = "propose_alert"
+# 提案工具：只读、返回 {kind, summary, proposal} 信封，由 runner 转成 action_proposal 事件。
+_PROPOSAL_TOOL_NAMES = frozenset({
+    "propose_alert",
+    "propose_portfolio_trade",
+    "propose_watchlist_change",
+})
+
+# 前端能分发的动作类型；越界的 kind 一律不发射，避免出现前端无法处理的卡片。
+_ALLOWED_PROPOSAL_KINDS = frozenset({
+    "alert",
+    "portfolio_trade",
+    "watchlist_add",
+    "watchlist_remove",
+})
 
 
-def _maybe_emit_alert_proposal(
+def _maybe_emit_action_proposal(
     tc,
     result_str: str,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]],
     step: int,
 ) -> str:
-    """Surface a ``propose_alert`` result to the client and simplify the LLM view.
+    """Surface a proposal tool result to the client and simplify the LLM view.
 
-    If the executed tool is ``propose_alert`` and its result is an
-    ``{"proposal": ..., "summary": ...}`` dict, emit an ``alert_proposal`` SSE
-    event via ``progress_callback`` and rewrite the LLM-facing ``result_str`` to a
-    short confirmation note (so the raw proposal JSON is not leaked into the
-    conversation). Returns the (possibly rewritten) ``result_str``.
+    If the executed tool is one of ``_PROPOSAL_TOOL_NAMES`` and its result is a
+    ``{"kind": ..., "summary": ..., "proposal": ...}`` envelope, emit an
+    ``action_proposal`` SSE event via ``progress_callback`` and rewrite the
+    LLM-facing ``result_str`` to a short confirmation note (so the raw proposal
+    JSON is not leaked into the conversation). Returns the (possibly rewritten)
+    ``result_str``.
     """
-    if tc.name != _ALERT_PROPOSAL_TOOL_NAME or not progress_callback:
+    if tc.name not in _PROPOSAL_TOOL_NAMES or not progress_callback:
         return result_str
     try:
         payload = json.loads(result_str)
@@ -637,11 +651,17 @@ def _maybe_emit_alert_proposal(
         return result_str
     if not isinstance(payload, dict):
         return result_str
+    kind = payload.get("kind")
     proposal = payload.get("proposal")
     summary = payload.get("summary")
+    # kind 必须是字符串且在白名单内（字符串判断同时挡住 list/dict 这类不可哈希取值）。
+    if not isinstance(kind, str) or kind not in _ALLOWED_PROPOSAL_KINDS:
+        return result_str
     if not isinstance(proposal, dict) or not isinstance(summary, str):
         return result_str
-    progress_callback(stream_event("alert_proposal", proposal=proposal, summary=summary))
+    progress_callback(
+        stream_event("action_proposal", kind=kind, proposal=proposal, summary=summary)
+    )
     return json.dumps({"message": summary}, ensure_ascii=False)
 
 
@@ -757,7 +777,7 @@ def _execute_tools(
             _, result_str, success, dur, cached, guard_result = _exec_single(tc)
         if progress_callback:
             progress_callback(stream_event("tool_done", step=step, tool=tc.name, success=success, duration=dur))
-        result_str = _maybe_emit_alert_proposal(tc, result_str, progress_callback, step)
+        result_str = _maybe_emit_action_proposal(tc, result_str, progress_callback, step)
         log_entry = {
             "step": step, "tool": tc.name, "arguments": tc.arguments,
             "success": success, "duration": dur, "result_length": len(result_str),
@@ -803,7 +823,7 @@ def _execute_tools(
             tc_item, result_str, success, dur, cached, guard_result = done.result()
             if progress_callback:
                 progress_callback(stream_event("tool_done", step=step, tool=tc_item.name, success=success, duration=dur))
-            result_str = _maybe_emit_alert_proposal(tc_item, result_str, progress_callback, step)
+            result_str = _maybe_emit_action_proposal(tc_item, result_str, progress_callback, step)
             log_entry = {
                 "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
                 "success": success, "duration": dur, "result_length": len(result_str),

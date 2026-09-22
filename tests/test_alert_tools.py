@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from src.agent.runner import _maybe_emit_alert_proposal
+from src.agent.runner import _maybe_emit_action_proposal
 from src.agent.tools.alert_tools import _handle_propose_alert, propose_alert_tool
 from src.agent.factory import get_tool_registry
 
@@ -66,32 +66,33 @@ def test_propose_empty_target_returns_error():
     assert result["error"]
 
 
-def test_maybe_emit_alert_proposal_emits_event_and_rewrites_result():
+def test_maybe_emit_action_proposal_emits_event_and_rewrites_result():
     events = []
     result = _handle_propose_alert(target="600519", alert_type="price_cross", parameters={"price": 1800})
     tc = SimpleNamespace(name="propose_alert")
-    out = _maybe_emit_alert_proposal(tc, json.dumps(result, ensure_ascii=False), events.append, step=3)
+    out = _maybe_emit_action_proposal(tc, json.dumps(result, ensure_ascii=False), events.append, step=3)
 
     assert len(events) == 1
     event = events[0]
-    assert event["type"] == "alert_proposal"
+    assert event["type"] == "action_proposal"
+    assert event["kind"] == "alert"
     assert event["summary"] == result["summary"]
     assert event["proposal"] == result["proposal"]
     # LLM-facing result is rewritten to a short note, not the raw proposal JSON.
     assert json.loads(out) == {"message": result["summary"]}
 
 
-def test_maybe_emit_alert_proposal_ignores_non_propose_tool():
+def test_maybe_emit_action_proposal_ignores_non_propose_tool():
     events = []
     tc = SimpleNamespace(name="get_realtime_quote")
-    out = _maybe_emit_alert_proposal(tc, '{"quote": 1}', events.append, step=3)
+    out = _maybe_emit_action_proposal(tc, '{"quote": 1}', events.append, step=3)
     assert out == '{"quote": 1}'
     assert events == []
 
 
-def test_maybe_emit_alert_proposal_ignores_error_result():
+def test_maybe_emit_action_proposal_ignores_error_result():
     events = []
     tc = SimpleNamespace(name="propose_alert")
-    out = _maybe_emit_alert_proposal(tc, json.dumps({"error": "x"}), events.append, step=3)
+    out = _maybe_emit_action_proposal(tc, json.dumps({"error": "x"}), events.append, step=3)
     assert json.loads(out) == {"error": "x"}
     assert events == []

@@ -455,3 +455,59 @@ def test_action_tools_are_registered_with_chinese_labels():
         assert tool is not None, f"{name} 未注册"
         assert _THINKING_TOOL_LABELS.get(name), f"{name} 缺少思考过程标签"
         assert TOOL_DISPLAY_NAMES.get(name), f"{name} 缺少中文展示名"
+
+
+from src.agent.runner import _maybe_emit_action_proposal
+
+
+def test_emitter_rejects_unknown_kind():
+    events = []
+    tc = SimpleNamespace(name="propose_portfolio_trade")
+    raw = json.dumps({"kind": "drop_table", "summary": "x", "proposal": {"a": 1}})
+    out = _maybe_emit_action_proposal(tc, raw, events.append, step=1)
+    assert out == raw
+    assert events == []
+
+
+def test_emitter_rejects_malformed_summary_and_proposal():
+    events = []
+    tc = SimpleNamespace(name="propose_portfolio_trade")
+    for payload in (
+        {"kind": "portfolio_trade", "summary": 1, "proposal": {"a": 1}},
+        {"kind": "portfolio_trade", "summary": "x", "proposal": "nope"},
+        {"kind": ["portfolio_trade"], "summary": "x", "proposal": {"a": 1}},
+    ):
+        raw = json.dumps(payload)
+        assert _maybe_emit_action_proposal(tc, raw, events.append, step=1) == raw
+    assert events == []
+
+
+def test_emitter_accepts_trade_and_watchlist_envelopes():
+    events = []
+    tc = SimpleNamespace(name="propose_watchlist_change")
+    raw = json.dumps(
+        {
+            "kind": "watchlist_add",
+            "summary": "把「600519」加入自选",
+            "proposal": {"stock_code": "600519", "list_name": None},
+        },
+        ensure_ascii=False,
+    )
+    out = _maybe_emit_action_proposal(tc, raw, events.append, step=2)
+    assert events[0]["type"] == "action_proposal"
+    assert events[0]["kind"] == "watchlist_add"
+    assert json.loads(out) == {"message": "把「600519」加入自选"}
+
+
+def test_every_proposable_kind_is_accepted_by_the_runner():
+    """工具能产出的 kind 必须恰好在 runner 白名单内。
+
+    这条把 runner 侧的白名单与工具侧的实际产出一致性钉住：漏一个，该动作的提案会被
+    `_maybe_emit_action_proposal` 静默丢弃（工具结果按原样放行），前端永远等不到卡片，
+    而且没有任何测试会红。白名单里多一个死值同样会被这条抓出来。
+    """
+    from src.agent.runner import _ALLOWED_PROPOSAL_KINDS
+    from src.agent.tools.action_tools import _ACTION_KINDS
+
+    producible = {"alert", "portfolio_trade", *set(_ACTION_KINDS.values())}
+    assert _ALLOWED_PROPOSAL_KINDS == producible
