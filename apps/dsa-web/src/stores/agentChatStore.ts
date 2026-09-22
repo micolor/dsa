@@ -9,8 +9,11 @@ import {
   type ParsedApiError,
 } from '../api/error';
 import { generateUUID } from '../utils/uuid';
-import { toCamelCase } from '../api/utils';
-import type { AlertProposal, AlertRuleCreateRequest } from '../types/alerts';
+import {
+  isActionProposalKind,
+  type ActionProposal,
+} from '../types/actionProposal';
+import type { AlertProposal } from '../types/alerts';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
@@ -52,7 +55,12 @@ export interface Message {
   skillName?: string;
   thinkingSteps?: ProgressStep[];
   backend?: string;
-  /** Alert rule proposed by the assistant, pending user confirmation. */
+  /** 写操作提案（告警/持仓录入/自选增删），等待用户在卡片上确认。 */
+  actionProposal?: ActionProposal;
+  /**
+   * @deprecated 过渡期兼容：ChatPage 的旧告警卡片仍读这个字段（Task 8 重写卡片时删除）。
+   * store 已不再写入它——后端不再发 alert_proposal，旧卡片在改动前后都不会渲染。
+   */
   alertProposal?: AlertProposal;
 }
 
@@ -421,9 +429,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       let receivedDoneEvent = false;
       let acceptedEvent: StreamAcceptedEvent | null = null;
       const currentProgressSteps: ProgressStep[] = [];
-      // Alert proposal surfaced via an alert_proposal event; attached to the
-      // committed assistant message at done so we avoid mid-stream mutation races.
-      let pendingAlertProposal: AlertProposal | undefined;
+      // 提案事件里的待确认动作；在 done 时挂到已提交的助手消息上，避免流中途改动消息。
+      let pendingActionProposal: ActionProposal | undefined;
       // Streaming text accumulation. content_delta events append here and the
       // assistant message is updated on a ~40ms throttle to avoid re-rendering
       // the full Markdown on every token.
@@ -560,14 +567,13 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           );
         }
 
-        if (event.type === 'alert_proposal') {
+        if (event.type === 'action_proposal') {
+          const kind = (event as { kind?: unknown }).kind;
           const proposal = (event as { proposal?: unknown }).proposal;
           const summary = (event as { summary?: unknown }).summary;
-          if (proposal && typeof summary === 'string') {
-            pendingAlertProposal = {
-              payload: toCamelCase<AlertRuleCreateRequest>(proposal),
-              summary,
-            };
+          if (isActionProposalKind(kind) && proposal && typeof summary === 'string') {
+            // proposal 保持后端原样（snake_case），snake→camel 与断言在 utils/actionProposal 里做。
+            pendingActionProposal = { kind, summary, proposal };
           }
           return;
         }
@@ -639,7 +645,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 content: committedContent,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
-                alertProposal: pendingAlertProposal,
+                actionProposal: pendingActionProposal,
               };
               return { messages };
             }
@@ -659,7 +665,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 skillName,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
-                alertProposal: pendingAlertProposal,
+                actionProposal: pendingActionProposal,
               },
             ],
           }));
