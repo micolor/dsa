@@ -83,6 +83,8 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
     "get_strategy_backtest_summary": "策略回测概览",
     "get_stock_backtest_summary": "个股回测数据",
     "propose_alert": "告警提案生成",
+    "propose_portfolio_trade": "持仓录入提案生成",
+    "propose_watchlist_change": "自选变更提案生成",
 }
 
 

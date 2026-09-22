@@ -442,3 +442,16 @@ def test_reason_is_length_bounded_in_both_proposal_tools():
             reason="很" * 5000,
         )
     assert len(trade["summary"]) < 400
+
+
+def test_action_tools_are_registered_with_chinese_labels():
+    from api.v1.endpoints.agent import TOOL_DISPLAY_NAMES
+    from src.agent.factory import get_tool_registry
+    from src.agent.runner import _THINKING_TOOL_LABELS
+
+    registry = get_tool_registry()
+    for name in ("propose_portfolio_trade", "propose_watchlist_change"):
+        tool = registry.resolve(name)
+        assert tool is not None, f"{name} 未注册"
+        assert _THINKING_TOOL_LABELS.get(name), f"{name} 缺少思考过程标签"
+        assert TOOL_DISPLAY_NAMES.get(name), f"{name} 缺少中文展示名"
