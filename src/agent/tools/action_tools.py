@@ -78,9 +78,13 @@ def _check_number(
     return number, None
 
 
-def _normalize_reason(reason: Any, *, limit: int = 200) -> str:
+# 提案理由长度上限：reason 会进入 summary → SSE 事件 → 确认卡片，避免模型塞长文本。
+_REASON_LIMIT = 200
+
+
+def _normalize_reason(reason: Any) -> str:
     """收敛提案理由：去空白并限制长度，避免模型把长文本塞进卡片与 SSE 事件。"""
-    return str(reason or "").strip()[:limit]
+    return str(reason or "").strip()[:_REASON_LIMIT]
 
 
 # ============================================================
@@ -346,7 +350,8 @@ def _resolve_named_list(list_name: str) -> Tuple[Optional[str], Optional[str]]:
     if not available:
         return None, (
             f"自选列表「{raw}」不存在；没有可用的命名自选列表"
-            "（未配置，或名字不规范、无法通过 list_name 指定），请省略 list_name 使用默认自选"
+            "（未配置，或名字不规范、无法通过 list_name 指定），"
+            "请让用户确认改用默认自选（需用户同意），或建议用户新建/重命名该列表"
         )
     return None, f"自选列表「{raw}」不存在；可用列表：{'、'.join(available)}"
 

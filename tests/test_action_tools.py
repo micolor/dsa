@@ -269,6 +269,7 @@ from src.agent.tools.action_tools import (  # noqa: E402
     ALL_ACTION_TOOLS,
     SUPPORTED_WATCHLIST_ACTIONS,
     _ACTION_KINDS,
+    _KIND_VERBS,
     _handle_propose_watchlist_change,
     propose_watchlist_change_tool,
 )
@@ -394,8 +395,15 @@ def test_watchlist_envelope_is_json_serializable():
 
 
 def test_watchlist_action_kinds_cover_the_supported_actions():
-    """kind 必须与 action 集合一一对应：漏一个就会在确认卡片上标错动作。"""
+    """kind 必须与 action 集合一一对应：漏一个就会在确认卡片上标错动作。
+
+    ``SUPPORTED_WATCHLIST_ACTIONS = tuple(_ACTION_KINDS)``，所以第一条断言其实是恒等式
+    （``set(tuple(d)) == set(d)`` 对任何 dict 都成立），只钉住推导关系；真正的守卫是第二条。
+    """
     assert set(_ACTION_KINDS) == set(SUPPORTED_WATCHLIST_ACTIONS)
+    # 这条不是恒等式：_KIND_VERBS 与 _ACTION_KINDS 是两份独立字面量，只往一边加成员
+    # 不会被上面那条恒等式发现（审查者实测：往 _ACTION_KINDS 加一条 "clear" 后 31 个测试仍全绿）。
+    assert set(_KIND_VERBS) == set(_ACTION_KINDS.values())
 
 
 def test_watchlist_hint_skips_names_that_cannot_round_trip():
@@ -412,7 +420,10 @@ def test_watchlist_hint_skips_names_that_cannot_round_trip():
         )
     assert "my-list" not in result["error"]
     assert "list_name" in result["error"]
-    assert "省略 list_name" in result["error"]
+    # 不能教模型「省略 list_name 用默认自选」：用户点名了某个列表，静默改用默认等于替用户
+    # 改写目标；必须先取到用户同意，或给出新建/重命名这类替代方案。
+    assert "省略 list_name" not in result["error"]
+    assert "需用户同意" in result["error"]
 
 
 def test_reason_is_length_bounded_in_both_proposal_tools():
