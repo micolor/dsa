@@ -267,20 +267,28 @@ def test_enums_mirror_the_api_contract():
 
 from src.agent.tools.action_tools import (  # noqa: E402
     ALL_ACTION_TOOLS,
+    SUPPORTED_WATCHLIST_ACTIONS,
+    _ACTION_KINDS,
     _handle_propose_watchlist_change,
     propose_watchlist_change_tool,
 )
 
 
-def _patch_named_lists(names=("短线池",)):
+def _patch_named_lists(names=("短线池",), keys=None):
+    """``keys`` 直接给出配置里的原始 key，用于构造非规范 key（如 ``WATCHLIST_MY-LIST``，注意
+    必须仍以大写 ``WATCHLIST_`` 开头，否则会被 ``list_named_watchlists`` 直接滤掉）；
+    省略时按 ``WATCHLIST_<NAME>`` 生成（``list_named_watchlists`` 的 name 即 key 后缀小写）。
+    """
     service = mock.MagicMock()
+    if keys is None:
+        keys = [f"WATCHLIST_{n.upper()}" for n in names]
 
     def _get_config(include_schema=True, mask_token="******"):
         # 断言侧会检查 get_config 的调用参数：真实 get_config(include_schema=True) 返回的是带
         # schema/掩码的结构而不是裸 items，若实现里漏传 False，只有断言过这个参数才抓得到。
         return {
             "config_version": "v1",
-            "items": [{"key": f"WATCHLIST_{n.upper()}", "value": ""} for n in names],
+            "items": [{"key": key, "value": ""} for key in keys],
         }
 
     service.get_config.side_effect = _get_config
@@ -383,3 +391,43 @@ def test_watchlist_appends_reason():
 def test_watchlist_envelope_is_json_serializable():
     result = _handle_propose_watchlist_change(action="add", symbol="600519")
     json.dumps(result, ensure_ascii=False)
+
+
+def test_watchlist_action_kinds_cover_the_supported_actions():
+    """kind 必须与 action 集合一一对应：漏一个就会在确认卡片上标错动作。"""
+    assert set(_ACTION_KINDS) == set(SUPPORTED_WATCHLIST_ACTIONS)
+
+
+def test_watchlist_hint_skips_names_that_cannot_round_trip():
+    """非规范 key ``WATCHLIST_MY-LIST`` 的 name 是「my-list」，但
+    ``resolve_watchlist_key("my-list")`` 会把 ``-`` 折成 ``_`` 得到 ``WATCHLIST_MY_LIST``：
+    把它列进「可用列表」等于推荐一个随后必然被拒的名字，模型会照着自己的提示原地重试。
+
+    注意不能用小写 ``watchlist_foo`` 当夹具：``list_named_watchlists`` 自己会按
+    ``startswith("WATCHLIST_")`` 把它整个滤掉，被测的往返过滤根本不会执行。
+    """
+    with _patch_named_lists(keys=["WATCHLIST_MY-LIST"]):
+        result = _handle_propose_watchlist_change(
+            action="add", symbol="600519", list_name="短线池"
+        )
+    assert "my-list" not in result["error"]
+    assert "list_name" in result["error"]
+    assert "省略 list_name" in result["error"]
+
+
+def test_reason_is_length_bounded_in_both_proposal_tools():
+    """reason 会流进 summary → SSE 事件 → 确认卡片，模型不能往里塞几 KB 文本。"""
+    watchlist = _handle_propose_watchlist_change(
+        action="add", symbol="600519", reason="很" * 5000
+    )
+    assert watchlist["summary"].endswith("（" + "很" * 200 + "）")
+    with _patch_accounts():
+        trade = _handle_propose_portfolio_trade(
+            account_id=1,
+            symbol="600519",
+            side="buy",
+            quantity=1,
+            price=1,
+            reason="很" * 5000,
+        )
+    assert len(trade["summary"]) < 400

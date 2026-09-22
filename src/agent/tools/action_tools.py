@@ -78,6 +78,11 @@ def _check_number(
     return number, None
 
 
+def _normalize_reason(reason: Any, *, limit: int = 200) -> str:
+    """收敛提案理由：去空白并限制长度，避免模型把长文本塞进卡片与 SSE 事件。"""
+    return str(reason or "").strip()[:limit]
+
+
 # ============================================================
 # propose_portfolio_trade
 # ============================================================
@@ -226,7 +231,7 @@ def _handle_propose_portfolio_trade(
         f"{norm_symbol} {_fmt_num(norm_quantity)} @ {price_text}"
         f"（{norm_date.isoformat()}，{amount_label} {amount_text}）"
     )
-    norm_reason = str(reason or "").strip()
+    norm_reason = _normalize_reason(reason)
     if norm_reason:
         summary = f"{summary}（{norm_reason}）"
 
@@ -295,7 +300,20 @@ propose_portfolio_trade_tool = ToolDefinition(
 # propose_watchlist_change
 # ============================================================
 
-SUPPORTED_WATCHLIST_ACTIONS = ("add", "remove")
+# action → 提案 kind。用映射而不是三元，避免将来新增 action 时被静默归到 remove。
+_ACTION_KINDS: Dict[str, str] = {
+    "add": "watchlist_add",
+    "remove": "watchlist_remove",
+}
+
+# 摘要动词按 kind 取，与 _ACTION_KINDS 同源：否则新增 action 时 summary 会把动作说成「移出」
+# 而 kind 是别的值，卡片文案与 kind 自相矛盾。查不到直接 KeyError，不静默兜底。
+_KIND_VERBS: Dict[str, str] = {
+    "watchlist_add": "加入",
+    "watchlist_remove": "移出",
+}
+
+SUPPORTED_WATCHLIST_ACTIONS = tuple(_ACTION_KINDS)
 
 
 def _resolve_named_list(list_name: str) -> Tuple[Optional[str], Optional[str]]:
@@ -320,9 +338,16 @@ def _resolve_named_list(list_name: str) -> Tuple[Optional[str], Optional[str]]:
     if any(n["key"] == wanted_key for n in named):
         return raw, None
 
-    available = [n["name"] for n in named]
+    # 提示里只列能往返的名字：非规范 key（如 WATCHLIST_MY-LIST）的 name 是「my-list」，
+    # resolve_watchlist_key 会把它折成 WATCHLIST_MY_LIST，模型照着提示重试仍会被拒，只会原地打转。
+    available = [
+        n["name"] for n in named if resolve_watchlist_key(n["name"]) == n["key"]
+    ]
     if not available:
-        return None, f"自选列表「{raw}」不存在；当前没有配置任何命名自选列表"
+        return None, (
+            f"自选列表「{raw}」不存在；没有可用的命名自选列表"
+            "（未配置，或名字不规范、无法通过 list_name 指定），请省略 list_name 使用默认自选"
+        )
     return None, f"自选列表「{raw}」不存在；可用列表：{'、'.join(available)}"
 
 
@@ -358,14 +383,14 @@ def _handle_propose_watchlist_change(
         return {"error": err}
 
     target = f"自选列表「{norm_list_name}」" if norm_list_name else "自选"
-    verb = "加入" if norm_action == "add" else "移出"
-    summary = f"把「{norm_code}」{verb}{target}"
-    norm_reason = str(reason or "").strip()
+    kind = _ACTION_KINDS[norm_action]
+    summary = f"把「{norm_code}」{_KIND_VERBS[kind]}{target}"
+    norm_reason = _normalize_reason(reason)
     if norm_reason:
         summary = f"{summary}（{norm_reason}）"
 
     return {
-        "kind": "watchlist_add" if norm_action == "add" else "watchlist_remove",
+        "kind": kind,
         "summary": summary,
         "proposal": {"stock_code": norm_code, "list_name": norm_list_name},
     }
