@@ -257,10 +257,10 @@ class AskCommand(BotCommand):
             user_msg = self._build_user_message(code, skill_id, skill_text)
             session_id = self._ask_session_id(message)
 
-            # Fold the most useful progress signal (a propose_alert outcome) into the
+            # Fold the most useful progress signal (an action_proposal outcome) into the
             # final reply. BotResponse has no streaming surface, so we capture the
-            # alert_proposal event and append a one-line hint instead.
-            alert_hint: Dict[str, str] = {}
+            # action_proposal event and append a one-line hint instead.
+            action_hint: Dict[str, str] = {}
 
             def _on_progress(event: Any) -> None:
                 if not isinstance(event, dict):
@@ -269,7 +269,9 @@ class AskCommand(BotCommand):
                     return
                 summary = event.get("summary")
                 if isinstance(summary, str) and summary.strip():
-                    alert_hint["summary"] = summary.strip()
+                    action_hint["summary"] = summary.strip()
+                    kind = event.get("kind")
+                    action_hint["kind"] = kind if isinstance(kind, str) else ""
 
             result = executor.chat(
                 message=user_msg,
@@ -282,10 +284,15 @@ class AskCommand(BotCommand):
                 skill_name = self._resolve_skill_name(skill_id)
                 header = f"📊 {code} | 技能: {skill_name}\n{'─' * 30}\n"
                 content = header + result.content
-                if alert_hint.get("summary"):
+                if action_hint.get("summary"):
+                    # 只有告警在 bot 侧有对应的落库命令（/alert），其余动作需要去 Web 端确认。
+                    if action_hint.get("kind") == "alert":
+                        follow_up = "（可用 /alert 或 Web 端落库）"
+                    else:
+                        follow_up = "（请在 Web 端「问股」中确认）"
                     content += (
-                        f"\n\n🤖 检测到可创建的预警：{alert_hint['summary']}\n"
-                        "（可用 /alert 或 Web 端落库）"
+                        f"\n\n🤖 检测到待确认操作：{action_hint['summary']}\n"
+                        f"{follow_up}"
                     )
                 return BotResponse.text_response(content)
             return BotResponse.text_response(f"⚠️ 分析失败: {result.error}")

@@ -5,6 +5,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 from src.agent.tools.action_tools import (
     SUPPORTED_MARKETS,
     SUPPORTED_SIDES,
@@ -401,8 +403,8 @@ def test_watchlist_action_kinds_cover_the_supported_actions():
     （``set(tuple(d)) == set(d)`` 对任何 dict 都成立），只钉住推导关系；真正的守卫是第二条。
     """
     assert set(_ACTION_KINDS) == set(SUPPORTED_WATCHLIST_ACTIONS)
-    # 只往一边加成员上面那条恒等式发现不了：没有测试会红（新增 action 若无测试覆盖，
-    # _KIND_VERBS 的 KeyError 只在运行时才炸）。
+    # 这条等式是唯一守卫：去掉它，往 _ACTION_KINDS 一边加成员不会有任何测试变红
+    # （新增 action 若无测试覆盖，_KIND_VERBS 的 KeyError 只在运行时才炸）。
     assert set(_KIND_VERBS) == set(_ACTION_KINDS.values())
 
 
@@ -482,21 +484,44 @@ def test_emitter_rejects_malformed_summary_and_proposal():
     assert events == []
 
 
-def test_emitter_accepts_trade_and_watchlist_envelopes():
+@pytest.mark.parametrize(
+    ("tool_name", "envelope", "expected_kind"),
+    [
+        (
+            "propose_alert",
+            {"kind": "alert", "summary": "「600519」价格上穿 ¥1800",
+             "proposal": {"target": "600519", "alert_type": "price_cross"}},
+            "alert",
+        ),
+        (
+            "propose_portfolio_trade",
+            {"kind": "portfolio_trade", "summary": "在「A股主账户」记一笔买入 005827 25900 @ CNY 1.6706",
+             "proposal": {"account_id": 1, "symbol": "005827", "side": "buy"}},
+            "portfolio_trade",
+        ),
+        (
+            "propose_watchlist_change",
+            {"kind": "watchlist_add", "summary": "把「600519」加入自选",
+             "proposal": {"stock_code": "600519", "list_name": None}},
+            "watchlist_add",
+        ),
+    ],
+)
+def test_emitter_accepts_every_proposal_tool_envelope(tool_name, envelope, expected_kind):
+    """三个提案工具的每种信封都必须被发射。
+
+    漏掉任一工具名（`_PROPOSAL_TOOL_NAMES`）或任一 kind（`_ALLOWED_PROPOSAL_KINDS`），
+    该动作的提案会被静默丢弃、前端永远等不到卡片，而旧版只用 watchlist 一个工具的写法
+    对 `propose_portfolio_trade` 缺失是空转的（实测：删掉它 46 个测试仍全绿）。
+    """
     events = []
-    tc = SimpleNamespace(name="propose_watchlist_change")
-    raw = json.dumps(
-        {
-            "kind": "watchlist_add",
-            "summary": "把「600519」加入自选",
-            "proposal": {"stock_code": "600519", "list_name": None},
-        },
-        ensure_ascii=False,
-    )
+    tc = SimpleNamespace(name=tool_name)
+    raw = json.dumps(envelope, ensure_ascii=False)
     out = _maybe_emit_action_proposal(tc, raw, events.append, step=2)
+
     assert events[0]["type"] == "action_proposal"
-    assert events[0]["kind"] == "watchlist_add"
-    assert json.loads(out) == {"message": "把「600519」加入自选"}
+    assert events[0]["kind"] == expected_kind
+    assert json.loads(out) == {"message": envelope["summary"]}
 
 
 def test_every_proposable_kind_is_accepted_by_the_runner():
