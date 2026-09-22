@@ -351,7 +351,7 @@ def _resolve_named_list(list_name: str) -> Tuple[Optional[str], Optional[str]]:
         return None, (
             f"自选列表「{raw}」不存在；没有可用的命名自选列表"
             "（未配置，或名字不规范、无法通过 list_name 指定），"
-            "请让用户确认改用默认自选（需用户同意），或建议用户新建/重命名该列表"
+            "请先取得用户同意再改用默认自选，或建议用户新建/重命名该列表"
         )
     return None, f"自选列表「{raw}」不存在；可用列表：{'、'.join(available)}"
 
@@ -406,8 +406,8 @@ propose_watchlist_change_tool = ToolDefinition(
     description=(
         "当用户要求把某只股票加入自选或从自选移除时，用本工具生成提案交给用户确认。"
         "只生成提案，不写入任何配置。\n"
-        "list_name 省略时作用于默认自选（STOCK_LIST）；指定命名列表时必须命中已存在的列表，"
-        "否则会报错并列出可用列表名。"
+        "list_name 省略时作用于默认自选（STOCK_LIST）；指定命名列表时必须命中已存在的、"
+        "名字可通过 list_name 指定的列表，否则会报错并说明原因。"
     ),
     parameters=[
         ToolParameter(

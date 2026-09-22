@@ -401,8 +401,8 @@ def test_watchlist_action_kinds_cover_the_supported_actions():
     （``set(tuple(d)) == set(d)`` 对任何 dict 都成立），只钉住推导关系；真正的守卫是第二条。
     """
     assert set(_ACTION_KINDS) == set(SUPPORTED_WATCHLIST_ACTIONS)
-    # 这条不是恒等式：_KIND_VERBS 与 _ACTION_KINDS 是两份独立字面量，只往一边加成员
-    # 不会被上面那条恒等式发现（审查者实测：往 _ACTION_KINDS 加一条 "clear" 后 31 个测试仍全绿）。
+    # 只往一边加成员上面那条恒等式发现不了：没有测试会红（新增 action 若无测试覆盖，
+    # _KIND_VERBS 的 KeyError 只在运行时才炸）。
     assert set(_KIND_VERBS) == set(_ACTION_KINDS.values())
 
 
@@ -423,7 +423,7 @@ def test_watchlist_hint_skips_names_that_cannot_round_trip():
     # 不能教模型「省略 list_name 用默认自选」：用户点名了某个列表，静默改用默认等于替用户
     # 改写目标；必须先取到用户同意，或给出新建/重命名这类替代方案。
     assert "省略 list_name" not in result["error"]
-    assert "需用户同意" in result["error"]
+    assert "用户同意" in result["error"]
 
 
 def test_reason_is_length_bounded_in_both_proposal_tools():
