@@ -25,6 +25,10 @@ CHAT_PROMPTS = (LEGACY_DEFAULT_CHAT_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT)
 ANALYSIS_PROMPTS = (LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT)
 
 PROPOSAL_TOOL_NAMES = ("propose_portfolio_trade", "propose_watchlist_change")
+# 提示词点名要模型调用的全部工具：三个提案工具，加上规则 7 用来解析账户的读工具。
+# get_portfolio_snapshot 也不在 Codex 只读面上（未声明 cancellation_safe），所以
+# 「Codex 提示词里不许出现」的清单必须连它一起钉住。
+PROMPT_NAMED_TOOLS = ("propose_alert",) + PROPOSAL_TOOL_NAMES + ("get_portfolio_snapshot",)
 
 
 def _rules_7_to_9(prompt: str) -> str:
@@ -52,7 +56,24 @@ class TestChatPromptProposalRules(unittest.TestCase):
 
     def test_chat_prompts_forbid_claiming_read_only(self):
         for prompt in CHAT_PROMPTS:
-            self.assertIn("不得**声称自己只能查询、无法写入", prompt)
+            self.assertIn("声称自己只能查询、无法写入", prompt)
+
+    def test_chat_prompts_keep_the_unrecoverable_clauses(self):
+        """「先追问 / 在用户确认前」这两条是设计里明确的不可恢复约束，单独钉住。
+
+        「两个变体逐字一致」那条是拿两份提示词互相比较，两边一起删也照样绿，
+        所以这几条必须各自独立断言。
+        """
+        for prompt in CHAT_PROMPTS:
+            self.assertIn("先追问用户", prompt)
+            self.assertIn("不许猜", prompt)
+            self.assertIn("在用户确认前", prompt)
+            self.assertIn("不得用行情价或估算值顶替", prompt)
+
+    def test_chat_prompts_give_edits_an_honest_exit(self):
+        """没有对应提案工具的写操作（改/删已有记录）必须如实说明，不得顶替。"""
+        for prompt in CHAT_PROMPTS:
+            self.assertIn("没有对应提案工具的操作，如实说明", prompt)
 
     def test_chat_prompts_keep_the_existing_alert_proposal_rule(self):
         for prompt in CHAT_PROMPTS:
@@ -68,16 +89,37 @@ class TestChatPromptProposalRules(unittest.TestCase):
 
     def test_codex_chat_prompt_does_not_expose_proposal_tools(self):
         """Codex 只读面拿不到提案工具，提示词里出现工具名等于让模型必然失败。"""
-        for tool_name in PROPOSAL_TOOL_NAMES:
+        for tool_name in PROMPT_NAMED_TOOLS:
             self.assertNotIn(tool_name, CODEX_CHAT_SYSTEM_PROMPT)
-        self.assertNotIn("propose_alert", CODEX_CHAT_SYSTEM_PROMPT)
 
     def test_analysis_prompts_do_not_mention_proposal_tools(self):
         for prompt in ANALYSIS_PROMPTS:
-            for tool_name in PROPOSAL_TOOL_NAMES:
+            for tool_name in PROMPT_NAMED_TOOLS:
                 self.assertNotIn(tool_name, prompt)
-            # 分析报告面从来没有告警提案规则，保持原样。
-            self.assertNotIn("propose_alert", prompt)
+
+
+class TestPromptNamedToolsExistInRegistry(unittest.TestCase):
+    """提示词点名要模型调用的工具，必须真的注册在案。
+
+    硬编码的名单抓不住「提示词改了工具名」和「工具改名而提示词没改」这两个方向：
+    前者让模型调用不存在的工具，后者同理。这里一头对注册表、一头对提示词原文。
+    """
+
+    def _registered(self) -> set:
+        from src.agent.factory import get_tool_registry
+
+        return set(get_tool_registry().list_names())
+
+    def test_every_prompt_named_tool_is_registered(self):
+        registered = self._registered()
+        self.assertIn("propose_portfolio_trade", registered)  # 先确认扫的是真注册表
+        for tool_name in PROMPT_NAMED_TOOLS:
+            self.assertIn(tool_name, registered, msg=f"提示词点名了未注册的工具 {tool_name}")
+
+    def test_chat_prompts_name_exactly_those_tools(self):
+        for prompt in CHAT_PROMPTS:
+            for tool_name in PROMPT_NAMED_TOOLS:
+                self.assertIn(f"`{tool_name}`", prompt)
 
 
 if __name__ == "__main__":
