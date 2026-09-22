@@ -547,4 +547,8 @@ def test_proposal_tool_names_match_the_registry():
     from src.agent.runner import _PROPOSAL_TOOL_NAMES
 
     registered = {n for n in get_tool_registry().list_names() if n.startswith("propose_")}
-    assert registered == set(_PROPOSAL_TOOL_NAMES)
+    runner_names = set(_PROPOSAL_TOOL_NAMES)
+    assert registered == runner_names, (
+        f"提案工具集合不一致：仅注册表有 {sorted(registered - runner_names)}；"
+        f"仅 runner 有 {sorted(runner_names - registered)}"
+    )

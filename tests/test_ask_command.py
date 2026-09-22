@@ -444,8 +444,8 @@ class TestAskCommandActionProposalHint(unittest.TestCase):
 
         class FakeExecutor:
             def chat(self, message, session_id, progress_callback=None, context=None):
-                for event in events:
-                    if progress_callback is not None:
+                if progress_callback is not None:
+                    for event in events:
                         progress_callback(event)
                 return SimpleNamespace(success=True, content="analysis ok")
 
@@ -455,7 +455,8 @@ class TestAskCommandActionProposalHint(unittest.TestCase):
                     SimpleNamespace(), self._message(), "600519", "chan_theory", ""
                 )
 
-    def test_every_kind_points_to_the_web_client(self):
+    def test_any_kind_gets_the_same_web_client_hint(self):
+        """每个 kind 得到的是同一条固定页脚，这里不覆盖任何按 kind 分发的逻辑。"""
         for kind, summary in (
             ("alert", "「600519」价格上穿 ¥1800"),
             ("watchlist_add", "把「600519」加入自选"),
@@ -492,6 +493,11 @@ class TestAskCommandActionProposalHint(unittest.TestCase):
             {"type": "action_proposal"},
         )
         self.assertNotIn("检测到待确认操作", response.text)
+        # 正向断言：分析必须真的成功。只查「没有提示」时，_on_progress 里被摘掉的
+        # isinstance(summary, str) 守卫会让 42.strip() 抛 AttributeError，异常被
+        # _analyze_single 的外层 except 吞掉、回复变成「⚠️ 问股执行出错: ...」——
+        # 那串错误里同样没有提示，本条依然全绿。
+        self.assertIn("analysis ok", response.text)
 
 
 if __name__ == "__main__":
