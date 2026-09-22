@@ -9,6 +9,7 @@
 让模型调用一个必然失败的工具，因此这里同时钉住「不许出现」。
 """
 
+import re
 import unittest
 
 from src.agent.executor import (
@@ -29,12 +30,30 @@ PROPOSAL_TOOL_NAMES = ("propose_portfolio_trade", "propose_watchlist_change")
 # get_portfolio_snapshot 也不在 Codex 只读面上（未声明 cancellation_safe），所以
 # 「Codex 提示词里不许出现」的清单必须连它一起钉住。
 PROMPT_NAMED_TOOLS = ("propose_alert",) + PROPOSAL_TOOL_NAMES + ("get_portfolio_snapshot",)
+# 分析报告提示词里只钉死提案工具的缺席：那才是真边界（只读报告面不暴露提案工具）。
+# get_portfolio_snapshot 是**读**工具，分析提示词里出现它（例如「先看用户持仓」）
+# 是合法的、甚至可能是以后想要的行为，钉住它的缺席只会在合法变更上误报。
+ANALYSIS_FORBIDDEN_TOOLS = ("propose_alert",) + PROPOSAL_TOOL_NAMES
+
+# 规则正文里反引号标注的提案工具名。
+_BACKTICKED_PROPOSAL_TOOL = re.compile(r"`(propose_[a-z_]+)`")
 
 
 def _rules_7_to_9(prompt: str) -> str:
     """抽取 7/8/9 三条规则原文，用于确认两个对话变体逐字一致。"""
     lines = [line for line in prompt.splitlines() if line[:2] in ("7.", "8.", "9.")]
     return "\n".join(lines)
+
+
+def _rules_6_to_9(prompt: str) -> str:
+    """抽取 6/7/8/9 四条提案规则原文，用于对注册表核名。"""
+    lines = [line for line in prompt.splitlines() if line[:2] in ("6.", "7.", "8.", "9.")]
+    return "\n".join(lines)
+
+
+def _named_proposal_tools_in_rules(prompt: str) -> set:
+    """规则 6–9 里点名的全部 `propose_*` 工具名。"""
+    return set(_BACKTICKED_PROPOSAL_TOOL.findall(_rules_6_to_9(prompt)))
 
 
 class TestChatPromptProposalRules(unittest.TestCase):
@@ -57,6 +76,10 @@ class TestChatPromptProposalRules(unittest.TestCase):
     def test_chat_prompts_forbid_claiming_read_only(self):
         for prompt in CHAT_PROMPTS:
             self.assertIn("声称自己只能查询、无法写入", prompt)
+            # 规则 7 的禁令必须限定在「有对应提案工具」的情形，否则规则 9 的
+            # 「如实说明」会被读成「写操作都可以拒绝」的许可证，把整个任务的
+            # 目的（不再回答「我无法写入」）反过来。
+            self.assertIn("在该笔录入有对应提案工具时声称自己只能查询、无法写入", prompt)
 
     def test_chat_prompts_keep_the_unrecoverable_clauses(self):
         """「先追问 / 在用户确认前」这两条是设计里明确的不可恢复约束，单独钉住。
@@ -71,9 +94,15 @@ class TestChatPromptProposalRules(unittest.TestCase):
             self.assertIn("不得用行情价或估算值顶替", prompt)
 
     def test_chat_prompts_give_edits_an_honest_exit(self):
-        """没有对应提案工具的写操作（改/删已有记录）必须如实说明，不得顶替。"""
+        """没有对应提案工具的写操作（改/删已有记录）必须如实说明，不得顶替。
+
+        后半句「不要用其他提案工具顶替」才是这条规则存在的理由：它同时禁掉了
+        两条歧路——发一笔对冲的反向提案，或者把请求塞进自选工具。少了它，
+        规则 9 只剩「如实说明」，模型仍会挑一条错的执行路径。
+        """
         for prompt in CHAT_PROMPTS:
             self.assertIn("没有对应提案工具的操作，如实说明", prompt)
+            self.assertIn("不要用其他提案工具顶替", prompt)
 
     def test_chat_prompts_keep_the_existing_alert_proposal_rule(self):
         for prompt in CHAT_PROMPTS:
@@ -94,15 +123,21 @@ class TestChatPromptProposalRules(unittest.TestCase):
 
     def test_analysis_prompts_do_not_mention_proposal_tools(self):
         for prompt in ANALYSIS_PROMPTS:
-            for tool_name in PROMPT_NAMED_TOOLS:
+            for tool_name in ANALYSIS_FORBIDDEN_TOOLS:
                 self.assertNotIn(tool_name, prompt)
 
 
 class TestPromptNamedToolsExistInRegistry(unittest.TestCase):
     """提示词点名要模型调用的工具，必须真的注册在案。
 
-    硬编码的名单抓不住「提示词改了工具名」和「工具改名而提示词没改」这两个方向：
-    前者让模型调用不存在的工具，后者同理。这里一头对注册表、一头对提示词原文。
+    两个方向都要抓：
+    - 提示词 → 注册表：规则 6–9 里写到的每个 `propose_*` 都从原文扫出来对注册表，
+      因此「提示词里新写了一个未注册的工具名」（改名、笔误、手滑）会直接转红，
+      不需要那份手写名单先知道这个名字；
+    - 注册表 → 提示词：手写名单 `PROMPT_NAMED_TOOLS` 反过来确认名单里的名字
+      仍然被点名，抓「规则被删掉/改名后名字从提示词里消失」——此时前者扫不到
+      任何可疑 token，会静默变绿。
+    两个方向缺一不可。
     """
 
     def _registered(self) -> set:
@@ -115,6 +150,18 @@ class TestPromptNamedToolsExistInRegistry(unittest.TestCase):
         self.assertIn("propose_portfolio_trade", registered)  # 先确认扫的是真注册表
         for tool_name in PROMPT_NAMED_TOOLS:
             self.assertIn(tool_name, registered, msg=f"提示词点名了未注册的工具 {tool_name}")
+
+    def test_rules_name_no_unregistered_proposal_tool(self):
+        """规则 6–9 里出现的每个 `propose_*` 工具名都必须注册在案。"""
+        registered = self._registered()
+        for prompt in CHAT_PROMPTS:
+            named = _named_proposal_tools_in_rules(prompt)
+            self.assertTrue(named, msg="规则 6–9 里一个提案工具名都没扫到，断言会空过")
+            self.assertLessEqual(
+                named,
+                registered,
+                msg=f"规则里点名的工具未注册：{sorted(named - registered)}",
+            )
 
     def test_chat_prompts_name_exactly_those_tools(self):
         for prompt in CHAT_PROMPTS:
