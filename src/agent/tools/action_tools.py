@@ -19,6 +19,11 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter, ToolPolicy
+from src.services.watchlist_service import (
+    list_named_watchlists,
+    resolve_watchlist_key,
+    validate_and_normalize_stock_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,4 +291,121 @@ propose_portfolio_trade_tool = ToolDefinition(
 )
 
 
-ALL_ACTION_TOOLS: List[ToolDefinition] = [propose_portfolio_trade_tool]
+# ============================================================
+# propose_watchlist_change
+# ============================================================
+
+SUPPORTED_WATCHLIST_ACTIONS = ("add", "remove")
+
+
+def _resolve_named_list(list_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Validate a named watchlist; returns (raw_name, error)."""
+    raw = str(list_name or "").strip()
+    if not raw:
+        return None, None
+    try:
+        from src.services.system_config_service import SystemConfigService
+    except Exception as exc:
+        logger.warning("propose_watchlist_change unavailable: %s", exc)
+        return None, f"配置模块不可用: {exc}"
+
+    try:
+        named = list_named_watchlists(SystemConfigService())
+    except Exception as exc:
+        logger.warning("propose_watchlist_change list_named_watchlists failed: %s", exc)
+        return None, f"读取自选列表失败: {exc}"
+
+    # 用与写接口相同的 key 解析规则比对：否则「My List」这类名字会因大小写/分隔符差异被误判为不存在。
+    wanted_key = resolve_watchlist_key(raw)
+    if any(n["key"] == wanted_key for n in named):
+        return raw, None
+
+    available = [n["name"] for n in named]
+    if not available:
+        return None, f"自选列表「{raw}」不存在；当前没有配置任何命名自选列表"
+    return None, f"自选列表「{raw}」不存在；可用列表：{'、'.join(available)}"
+
+
+def _handle_propose_watchlist_change(
+    action: str,
+    symbol: str,
+    list_name: str = "",
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Validate one watchlist add/remove and return a proposal; persists nothing.
+
+    校验复用 ``watchlist_service``：写接口自身的 400 也来自同一份逻辑，因此「提案通过」
+    意味着确认时的 ``POST /api/v1/stocks/watchlist/add``（或 ``/remove``）不会因代码格式
+    或列表名被拒。
+    """
+    norm_action = str(action or "").strip().lower()
+    if norm_action not in SUPPORTED_WATCHLIST_ACTIONS:
+        return {
+            "error": f"action 必须是 {'/'.join(SUPPORTED_WATCHLIST_ACTIONS)}，收到 {action!r}"
+        }
+
+    try:
+        norm_code = validate_and_normalize_stock_code(str(symbol or ""))
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    norm_list_name, err = _resolve_named_list(list_name)
+    if err:
+        return {"error": err}
+
+    target = f"自选列表「{norm_list_name}」" if norm_list_name else "自选"
+    verb = "加入" if norm_action == "add" else "移出"
+    summary = f"把「{norm_code}」{verb}{target}"
+    norm_reason = str(reason or "").strip()
+    if norm_reason:
+        summary = f"{summary}（{norm_reason}）"
+
+    return {
+        "kind": "watchlist_add" if norm_action == "add" else "watchlist_remove",
+        "summary": summary,
+        "proposal": {"stock_code": norm_code, "list_name": norm_list_name},
+    }
+
+
+propose_watchlist_change_tool = ToolDefinition(
+    name="propose_watchlist_change",
+    description=(
+        "当用户要求把某只股票加入自选或从自选移除时，用本工具生成提案交给用户确认。"
+        "只生成提案，不写入任何配置。\n"
+        "list_name 省略时作用于默认自选（STOCK_LIST）；指定命名列表时必须命中已存在的列表，"
+        "否则会报错并列出可用列表名。"
+    ),
+    parameters=[
+        ToolParameter(
+            name="action",
+            type="string",
+            description="add 加入自选 / remove 移出自选",
+            required=True,
+            enum=list(SUPPORTED_WATCHLIST_ACTIONS),
+        ),
+        ToolParameter(
+            # 参数名必须是 symbol 而不是 stock_code：叫 stock_code 会让 _is_stock_scoped_tool
+            # 把它当成受股票范围约束的工具，从而硬阻断跨标的请求（retriable: False）。
+            name="symbol",
+            type="string",
+            description="股票代码，支持 600519 / HK00700 / AAPL 等格式",
+            required=True,
+        ),
+        ToolParameter(
+            name="list_name",
+            type="string",
+            description="可选命名自选列表名；省略作用于默认 STOCK_LIST",
+            required=False,
+        ),
+        ToolParameter(name="reason", type="string", description="可选提案理由，用于在卡片上向用户说明", required=False),
+    ],
+    handler=_handle_propose_watchlist_change,
+    category="action",
+    policy=_PROPOSAL_POLICY,
+)
+
+
+ALL_ACTION_TOOLS: List[ToolDefinition] = [
+    propose_portfolio_trade_tool,
+    propose_watchlist_change_tool,
+]

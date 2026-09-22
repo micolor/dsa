@@ -259,3 +259,129 @@ def test_enums_mirror_the_api_contract():
 
     assert set(SUPPORTED_SIDES) == api_sides == set(VALID_SIDES)
     assert set(SUPPORTED_MARKETS) == api_markets == set(VALID_MARKETS)
+
+
+# ============================================================
+# propose_watchlist_change
+# ============================================================
+
+from src.agent.tools.action_tools import (  # noqa: E402
+    ALL_ACTION_TOOLS,
+    _handle_propose_watchlist_change,
+    propose_watchlist_change_tool,
+)
+
+
+def _patch_named_lists(names=("短线池",)):
+    service = mock.MagicMock()
+    calls = []
+
+    def _get_config(include_schema=True, mask_token="******"):
+        # 必须记录 include_schema：真实 get_config(include_schema=True) 返回的是带 schema/掩码的
+        # 结构而不是裸 items，若实现里漏传 False，只有断言过这个参数才抓得到。
+        calls.append(include_schema)
+        return {
+            "config_version": "v1",
+            "items": [{"key": f"WATCHLIST_{n.upper()}", "value": ""} for n in names],
+        }
+
+    service.get_config.side_effect = _get_config
+    return mock.patch(
+        "src.services.system_config_service.SystemConfigService", return_value=service
+    )
+
+
+def test_watchlist_tool_parameter_is_named_symbol_not_stock_code():
+    """参数名必须是 symbol。
+
+    叫 stock_code 会被 `_is_stock_scoped_tool`（`src/agent/tools/execution.py:189-193`）视为受股票
+    范围约束的工具，`_guard_tool_stock_scope` 会在单股会话里对跨标的请求硬阻断
+    （`retriable: False`，模型无法绕过），从而拒绝用户明确点名的标的。这条断言把该决定钉住，
+    防止将来有人「为了和请求体字段名对齐」把它改回去。
+    """
+    declared = {param.name for param in propose_watchlist_change_tool.parameters}
+    assert "symbol" in declared
+    assert "stock_code" not in declared
+
+
+def test_watchlist_tool_registered_in_all_action_tools():
+    names = [t.name for t in ALL_ACTION_TOOLS]
+    assert names == ["propose_portfolio_trade", "propose_watchlist_change"]
+    assert propose_watchlist_change_tool.category == "action"
+    assert propose_watchlist_change_tool.policy.read_only is True
+    assert propose_watchlist_change_tool.policy.cancellation_safe is False
+
+
+def test_watchlist_add_proposal_shape():
+    result = _handle_propose_watchlist_change(action="add", symbol=" 600519 ")
+    assert "error" not in result
+    assert result["kind"] == "watchlist_add"
+    # proposal 用的是请求体字段名 stock_code，与工具参数名 symbol 刻意不同
+    assert result["proposal"] == {"stock_code": "600519", "list_name": None}
+    assert result["summary"] == "把「600519」加入自选"
+
+
+def test_watchlist_remove_proposal_shape():
+    result = _handle_propose_watchlist_change(action="remove", symbol="AAPL")
+    assert result["kind"] == "watchlist_remove"
+    assert result["summary"] == "把「AAPL」移出自选"
+
+
+def test_watchlist_named_list_is_echoed_in_summary():
+    with _patch_named_lists():
+        result = _handle_propose_watchlist_change(
+            action="add", symbol="600519", list_name="短线池"
+        )
+    assert "error" not in result
+    assert result["proposal"] == {"stock_code": "600519", "list_name": "短线池"}
+    assert result["summary"] == "把「600519」加入自选列表「短线池」"
+
+
+def test_watchlist_helpers_request_config_without_schema():
+    """list_named_watchlists 必须传 include_schema=False，否则拿到的是 schema 结构而非裸 items。"""
+    with _patch_named_lists() as patched:
+        _handle_propose_watchlist_change(action="add", symbol="600519", list_name="短线池")
+    service = patched.return_value
+    assert service.get_config.call_args_list, "get_config 从未被调用"
+    assert all(
+        call.kwargs.get("include_schema") is False for call in service.get_config.call_args_list
+    )
+
+
+def test_watchlist_rejects_unknown_named_list_and_lists_valid_names():
+    with _patch_named_lists(names=("短线池", "长线池")):
+        result = _handle_propose_watchlist_change(
+            action="add", symbol="600519", list_name="编的池子"
+        )
+    assert "不存在" in result["error"]
+    assert "短线池" in result["error"]
+    assert "长线池" in result["error"]
+
+
+def test_watchlist_named_list_matching_uses_resolved_key():
+    """"My List" 应能命中 WATCHLIST_MY_LIST，而不是按小写名比对时被判为不存在。"""
+    with _patch_named_lists(names=("my_list",)):
+        result = _handle_propose_watchlist_change(
+            action="add", symbol="600519", list_name="My List"
+        )
+    assert "error" not in result
+    assert result["proposal"]["list_name"] == "My List"
+
+
+def test_watchlist_rejects_bad_action_and_bad_code():
+    assert "action" in _handle_propose_watchlist_change(action="toggle", symbol="600519")["error"]
+    assert "不是合法的股票代码格式" in _handle_propose_watchlist_change(
+        action="add", symbol="600519;;;"
+    )["error"]
+
+
+def test_watchlist_appends_reason():
+    result = _handle_propose_watchlist_change(
+        action="add", symbol="600519", reason="突破前高"
+    )
+    assert result["summary"].endswith("（突破前高）")
+
+
+def test_watchlist_envelope_is_json_serializable():
+    result = _handle_propose_watchlist_change(action="add", symbol="600519")
+    json.dumps(result, ensure_ascii=False)
