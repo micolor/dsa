@@ -18,13 +18,27 @@ class _FakeConfigService:
         self._items = list(items or [])
         self._config_version = config_version
         self.updates = []
+        # 记录 include_schema，用于抓「搬迁时把它传成 True」这类走样
+        self.get_config_include_schema = []
 
     def get_config(self, include_schema=True, mask_token="******"):
+        self.get_config_include_schema.append(include_schema)
         return {"config_version": self._config_version, "items": list(self._items)}
 
-    def update(self, config_version, items, mask_token="******", reload_now=False):
+    # 刻意不用真实默认值 "******"（SystemConfigService.update 的默认值正是它）：
+    # 若与真实默认值相同，service 漏传 mask_token 时记录到的值仍是 "******"，
+    # 断言无法区分「显式传了」和「漏传走了默认值」，守卫形同虚设。用哨兵值才能抓到漏传。
+    _MASK_TOKEN_UNSET = "<mask-token-not-passed>"
+
+    def update(self, config_version, items, mask_token=_MASK_TOKEN_UNSET, reload_now=False):
         self.updates.append(
-            {"config_version": config_version, "items": items, "reload_now": reload_now}
+            {
+                "config_version": config_version,
+                "items": items,
+                # 记录 mask_token，漏传时断言会红
+                "mask_token": mask_token,
+                "reload_now": reload_now,
+            }
         )
         for item in items:
             self._replace(item["key"], item["value"])
@@ -64,9 +78,20 @@ def test_write_watchlist_codes_persists_joined_value():
         {
             "config_version": "v1",
             "items": [{"key": "STOCK_LIST", "value": "600519,AAPL"}],
+            "mask_token": "******",
             "reload_now": True,
         }
     ]
+    assert service.get_config_include_schema == [False]
+
+
+def test_helpers_request_config_without_schema():
+    """搬迁走样守卫：三个读写入口都必须以 include_schema=False 读取配置。"""
+    service = _FakeConfigService(items=[{"key": "STOCK_LIST", "value": "600519"}])
+    read_watchlist_codes(service)
+    write_watchlist_codes(service, ["600519"])
+    list_named_watchlists(service)
+    assert service.get_config_include_schema == [False, False, False]
 
 
 def test_list_named_watchlists_excludes_default_and_sorts():

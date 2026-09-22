@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """Watchlist API regressions for stock-code variant matching."""
 
+import pytest
+from fastapi import HTTPException
+
 from api.v1.endpoints.stocks import (
     _list_named_watchlists,
+    _validate_and_normalize_stock_code,
     add_to_watchlist,
     get_watchlist,
     get_watchlist_lists,
@@ -179,3 +183,20 @@ def test_get_watchlist_lists_endpoint_returns_summary() -> None:
     assert response.lists[0].name == "short"
     assert response.lists[0].count == 2
     assert response.lists[0].key == "WATCHLIST_SHORT"
+
+
+def test_validate_and_normalize_stock_code_maps_empty_to_400() -> None:
+    with pytest.raises(HTTPException) as excinfo:
+        _validate_and_normalize_stock_code("   ")
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == {"error": "invalid_stock_code", "message": "股票代码不能为空"}
+
+
+def test_validate_and_normalize_stock_code_maps_bad_format_to_400() -> None:
+    with pytest.raises(HTTPException) as excinfo:
+        _validate_and_normalize_stock_code("600519;;;")
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == {
+        "error": "invalid_stock_code",
+        "message": "'600519;;;' 不是合法的股票代码格式",
+    }

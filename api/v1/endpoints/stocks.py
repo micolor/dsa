@@ -48,7 +48,6 @@ from src.services.stock_service import StockService
 from src.services.watchlist_service import (
     list_named_watchlists,
     read_watchlist_codes,
-    resolve_watchlist_key,
     validate_and_normalize_stock_code,
     write_watchlist_codes,
 )
@@ -61,11 +60,6 @@ router = APIRouter()
 
 # 须在 /{stock_code} 路由之前定义
 ALLOWED_MIME_STR = ", ".join(ALLOWED_MIME)
-
-
-def _watchlist_env_key(list_name: Optional[str]) -> str:
-    """Resolve the config-item key for a watchlist. 见 src/services/watchlist_service。"""
-    return resolve_watchlist_key(list_name)
 
 
 def _read_watchlist_codes(service: SystemConfigService, list_name: Optional[str] = None) -> list:

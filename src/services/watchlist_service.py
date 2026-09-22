@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from data_provider.base import normalize_stock_code
 from src.services.stock_list_parser import split_stock_list
 
-if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注，避免运行时循环依赖
+if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注；见下方说明
+    # 不在运行时导入 SystemConfigService 是为了控制导入重量，而非避免循环依赖
+    # （该模块并不反向 import 本模块）。实测：只 import 本模块会拉起约 1200 个模块，
+    # 而 import system_config_service 要拉起约 14000 个。本模块的调用方包含
+    # 工具/Agent 侧的轻量入口，不应为此付出这个代价。
     from src.services.system_config_service import SystemConfigService
 
 # Stock code validation patterns (aligned with frontend validateStockCode)
