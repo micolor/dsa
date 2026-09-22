@@ -46,7 +46,9 @@ export function parseActionProposalEvent(event: unknown): ActionProposal | undef
     proposal?: unknown;
   };
   if (!isActionProposalKind(kind)) return undefined;
-  if (!proposal || typeof proposal !== 'object') return undefined;
-  if (typeof summary !== 'string') return undefined;
+  // 数组也是 object，但不是合法的请求体（FastAPI 422 的 detail 就是数组，见 api/error.ts 的 isRecord）。
+  if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return undefined;
+  // 空摘要会渲染出一张「用户不知道自己在确认什么」的卡片，宁可不出卡片。
+  if (typeof summary !== 'string' || summary.trim() === '') return undefined;
   return { kind, summary, proposal };
 }

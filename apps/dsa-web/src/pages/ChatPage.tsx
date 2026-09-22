@@ -259,6 +259,8 @@ const ChatPage: React.FC = () => {
   const [agentStatusChecking, setAgentStatusChecking] = useState(true);
   // 一条助手消息可以带多张卡片，因此状态按卡片键（`${msg.id}#${index}`）记，不能只按 msg.id。
   const [actionProposalStatus, setActionProposalStatus] = useState<Record<string, ActionProposalStatus>>({});
+  // 提交失败的具体原因（服务端拒绝的原因、网络错误等），按卡片键记；没有解析结果时用通用文案。
+  const [actionProposalError, setActionProposalError] = useState<Record<string, string>>({});
   const { index: stockIndex } = useStockIndex(
     agentStatus?.backend === 'codex_app_server',
   );
@@ -376,9 +378,11 @@ const ChatPage: React.FC = () => {
         if (isMountedRef.current) {
           setActionProposalStatus((s) => ({ ...s, [cardKey]: 'applied' }));
         }
-      } catch {
+      } catch (err) {
+        console.error('[action proposal] apply failed', err);
         if (isMountedRef.current) {
           setActionProposalStatus((s) => ({ ...s, [cardKey]: 'error' }));
+          setActionProposalError((s) => ({ ...s, [cardKey]: getParsedApiError(err).message }));
         }
       }
     },
@@ -1061,6 +1065,7 @@ const ChatPage: React.FC = () => {
     const applied = status === 'applied';
     const applying = status === 'applying';
     const failed = status === 'error';
+    const failureMessage = actionProposalError[cardKey] ?? t('chat.actionProposalFailed');
 
     return (
       <div key={cardKey} className="mb-3 mt-2">
@@ -1070,8 +1075,14 @@ const ChatPage: React.FC = () => {
           message={(
             <span className="flex flex-col gap-3">
               <span className="font-medium">{proposal.summary}</span>
-              {!applied && !failed && (
+              {failed && (
+                <span className="text-xs">{failureMessage}</span>
+              )}
+              {!applied && (
                 <span className="flex gap-2">
+                  {/* 确认按钮在失败态复用为「重试」：它不可点会让用户彻底卡死——失败态下
+                      再没有别的入口能改状态（取消也会让卡片消失），而 409 /「持仓账本正忙」
+                      这类必须先改数据才能成功。所以失败态保留它，并把原因显示在上方。 */}
                   <Button
                     type="button"
                     size="sm"
@@ -1093,9 +1104,6 @@ const ChatPage: React.FC = () => {
                     {t('chat.actionProposalCancel')}
                   </Button>
                 </span>
-              )}
-              {failed && (
-                <span className="text-xs">{t('chat.actionProposalFailed')}</span>
               )}
             </span>
           )}

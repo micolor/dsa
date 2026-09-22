@@ -31,6 +31,9 @@ describe('parseActionProposalEvent', () => {
     ['summary 不是字符串', { kind: 'alert', summary: 42, proposal: { a: 1 } }],
     ['proposal 缺失', { kind: 'alert', summary: 'x' }],
     ['proposal 不是对象', { kind: 'alert', summary: 'x', proposal: 'nope' }],
+    ['proposal 是数组（数组也是 object，但不是合法请求体）', { kind: 'alert', summary: 'x', proposal: [] }],
+    ['summary 是空串', { kind: 'alert', summary: '', proposal: { a: 1 } }],
+    ['summary 只有空白', { kind: 'alert', summary: '   ', proposal: { a: 1 } }],
   ];
 
   it.each(invalidCases)('returns undefined when %s', (_label, event) => {

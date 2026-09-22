@@ -2527,6 +2527,41 @@ describe('watchlist button with code variants', () => {
     expect(screen.getAllByRole('button', { name: '确认' })).toHaveLength(1);
   });
 
+  it('keeps a failed proposal card actionable and shows why it failed', async () => {
+    mockAddToWatchlist.mockRejectedValue(new Error('boom'));
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '把 600519 加入自选' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成提案',
+        actionProposals: [
+          {
+            kind: 'watchlist_add',
+            summary: '把「600519」加入自选',
+            proposal: { stock_code: '600519', list_name: null },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    // 失败原因来自 getParsedApiError（这里就是 Error('boom') 的 message），
+    // 而不是诱导用户无限重试的通用文案。
+    expect(await screen.findByText('boom')).toBeInTheDocument();
+    // 失败态必须仍然可操作：确认（即重试）与取消都还在，用户不会被动卡死。
+    expect(screen.getByRole('button', { name: '确认' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '取消' })).toBeEnabled();
+  });
+
   it('dismisses an action proposal card on cancel', async () => {
     mockStoreState.messages = [
       { id: 'user-1', role: 'user', content: '分析 600519' },
