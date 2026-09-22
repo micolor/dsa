@@ -48,10 +48,15 @@ Unknown event types should be ignored or displayed with a generic fallback.
 | `tool_start` | single-agent loop | A tool call has started. | `step`, `tool`, `display_name` |
 | `tool_done` | single-agent loop | A tool call has completed or failed. | `step`, `tool`, `success`, `duration`, `display_name` |
 | `generating` | single-agent loop | The final response is being generated. | `step`, `message` |
+| `action_proposal` | single-agent loop (proposal tools) | The agent proposed a write action that requires explicit user confirmation. Nothing is persisted; the web client applies it via the existing REST endpoint after the user confirms. | `kind`, `summary`, `proposal` |
 | `pipeline_timeout` | multi-agent orchestrator | The orchestrator stopped because the stage or pipeline budget expired. | `stage`, `elapsed`, `timeout` |
 | `pipeline_budget_skipped` | multi-agent orchestrator | The orchestrator stopped before starting the next stage because the remaining budget was too low for useful work. | `stage`, `elapsed`, `timeout`, `remaining`, `minimum`, `reason`, `message` |
 | `done` | SSE endpoint | The request completed. | `success`, `content`, `error`, `total_steps`, `session_id` |
 | `error` | SSE endpoint | The request failed before normal completion. | `message` |
+
+`action_proposal` 的 `kind` 取值：`alert` / `portfolio_trade` / `watchlist_add` / `watchlist_remove`。
+`proposal` 就是对应写接口的请求体（snake_case），`summary` 由后端工具生成、供卡片直接展示。
+客户端遇到未知 `kind` 必须忽略该事件，不得据此发起任何请求。
 
 ## Web Behavior
 
