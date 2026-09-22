@@ -14,6 +14,7 @@ runner 读到该信封后发出 ``action_proposal`` SSE 事件，真正的写入
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,6 +46,14 @@ def _fmt_amount(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _with_currency(text: str, currency: str) -> str:
+    """Prefix a rendered number with an explicit currency code (``CNY 1.6706``).
+
+    用代码而不是 ``¥``：``¥`` 在 CNY 与 JPY 之间有歧义（``market`` 枚举里确实有 ``jp``）。
+    """
+    return f"{currency} {text}" if currency else text
+
+
 def _check_number(
     value: Any, field: str, *, allow_zero: bool
 ) -> Tuple[Optional[float], Optional[str]]:
@@ -53,6 +62,10 @@ def _check_number(
         number = float(value)
     except (TypeError, ValueError):
         return None, f"{field} 必须是数字，收到 {value!r}"
+    # JSON 允许 1e999 这种字面量，float() 会得到 inf；而 inf/nan 对任何比较都返回
+    # False，下面的范围守卫拦不住它们，必须先用 isfinite 挡掉。
+    if not math.isfinite(number):
+        return None, f"{field} 必须是有限数字，收到 {value!r}"
     if allow_zero and number < 0:
         return None, f"{field} 必须 >= 0，收到 {number}"
     if not allow_zero and number <= 0:
@@ -69,7 +82,9 @@ def _format_account_choices(accounts: List[Dict[str, Any]]) -> str:
     active = [a for a in accounts if a.get("is_active")]
     if not active:
         return "当前没有已激活的账户，请先在持仓页创建账户"
-    return "；".join(f"{int(a['id'])}: {a.get('name') or '未命名'}" for a in active)
+    # 本函数在 _resolve_account 的 try 块外被调用，缺 id 时不能抛 KeyError（否则错误
+    # 处理路径自己会崩），故一律用 .get 且不做 int() 转换。
+    return "；".join(f"{a.get('id', '?')}: {a.get('name') or '未命名'}" for a in active)
 
 
 def _resolve_account(account_id: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -114,6 +129,7 @@ def _handle_propose_portfolio_trade(
     fee: Any = 0,
     tax: Any = 0,
     market: str = "",
+    currency: str = "",
     note: str = "",
     reason: str = "",
 ) -> Dict[str, Any]:
@@ -161,7 +177,11 @@ def _handle_propose_portfolio_trade(
 
     norm_market = str(market or "").strip().lower() or None
     if norm_market and norm_market not in SUPPORTED_MARKETS:
-        return {"error": f"market 必须是 {list(SUPPORTED_MARKETS)} 之一，收到 {market!r}"}
+        return {"error": f"market 必须是 {'/'.join(SUPPORTED_MARKETS)} 之一，收到 {market!r}"}
+
+    norm_currency = str(currency or "").strip().upper()
+    if norm_currency and not 3 <= len(norm_currency) <= 8:
+        return {"error": f"currency 必须是 3-8 位货币代码（如 CNY/USD/HKD），收到 {currency!r}"}
 
     proposal: Dict[str, Any] = {
         "account_id": int(account["id"]),
@@ -175,16 +195,31 @@ def _handle_propose_portfolio_trade(
     }
     if norm_market:
         proposal["market"] = norm_market
+    if norm_currency:
+        proposal["currency"] = norm_currency
     norm_note = str(note or "").strip()
     if norm_note:
         proposal["note"] = norm_note[:255]
 
+    # 成交价币种优先用模型显式给出的（标的计价币种），其次退到账户本位币；后者只用于
+    # 文案展示，不写进 proposal —— 美元账户买 A 股时价仍是 CNY，不能混为一谈。
+    display_currency = norm_currency or str(account.get("base_currency") or "").strip().upper()
+
     action_label = "买入" if norm_side == "buy" else "卖出"
-    amount = norm_quantity * norm_price + norm_fee + norm_tax
+    if norm_side == "buy":
+        # 买入是现金流出：成交额 + 手续费 + 税费
+        amount = norm_quantity * norm_price + norm_fee + norm_tax
+        amount_label = "约支出"
+    else:
+        # 卖出是现金流入：成交额 - 手续费 - 税费
+        amount = norm_quantity * norm_price - norm_fee - norm_tax
+        amount_label = "约收入"
+    price_text = _with_currency(_fmt_num(norm_price), display_currency)
+    amount_text = _with_currency(_fmt_amount(amount), display_currency)
     summary = (
         f"在「{account.get('name') or '未命名账户'}」记一笔{action_label} "
-        f"{norm_symbol} {_fmt_num(norm_quantity)} @ ¥{_fmt_num(norm_price)}"
-        f"（{norm_date.isoformat()}，约 ¥{_fmt_amount(amount)}）"
+        f"{norm_symbol} {_fmt_num(norm_quantity)} @ {price_text}"
+        f"（{norm_date.isoformat()}，{amount_label} {amount_text}）"
     )
     norm_reason = str(reason or "").strip()
     if norm_reason:
@@ -233,6 +268,14 @@ propose_portfolio_trade_tool = ToolDefinition(
             description="市场；省略时由后端按账户与代码推断",
             required=False,
             enum=list(SUPPORTED_MARKETS),
+        ),
+        ToolParameter(
+            name="currency",
+            type="string",
+            description=(
+                "成交价计价币种代码（如 CNY/USD/HKD）；仅当标的计价币种与账户本位币不同时才给出"
+            ),
+            required=False,
         ),
         ToolParameter(name="note", type="string", description="可选备注，写入交易记录", required=False),
         ToolParameter(name="reason", type="string", description="可选提案理由，用于在卡片上向用户说明", required=False),
