@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+from src.agent.runner import _maybe_emit_action_proposal
 from src.agent.tools.action_tools import (
     SUPPORTED_MARKETS,
     SUPPORTED_SIDES,
@@ -459,9 +460,6 @@ def test_action_tools_are_registered_with_chinese_labels():
         assert TOOL_DISPLAY_NAMES.get(name), f"{name} 缺少中文展示名"
 
 
-from src.agent.runner import _maybe_emit_action_proposal
-
-
 def test_emitter_rejects_unknown_kind():
     events = []
     tc = SimpleNamespace(name="propose_portfolio_trade")
@@ -536,3 +534,17 @@ def test_every_proposable_kind_is_accepted_by_the_runner():
 
     producible = {"alert", "portfolio_trade", *set(_ACTION_KINDS.values())}
     assert _ALLOWED_PROPOSAL_KINDS == producible
+
+
+def test_proposal_tool_names_match_the_registry():
+    """runner 的提案工具集合必须与注册表里所有 propose_* 工具一致。
+
+    硬编码的工具名列表无法发现「新注册了一个提案工具但没加进 runner 集合」——
+    那种情况下该工具的提案会被静默丢弃，且现有测试全绿。这条从注册表反查，
+    把那个方向也堵上。
+    """
+    from src.agent.factory import get_tool_registry
+    from src.agent.runner import _PROPOSAL_TOOL_NAMES
+
+    registered = {n for n in get_tool_registry().list_names() if n.startswith("propose_")}
+    assert registered == set(_PROPOSAL_TOOL_NAMES)

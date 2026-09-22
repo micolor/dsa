@@ -424,7 +424,7 @@ class TestAskCommandAgenticSession(unittest.TestCase):
 
 
 class TestAskCommandActionProposalHint(unittest.TestCase):
-    """Verify the /ask proposal hint is labelled by kind, not always "预警"."""
+    """Verify /ask surfaces every action proposal and sends users to the Web client."""
 
     @staticmethod
     def _message() -> BotMessage:
@@ -438,14 +438,15 @@ class TestAskCommandActionProposalHint(unittest.TestCase):
             content="/ask 600519",
         )
 
-    def _reply_for_event(self, event):
-        """Run _analyze_single with an executor that replays one progress event."""
+    def _reply_for_events(self, *events):
+        """Run _analyze_single with an executor that replays the given progress events."""
         command = AskCommand()
 
         class FakeExecutor:
             def chat(self, message, session_id, progress_callback=None, context=None):
-                if progress_callback is not None:
-                    progress_callback(event)
+                for event in events:
+                    if progress_callback is not None:
+                        progress_callback(event)
                 return SimpleNamespace(success=True, content="analysis ok")
 
         with patch("src.agent.factory.build_agent_executor", return_value=FakeExecutor()):
@@ -454,44 +455,42 @@ class TestAskCommandActionProposalHint(unittest.TestCase):
                     SimpleNamespace(), self._message(), "600519", "chan_theory", ""
                 )
 
-    def test_non_alert_kinds_point_to_the_web_client(self):
+    def test_every_kind_points_to_the_web_client(self):
         for kind, summary in (
+            ("alert", "「600519」价格上穿 ¥1800"),
             ("watchlist_add", "把「600519」加入自选"),
             ("portfolio_trade", "在「A股主账户」记一笔买入 005827 25900 @ CNY 1.6706"),
         ):
             with self.subTest(kind=kind):
-                response = self._reply_for_event(
+                response = self._reply_for_events(
                     {"type": "action_proposal", "kind": kind, "summary": summary}
                 )
                 self.assertIn("检测到待确认操作", response.text)
                 self.assertIn(summary, response.text)
                 self.assertIn("（请在 Web 端「问股」中确认）", response.text)
-                # /alert 只能落库告警规则，对自选/持仓提案是无效指引。
+                # 本仓库没有 /alert 命令（ALL_COMMANDS 里没有 alert）：提示用户执行它
+                # 只会得到「未知命令: alert」，所以任何 kind 都不能出现这条指引。
                 self.assertNotIn("/alert", response.text)
-                # 自选/持仓提案不是预警：说成「可创建的预警」就是给用户错话。
+                # 提案不是预警：说成「可创建的预警」就是给用户错话。
                 self.assertNotIn("预警", response.text)
 
-    def test_alert_kind_keeps_the_alert_command_hint(self):
-        response = self._reply_for_event(
-            {
-                "type": "action_proposal",
-                "kind": "alert",
-                "summary": "「600519」价格上穿 ¥1800",
-            }
+    def test_every_proposal_in_one_session_is_listed(self):
+        response = self._reply_for_events(
+            {"type": "action_proposal", "kind": "watchlist_add", "summary": "把「600519」加入自选"},
+            {"type": "action_proposal", "kind": "alert", "summary": "「600519」价格上穿 ¥1800"},
         )
-        self.assertIn("检测到待确认操作", response.text)
+        # 两次提案都要在回复里：只留最后一条会让先到的提案对 Feishu 用户完全不可见。
+        self.assertIn("把「600519」加入自选", response.text)
         self.assertIn("「600519」价格上穿 ¥1800", response.text)
-        self.assertIn("（可用 /alert 或 Web 端落库）", response.text)
+        self.assertEqual(response.text.count("（请在 Web 端「问股」中确认）"), 1)
 
-    def test_missing_kind_falls_back_to_the_web_client_hint(self):
-        response = self._reply_for_event(
-            {"type": "action_proposal", "summary": "把「600519」加入自选"}
+    def test_malformed_and_other_events_add_no_hint(self):
+        response = self._reply_for_events(
+            {"type": "tool_done", "tool": "get_realtime_quote"},
+            {"type": "action_proposal", "summary": "   "},
+            {"type": "action_proposal", "summary": 42},
+            {"type": "action_proposal"},
         )
-        self.assertIn("（请在 Web 端「问股」中确认）", response.text)
-        self.assertNotIn("/alert", response.text)
-
-    def test_other_event_types_add_no_hint(self):
-        response = self._reply_for_event({"type": "tool_done", "tool": "get_realtime_quote"})
         self.assertNotIn("检测到待确认操作", response.text)
 
 

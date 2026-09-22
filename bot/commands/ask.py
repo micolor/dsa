@@ -257,10 +257,12 @@ class AskCommand(BotCommand):
             user_msg = self._build_user_message(code, skill_id, skill_text)
             session_id = self._ask_session_id(message)
 
-            # Fold the most useful progress signal (an action_proposal outcome) into the
-            # final reply. BotResponse has no streaming surface, so we capture the
-            # action_proposal event and append a one-line hint instead.
-            action_hint: Dict[str, str] = {}
+            # Fold the most useful progress signal (action_proposal outcomes) into the
+            # final reply. BotResponse has no streaming surface, so we collect the
+            # action_proposal events and append one hint line per proposal.
+            # 累积而不是只留最后一条：一次会话可以提出多个提案，只存一条会让先到的提案
+            # 凭空消失，而并行工具路径下完成顺序不确定，丢哪条都不确定。
+            action_hints: List[str] = []
 
             def _on_progress(event: Any) -> None:
                 if not isinstance(event, dict):
@@ -269,9 +271,7 @@ class AskCommand(BotCommand):
                     return
                 summary = event.get("summary")
                 if isinstance(summary, str) and summary.strip():
-                    action_hint["summary"] = summary.strip()
-                    kind = event.get("kind")
-                    action_hint["kind"] = kind if isinstance(kind, str) else ""
+                    action_hints.append(summary.strip())
 
             result = executor.chat(
                 message=user_msg,
@@ -284,15 +284,15 @@ class AskCommand(BotCommand):
                 skill_name = self._resolve_skill_name(skill_id)
                 header = f"📊 {code} | 技能: {skill_name}\n{'─' * 30}\n"
                 content = header + result.content
-                if action_hint.get("summary"):
-                    # 只有告警在 bot 侧有对应的落库命令（/alert），其余动作需要去 Web 端确认。
-                    if action_hint.get("kind") == "alert":
-                        follow_up = "（可用 /alert 或 Web 端落库）"
-                    else:
-                        follow_up = "（请在 Web 端「问股」中确认）"
+                if action_hints:
+                    # 本仓库**没有** /alert 命令（ALL_COMMANDS 里只有 help/status/analyze/
+                    # market/batch/ask/chat/research/strategies/history），提示用户执行它
+                    # 只会得到「未知命令: alert」。所有 kind 的落库路径都只有 Web 端确认卡片
+                    # （告警走 POST /api/v1/alerts/rules），因此统一给同一条提示。
+                    lines = "\n".join(f"· {summary}" for summary in action_hints)
                     content += (
-                        f"\n\n🤖 检测到待确认操作：{action_hint['summary']}\n"
-                        f"{follow_up}"
+                        f"\n\n🤖 检测到待确认操作：\n{lines}\n"
+                        "（请在 Web 端「问股」中确认）"
                     )
                 return BotResponse.text_response(content)
             return BotResponse.text_response(f"⚠️ 分析失败: {result.error}")
