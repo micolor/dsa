@@ -9,7 +9,8 @@ import type { ActionProposal } from '../types/actionProposal';
 /** watchlist 接口的请求体形状（对齐 WatchlistRequest，`api/v1/schemas/history.py:389`）。 */
 interface WatchlistProposalPayload {
   stockCode: string;
-  listName?: string;
+  /** 后端可能给 null（"默认列表"由客户端用 undefined 表达）。 */
+  listName?: string | null;
 }
 
 /**
@@ -17,6 +18,8 @@ interface WatchlistProposalPayload {
  *
  * 写入发生在浏览器会话下、走既有 REST 接口，AI 从不持有写权限；这里只负责把后端
  * 原样的 snake_case 请求体转成各客户端的入参形状并调用。
+ *
+ * kind 不在白名单时抛错（不会静默什么都不做），调用方可据此包 try/catch 提示用户。
  */
 export async function applyActionProposal(proposal: ActionProposal): Promise<void> {
   switch (proposal.kind) {
@@ -39,8 +42,10 @@ export async function applyActionProposal(proposal: ActionProposal): Promise<voi
       await systemConfigApi.removeFromWatchlist(payload.stockCode, payload.listName ?? undefined);
       return;
     }
-    default:
-      // kind 已在服务端白名单校验过，这里只是纵深防御：宁可直接报错，也不静默什么都不做。
-      throw new Error(`unsupported action proposal kind: ${String((proposal as { kind?: unknown }).kind)}`);
+    default: {
+      // 穷尽性检查：新增 kind 而忘了在这里处理时，`tsc -b` 会失败，而不是让用户看到「提交失败」。
+      const exhaustive: never = proposal.kind;
+      throw new Error(`unsupported action proposal kind: ${String(exhaustive)}`);
+    }
   }
 }

@@ -20,6 +20,11 @@ export const ACTION_PROPOSAL_KINDS = [
 /** kind 类型从运行时数组派生：单一源，二者不可能不一致（详见上方注释）。 */
 export type ActionProposalKind = (typeof ACTION_PROPOSAL_KINDS)[number];
 
+/** 未知 kind 一律丢弃，避免把前端无法分发的卡片挂到消息上。 */
+export function isActionProposalKind(value: unknown): value is ActionProposalKind {
+  return typeof value === 'string' && (ACTION_PROPOSAL_KINDS as readonly string[]).includes(value);
+}
+
 export interface ActionProposal {
   kind: ActionProposalKind;
   /** 卡片展示的中文摘要，由后端工具处理器生成，不是模型自由生成 */

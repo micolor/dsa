@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TS_PATH = "apps/dsa-web/src/types/actionProposal.ts"
 
 _ARRAY_BLOCK_RE = re.compile(r"export const ACTION_PROPOSAL_KINDS = \[(.*?)\] as const;", re.DOTALL)
-_STRING_LITERAL_RE = re.compile(r"'([^']+)'")
+# 单双引号都要匹配：只认单引号时，用双引号写的一项会被静默跳过，数组真的漂移了测试反而通过。
+_STRING_LITERAL_RE = re.compile(r"""['"]([^'"]+)['"]""")
 
 
 def _web_kinds() -> set:
