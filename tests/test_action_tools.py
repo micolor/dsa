@@ -274,12 +274,10 @@ from src.agent.tools.action_tools import (  # noqa: E402
 
 def _patch_named_lists(names=("短线池",)):
     service = mock.MagicMock()
-    calls = []
 
     def _get_config(include_schema=True, mask_token="******"):
-        # 必须记录 include_schema：真实 get_config(include_schema=True) 返回的是带 schema/掩码的
-        # 结构而不是裸 items，若实现里漏传 False，只有断言过这个参数才抓得到。
-        calls.append(include_schema)
+        # 断言侧会检查 get_config 的调用参数：真实 get_config(include_schema=True) 返回的是带
+        # schema/掩码的结构而不是裸 items，若实现里漏传 False，只有断言过这个参数才抓得到。
         return {
             "config_version": "v1",
             "items": [{"key": f"WATCHLIST_{n.upper()}", "value": ""} for n in names],

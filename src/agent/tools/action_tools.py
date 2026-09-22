@@ -334,9 +334,13 @@ def _handle_propose_watchlist_change(
 ) -> Dict[str, Any]:
     """Validate one watchlist add/remove and return a proposal; persists nothing.
 
-    校验复用 ``watchlist_service``：写接口自身的 400 也来自同一份逻辑，因此「提案通过」
-    意味着确认时的 ``POST /api/v1/stocks/watchlist/add``（或 ``/remove``）不会因代码格式
-    或列表名被拒。
+    股票代码格式与写接口共享同一份校验（``src/services/watchlist_service.py`` 的
+    ``validate_and_normalize_stock_code`` 与同一条 ``STOCK_CODE_RE``），因此「提案通过」
+    意味着确认时的 ``POST /api/v1/stocks/watchlist/add``（或 ``/remove``）不会因代码格式被拒。
+
+    列表名是本工具**额外**加的、严于端点的检查：端点并不校验 ``list_name``，未知名字会被
+    直接解析成新 key 从而创建出新的命名列表；不在这里挡住的话，模型随手编一个列表名就会
+    静默产生配置写入副作用。
     """
     norm_action = str(action or "").strip().lower()
     if norm_action not in SUPPORTED_WATCHLIST_ACTIONS:
