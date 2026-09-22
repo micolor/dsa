@@ -13,7 +13,6 @@ import {
   parseActionProposalEvent,
   type ActionProposal,
 } from '../types/actionProposal';
-import type { AlertProposal } from '../types/alerts';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
@@ -65,11 +64,6 @@ export interface Message {
    * `utils/actionProposal` 的 apply 分支里做。
    */
   actionProposals?: ActionProposal[];
-  /**
-   * @deprecated 过渡期兼容：ChatPage 的旧告警卡片仍读这个字段（Task 8 重写卡片时删除）。
-   * store 已不再写入它——后端不再发 alert_proposal，旧卡片在改动前后都不会渲染。
-   */
-  alertProposal?: AlertProposal;
 }
 
 export interface StreamMeta {

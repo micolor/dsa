@@ -9,8 +9,8 @@ import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, AutoDismissToast, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip } from '../components/common';
 import { ToastPortal } from '../contexts/ToastHostContext';
 import { createParsedApiError, getParsedApiError } from '../api/error';
-import { alertsApi } from '../api/alerts';
-import type { AlertProposal } from '../types/alerts';
+import { applyActionProposal } from '../utils/actionProposal';
+import type { ActionProposal } from '../types/actionProposal';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
 import {
@@ -38,7 +38,7 @@ import { useUiLanguage } from '../contexts/UiLanguageContext';
 // Quick question examples shown on empty state
 type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>;
 
-type AlertProposalStatus = 'pending' | 'creating' | 'created' | 'error' | 'cancelled';
+type ActionProposalStatus = 'pending' | 'applying' | 'applied' | 'error' | 'cancelled';
 
 const QUICK_QUESTIONS: Array<{
   label: string;
@@ -257,7 +257,8 @@ const ChatPage: React.FC = () => {
   const [agentStatus, setAgentStatus] = useState<AgentStatusResponse | null>(null);
   const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
   const [agentStatusChecking, setAgentStatusChecking] = useState(true);
-  const [alertProposalStatus, setAlertProposalStatus] = useState<Record<string, AlertProposalStatus>>({});
+  // 一条助手消息可以带多张卡片，因此状态按卡片键（`${msg.id}#${index}`）记，不能只按 msg.id。
+  const [actionProposalStatus, setActionProposalStatus] = useState<Record<string, ActionProposalStatus>>({});
   const { index: stockIndex } = useStockIndex(
     agentStatus?.backend === 'codex_app_server',
   );
@@ -367,25 +368,25 @@ const ChatPage: React.FC = () => {
     [isWatchlistActioning, watchlistCodes, t],
   );
 
-  const handleCreateAlertProposal = useCallback(
-    async (msgId: string, proposal: AlertProposal) => {
-      setAlertProposalStatus((s) => ({ ...s, [msgId]: 'creating' }));
+  const handleApplyActionProposal = useCallback(
+    async (cardKey: string, proposal: ActionProposal) => {
+      setActionProposalStatus((s) => ({ ...s, [cardKey]: 'applying' }));
       try {
-        await alertsApi.createRule(proposal.payload);
+        await applyActionProposal(proposal);
         if (isMountedRef.current) {
-          setAlertProposalStatus((s) => ({ ...s, [msgId]: 'created' }));
+          setActionProposalStatus((s) => ({ ...s, [cardKey]: 'applied' }));
         }
       } catch {
         if (isMountedRef.current) {
-          setAlertProposalStatus((s) => ({ ...s, [msgId]: 'error' }));
+          setActionProposalStatus((s) => ({ ...s, [cardKey]: 'error' }));
         }
       }
     },
     [],
   );
 
-  const handleCancelAlertProposal = useCallback((msgId: string) => {
-    setAlertProposalStatus((s) => ({ ...s, [msgId]: 'cancelled' }));
+  const handleCancelActionProposal = useCallback((cardKey: string) => {
+    setActionProposalStatus((s) => ({ ...s, [cardKey]: 'cancelled' }));
   }, []);
 
   const {
@@ -1052,50 +1053,49 @@ const ChatPage: React.FC = () => {
     </div>
   );
 
-  const renderAlertProposalCard = (msg: Message) => {
-    const proposal = msg.alertProposal;
-    if (!proposal) return null;
-    const status = alertProposalStatus[msg.id] || 'pending';
+  const renderActionProposalCard = (msg: Message, proposal: ActionProposal, index: number) => {
+    const cardKey = `${msg.id}#${index}`;
+    const status = actionProposalStatus[cardKey] || 'pending';
     if (status === 'cancelled') return null;
 
-    const created = status === 'created';
-    const creating = status === 'creating';
+    const applied = status === 'applied';
+    const applying = status === 'applying';
     const failed = status === 'error';
 
     return (
-      <div className="mb-3 mt-2">
+      <div key={cardKey} className="mb-3 mt-2">
         <InlineAlert
-          variant={created ? 'success' : failed ? 'danger' : 'info'}
-          title={created ? t('chat.alertProposalCreated') : t('chat.alertProposalTitle')}
+          variant={applied ? 'success' : failed ? 'danger' : 'info'}
+          title={applied ? t('chat.actionProposalApplied') : t('chat.actionProposalTitle')}
           message={(
             <span className="flex flex-col gap-3">
               <span className="font-medium">{proposal.summary}</span>
-              {!created && !failed && (
+              {!applied && !failed && (
                 <span className="flex gap-2">
                   <Button
                     type="button"
                     size="sm"
                     variant="primary"
-                    isLoading={creating}
-                    disabled={creating}
-                    loadingText={t('chat.alertProposalCreating')}
-                    onClick={() => void handleCreateAlertProposal(msg.id, proposal)}
+                    isLoading={applying}
+                    disabled={applying}
+                    loadingText={t('chat.actionProposalApplying')}
+                    onClick={() => void handleApplyActionProposal(cardKey, proposal)}
                   >
-                    {t('chat.alertProposalCreate')}
+                    {t('chat.actionProposalConfirm')}
                   </Button>
                   <Button
                     type="button"
                     size="sm"
                     variant="danger-subtle"
-                    disabled={creating}
-                    onClick={() => handleCancelAlertProposal(msg.id)}
+                    disabled={applying}
+                    onClick={() => handleCancelActionProposal(cardKey)}
                   >
-                    {t('chat.alertProposalCancel')}
+                    {t('chat.actionProposalCancel')}
                   </Button>
                 </span>
               )}
               {failed && (
-                <span className="text-xs">{t('chat.alertProposalFailed')}</span>
+                <span className="text-xs">{t('chat.actionProposalFailed')}</span>
               )}
             </span>
           )}
@@ -1497,7 +1497,10 @@ const ChatPage: React.FC = () => {
                       expandedThinking.has(msg.id) &&
                       msg.thinkingSteps &&
                       renderThinkingDetails(msg.thinkingSteps)}
-                    {msg.role === 'assistant' && renderAlertProposalCard(msg)}
+                    {msg.role === 'assistant' &&
+                      msg.actionProposals?.map((proposal, index) =>
+                        renderActionProposalCard(msg, proposal, index),
+                      )}
                     {msg.role === 'assistant' ? (
                       <div className="relative">
                         <div className="chat-message-actions">

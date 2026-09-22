@@ -2394,7 +2394,7 @@ describe('watchlist button with code variants', () => {
     expect(mockAddToWatchlist).not.toHaveBeenCalled();
   });
 
-  it('renders an alert proposal card and creates the rule on confirm', async () => {
+  it('renders an action proposal card and creates the rule on confirm', async () => {
     mockCreateAlertRule.mockResolvedValue({
       id: 1,
       name: '600519 price above 1800',
@@ -2412,17 +2412,21 @@ describe('watchlist button with code variants', () => {
         id: 'assistant-1',
         role: 'assistant',
         content: '建议关注该价格位',
-        alertProposal: {
-          summary: '「600519」价格上穿 ¥1800',
-          payload: {
-            name: '600519 price above 1800',
-            targetScope: 'single_symbol',
-            target: '600519',
-            alertType: 'price_cross',
-            parameters: { direction: 'above', price: 1800 },
-            severity: 'info',
+        actionProposals: [
+          {
+            kind: 'alert',
+            summary: '「600519」价格上穿 ¥1800',
+            // proposal 是后端原样的 snake_case 请求体
+            proposal: {
+              name: '600519 price above 1800',
+              target_scope: 'single_symbol',
+              target: '600519',
+              alert_type: 'price_cross',
+              parameters: { direction: 'above', price: 1800 },
+              severity: 'info',
+            },
           },
-        },
+        ],
       },
     ];
 
@@ -2433,34 +2437,117 @@ describe('watchlist button with code variants', () => {
     );
 
     expect(await screen.findByText('「600519」价格上穿 ¥1800')).toBeInTheDocument();
+    expect(screen.getByText('待确认操作')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
 
     await waitFor(() => expect(mockCreateAlertRule).toHaveBeenCalledTimes(1));
+    // apply 分支把 snake_case 转成客户端入参形状后再调 createRule
     expect(mockCreateAlertRule).toHaveBeenCalledWith(
       expect.objectContaining({ target: '600519', alertType: 'price_cross' }),
     );
-    expect(await screen.findByText('告警规则已创建')).toBeInTheDocument();
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
   });
 
-  it('dismisses an alert proposal card on cancel', async () => {
+  it('applies a watchlist proposal through the systemConfig client', async () => {
+    mockAddToWatchlist.mockResolvedValue(['600519']);
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '把 600519 加入自选' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成提案',
+        actionProposals: [
+          {
+            kind: 'watchlist_add',
+            summary: '把「600519」加入自选',
+            proposal: { stock_code: '600519', list_name: null },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(mockAddToWatchlist).toHaveBeenCalledWith('600519', undefined));
+    expect(mockCreateAlertRule).not.toHaveBeenCalled();
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
+  });
+
+  it('renders one card per proposal and tracks their status independently', async () => {
+    mockAddToWatchlist.mockResolvedValue(['600519']);
+    mockCreateAlertRule.mockResolvedValue({ id: 2 });
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '两只都处理一下' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成两条提案',
+        actionProposals: [
+          {
+            kind: 'watchlist_add',
+            summary: '把「600519」加入自选',
+            proposal: { stock_code: '600519', list_name: null },
+          },
+          {
+            kind: 'watchlist_add',
+            summary: '把「300750」加入自选',
+            proposal: { stock_code: '300750', list_name: null },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
+    expect(screen.getByText('把「300750」加入自选')).toBeInTheDocument();
+    // 两张卡片各自一个确认按钮
+    const confirmButtons = screen.getAllByRole('button', { name: '确认' });
+    expect(confirmButtons).toHaveLength(2);
+
+    fireEvent.click(confirmButtons[0]);
+
+    // 只提交被点的那一张，另一张仍在等待确认
+    await waitFor(() => expect(mockAddToWatchlist).toHaveBeenCalledTimes(1));
+    expect(mockAddToWatchlist).toHaveBeenCalledWith('600519', undefined);
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '确认' })).toHaveLength(1);
+  });
+
+  it('dismisses an action proposal card on cancel', async () => {
     mockStoreState.messages = [
       { id: 'user-1', role: 'user', content: '分析 600519' },
       {
         id: 'assistant-1',
         role: 'assistant',
         content: '建议关注该价格位',
-        alertProposal: {
-          summary: '「600519」价格上穿 ¥1800',
-          payload: {
-            name: '600519 price above 1800',
-            targetScope: 'single_symbol',
-            target: '600519',
-            alertType: 'price_cross',
-            parameters: { direction: 'above', price: 1800 },
-            severity: 'info',
+        actionProposals: [
+          {
+            kind: 'alert',
+            summary: '「600519」价格上穿 ¥1800',
+            proposal: {
+              name: '600519 price above 1800',
+              target_scope: 'single_symbol',
+              target: '600519',
+              alert_type: 'price_cross',
+              parameters: { direction: 'above', price: 1800 },
+              severity: 'info',
+            },
           },
-        },
+        ],
       },
     ];
 

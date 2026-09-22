@@ -384,6 +384,41 @@ describe('agentChatStore.startStream', () => {
     ]);
   });
 
+  it('accumulates every action_proposal event in one turn instead of keeping only the last', async () => {
+    // 「把这三只加入自选」会让模型对每只各调一次提案工具，后端每次调用发一个事件；
+    // 只留最后一个会静默丢掉其余卡片，且并行路径下顺序是完成顺序、丢哪个不确定。
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        accepted('request-multi-proposal'),
+        'data: {"type":"content_delta","delta":"先导"}',
+        'data: {"type":"action_proposal","kind":"watchlist_add","proposal":{"stock_code":"600519","list_name":null},"summary":"把「600519」加入自选"}',
+        'data: {"type":"action_proposal","kind":"watchlist_add","proposal":{"stock_code":"300750","list_name":null},"summary":"把「300750」加入自选"}',
+        'data: {"type":"done","success":true,"content":"已生成两条提案","backend":"litellm"}',
+      ]),
+    );
+
+    await useAgentChatStore.getState().startStream({
+      message: '把这两只加入自选',
+      session_id: 'session-test',
+      request_id: 'request-multi-proposal',
+    });
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1].actionProposals).toEqual([
+      {
+        kind: 'watchlist_add',
+        summary: '把「600519」加入自选',
+        proposal: { stock_code: '600519', list_name: null },
+      },
+      {
+        kind: 'watchlist_add',
+        summary: '把「300750」加入自选',
+        proposal: { stock_code: '300750', list_name: null },
+      },
+    ]);
+  });
+
   it('ignores an action_proposal event whose kind is not in the whitelist', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([
