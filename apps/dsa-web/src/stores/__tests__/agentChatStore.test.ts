@@ -349,6 +349,9 @@ describe('agentChatStore.startStream', () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([
         accepted('request-alert-proposal'),
+        // 先有一段正文，让流式占位消息先被 append，从而逼出 streaming-placeholder 那个 attach 点
+        // （没有 content_delta 时只走 fresh-append 那一处）。
+        'data: {"type":"content_delta","delta":"先导"}',
         'data: {"type":"action_proposal","kind":"alert","proposal":{"name":"600519 price above 1800","target_scope":"single_symbol","target":"600519","alert_type":"price_cross","parameters":{"direction":"above","price":1800},"severity":"info"},"summary":"「600519」价格上穿 ¥1800"}',
         'data: {"type":"done","success":true,"content":"建议关注该价格位","backend":"litellm"}',
       ]),
@@ -363,19 +366,22 @@ describe('agentChatStore.startStream', () => {
     const state = useAgentChatStore.getState();
     expect(state.messages).toHaveLength(2);
     const assistant = state.messages[1];
-    // proposal 保持后端原样的 snake_case，转换交给 utils/actionProposal 的 apply 分支
-    expect(assistant.actionProposal).toMatchObject({
-      kind: 'alert',
-      summary: '「600519」价格上穿 ¥1800',
-      proposal: {
-        name: '600519 price above 1800',
-        target_scope: 'single_symbol',
-        target: '600519',
-        alert_type: 'price_cross',
-        parameters: { direction: 'above', price: 1800 },
-        severity: 'info',
+    // toEqual 而非 toMatchObject：钉住「恰好是后端原样的 snake_case 请求体，没有多加东西」，
+    // 转换交给 utils/actionProposal 的 apply 分支。
+    expect(assistant.actionProposals).toEqual([
+      {
+        kind: 'alert',
+        summary: '「600519」价格上穿 ¥1800',
+        proposal: {
+          name: '600519 price above 1800',
+          target_scope: 'single_symbol',
+          target: '600519',
+          alert_type: 'price_cross',
+          parameters: { direction: 'above', price: 1800 },
+          severity: 'info',
+        },
       },
-    });
+    ]);
   });
 
   it('ignores an action_proposal event whose kind is not in the whitelist', async () => {
@@ -393,7 +399,7 @@ describe('agentChatStore.startStream', () => {
       request_id: 'request-bad-proposal',
     });
 
-    expect(useAgentChatStore.getState().messages[1].actionProposal).toBeUndefined();
+    expect(useAgentChatStore.getState().messages[1].actionProposals).toBeUndefined();
   });
 
   it('keeps streamed text when the stream fails after content_delta', async () => {

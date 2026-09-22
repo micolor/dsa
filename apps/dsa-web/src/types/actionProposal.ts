@@ -32,3 +32,21 @@ export interface ActionProposal {
   /** 对应写接口的请求体（snake_case） */
   proposal: unknown;
 }
+
+/**
+ * 从 SSE 事件里解析提案；形状不合规一律返回 undefined（不抛错、不部分接受）。
+ *
+ * 放在这里而不是 `utils/actionProposal.ts`：那个模块 import 三个 API 客户端，是 apply 边界；
+ * 这里只是 ingest 边界，纯解析、无副作用。
+ */
+export function parseActionProposalEvent(event: unknown): ActionProposal | undefined {
+  const { kind, summary, proposal } = (event ?? {}) as {
+    kind?: unknown;
+    summary?: unknown;
+    proposal?: unknown;
+  };
+  if (!isActionProposalKind(kind)) return undefined;
+  if (!proposal || typeof proposal !== 'object') return undefined;
+  if (typeof summary !== 'string') return undefined;
+  return { kind, summary, proposal };
+}

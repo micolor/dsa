@@ -10,7 +10,7 @@ import {
 } from '../api/error';
 import { generateUUID } from '../utils/uuid';
 import {
-  isActionProposalKind,
+  parseActionProposalEvent,
   type ActionProposal,
 } from '../types/actionProposal';
 import type { AlertProposal } from '../types/alerts';
@@ -55,8 +55,16 @@ export interface Message {
   skillName?: string;
   thinkingSteps?: ProgressStep[];
   backend?: string;
-  /** 写操作提案（告警/持仓录入/自选增删），等待用户在卡片上确认。 */
-  actionProposal?: ActionProposal;
+  /**
+   * 写操作提案（告警/持仓录入/自选增删），等待用户在卡片上确认。
+   *
+   * 数组而不是单值：一轮对话里可以有多次提案工具调用（例如「把这三只加入自选」会对每只各发一次），
+   * 后端每次调用发一个事件，并行路径下顺序还是完成顺序——只留最后一个会静默丢掉其余提案。
+   *
+   * 每项的 `proposal` 是后端原样的 snake_case 请求体，snake→camel 转换与断言在
+   * `utils/actionProposal` 的 apply 分支里做。
+   */
+  actionProposals?: ActionProposal[];
   /**
    * @deprecated 过渡期兼容：ChatPage 的旧告警卡片仍读这个字段（Task 8 重写卡片时删除）。
    * store 已不再写入它——后端不再发 alert_proposal，旧卡片在改动前后都不会渲染。
@@ -429,8 +437,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       let receivedDoneEvent = false;
       let acceptedEvent: StreamAcceptedEvent | null = null;
       const currentProgressSteps: ProgressStep[] = [];
-      // 提案事件里的待确认动作；在 done 时挂到已提交的助手消息上，避免流中途改动消息。
-      let pendingActionProposal: ActionProposal | undefined;
+      // 提案事件里的待确认动作（一轮可能多个）；在 done 时挂到已提交的助手消息上，避免流中途改动消息。
+      const pendingActionProposals: ActionProposal[] = [];
       // Streaming text accumulation. content_delta events append here and the
       // assistant message is updated on a ~40ms throttle to avoid re-rendering
       // the full Markdown on every token.
@@ -568,12 +576,9 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
 
         if (event.type === 'action_proposal') {
-          const kind = (event as { kind?: unknown }).kind;
-          const proposal = (event as { proposal?: unknown }).proposal;
-          const summary = (event as { summary?: unknown }).summary;
-          if (isActionProposalKind(kind) && proposal && typeof summary === 'string') {
-            // proposal 保持后端原样（snake_case），snake→camel 与断言在 utils/actionProposal 里做。
-            pendingActionProposal = { kind, summary, proposal };
+          const proposal = parseActionProposalEvent(event);
+          if (proposal) {
+            pendingActionProposals.push(proposal);
           }
           return;
         }
@@ -645,7 +650,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 content: committedContent,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
-                actionProposal: pendingActionProposal,
+                actionProposals: pendingActionProposals.length > 0 ? pendingActionProposals : undefined,
               };
               return { messages };
             }
@@ -665,7 +670,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 skillName,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
-                actionProposal: pendingActionProposal,
+                actionProposals: pendingActionProposals.length > 0 ? pendingActionProposals : undefined,
               },
             ],
           }));
