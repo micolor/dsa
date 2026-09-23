@@ -54,6 +54,21 @@ _QUOTE_REFRESH_INFLIGHT: Set[str] = set()
 FUND_LIMITATION_NOTE = "场外基金按最新单位净值估值，非实时"
 
 
+def default_currency_for_market(market: str) -> str:
+    """Default currency a trade in ``market`` is recorded under.
+
+    这是「成交价币种缺省值」的**唯一**规则：``record_trade`` / ``record_corporate_action``
+    用它落库，Agent 的提案工具也用它渲染卡片（``src/agent/tools/action_tools.py``）——
+    两边必须同源，否则卡片上的金额会带着与账本不同的单位。因此它是模块级函数而非类方法：
+    调用方（含 mock 掉 ``PortfolioService`` 的测试）能直接 import，不必经过类。
+    """
+    if market == "hk":
+        return "HKD"
+    if market == "us":
+        return "USD"
+    return "CNY"
+
+
 def _portfolio_limitations_for_market(market: str) -> List[str]:
     """Return explicit snapshot limitations for markets with partial valuation semantics."""
 
@@ -234,7 +249,7 @@ class PortfolioService:
             with self.repo.portfolio_write_session() as session:
                 account = self._require_active_account_in_session(session=session, account_id=account_id)
                 market_norm = self._normalize_market(market or account.market)
-                currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                currency_norm = self._normalize_currency(currency or default_currency_for_market(market_norm))
                 self._validate_trade_identity(
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
@@ -328,7 +343,7 @@ class PortfolioService:
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             market_norm = self._normalize_market(market or account.market)
-            currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+            currency_norm = self._normalize_currency(currency or default_currency_for_market(market_norm))
             symbol_norm = self._normalize_symbol_for_storage(symbol)
             if not symbol_norm:
                 raise ValueError("symbol is required")
@@ -1857,11 +1872,3 @@ class PortfolioService:
         if method not in VALID_COST_METHODS:
             raise ValueError("cost_method must be fifo or avg")
         return method
-
-    @staticmethod
-    def _default_currency_for_market(market: str) -> str:
-        if market == "hk":
-            return "HKD"
-        if market == "us":
-            return "USD"
-        return "CNY"

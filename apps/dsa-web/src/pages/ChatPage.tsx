@@ -378,6 +378,12 @@ const ChatPage: React.FC = () => {
         if (isMountedRef.current) {
           setActionProposalStatus((s) => ({ ...s, [cardKey]: 'applied' }));
         }
+        // 自选类提案改的是本页顶部那个「加入自选 / 从自选删除」按钮的依据（watchlistCodes），
+        // 它只在挂载与手动切换时更新，不重载的话确认完卡片按钮仍按旧快照渲染成相反的意思。
+        // 只对自选两个 kind 重取：交易/告警不影响这份状态，多打一次配置接口没有理由。
+        if (proposal.kind === 'watchlist_add' || proposal.kind === 'watchlist_remove') {
+          await loadWatchlist();
+        }
       } catch (err) {
         console.error('[action proposal] apply failed', err);
         if (isMountedRef.current) {
@@ -386,7 +392,7 @@ const ChatPage: React.FC = () => {
         }
       }
     },
-    [],
+    [loadWatchlist],
   );
 
   const handleCancelActionProposal = useCallback((cardKey: string) => {

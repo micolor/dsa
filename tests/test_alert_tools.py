@@ -51,6 +51,25 @@ def test_propose_default_name_and_reason():
     assert result["summary"].endswith("（放量突破）")
 
 
+def test_reason_is_length_bounded():
+    """reason 会流进 summary → SSE 事件 → 确认卡片，模型不能往里塞几 KB 文本。
+
+    上限与 `action_tools` 的两个提案工具**共用同一份**帮助函数（三个工具的 reason 走同一条
+    通道），这里断言实际截断结果，而不是断言它们「应该一样」。
+    """
+    from src.agent.tools.action_tools import _REASON_LIMIT
+
+    result = _handle_propose_alert(
+        target="AAPL",
+        alert_type="volume_spike",
+        parameters={"multiplier": 2},
+        reason="很" * 5000,
+    )
+    assert "error" not in result
+    assert result["summary"].endswith("（" + "很" * _REASON_LIMIT + "）")
+    assert len(result["summary"]) < 400
+
+
 def test_propose_invalid_type_returns_error():
     result = _handle_propose_alert(target="600519", alert_type="bogus", parameters={})
     assert result["error"]

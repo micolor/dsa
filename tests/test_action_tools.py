@@ -16,14 +16,20 @@ from src.agent.tools.action_tools import (
 )
 
 _ACCOUNTS = [
-    {"id": 1, "name": "A股主账户", "is_active": True},
-    {"id": 2, "name": "港美股", "is_active": True},
-    {"id": 3, "name": "已停用账户", "is_active": False},
+    {"id": 1, "name": "A股主账户", "is_active": True, "market": "cn", "base_currency": "CNY"},
+    {"id": 2, "name": "港美股", "is_active": True, "market": "us", "base_currency": "USD"},
+    {"id": 3, "name": "已停用账户", "is_active": False, "market": "cn", "base_currency": "CNY"},
 ]
 
 
-_ACCOUNTS_CNY = [{"id": 1, "name": "A股主账户", "is_active": True, "base_currency": "CNY"}]
-_ACCOUNTS_USD = [{"id": 1, "name": "港美股", "is_active": True, "base_currency": "USD"}]
+_ACCOUNTS_CNY = [{"id": 1, "name": "A股主账户", "is_active": True, "market": "cn", "base_currency": "CNY"}]
+_ACCOUNTS_USD = [{"id": 1, "name": "港美股", "is_active": True, "market": "us", "base_currency": "USD"}]
+# market 与 base_currency 是两个互相独立的字段（`PortfolioAccount` 上都是 NOT NULL 默认值），
+# 港美股账户配人民币本位币是 CN 用户的真实组合。落库币种只看 market，所以这类账户的卡片
+# 必须写 USD —— 写 base_currency 的 CNY 就是给用户看错单位。
+_ACCOUNTS_US_MARKET_CNY_BASE = [
+    {"id": 1, "name": "港美股", "is_active": True, "market": "us", "base_currency": "CNY"}
+]
 
 
 def _patch_accounts(accounts=None):
@@ -73,9 +79,9 @@ def test_propose_trade_builds_api_shaped_payload():
         "fee": 0.0,
         "tax": 0.0,
     }
-    # 夹具没有 base_currency，模型也没给 currency：只渲染数字，不猜 ¥
-    assert result["summary"].startswith("在「A股主账户」记一笔买入 005827 25900 @ 1.6706")
-    assert "约支出 43268.54" in result["summary"]
+    # 模型没给 currency：币种按服务端落库规则由 market 推出（cn → CNY），与 `¥` 无关
+    assert result["summary"].startswith("在「A股主账户」记一笔买入 005827 25900 @ CNY 1.6706")
+    assert "约支出 CNY 43268.54" in result["summary"]
     assert "2026-09-22" in result["summary"]
 
 
@@ -143,7 +149,7 @@ def test_propose_trade_includes_amount_and_reason():
             reason="定投补仓",
         )
     # 25900 × 1.6706 = 43268.54，加 5 元手续费 = 43273.54
-    assert "约支出 43273.54" in result["summary"]
+    assert "约支出 CNY 43273.54" in result["summary"]
     assert result["summary"].endswith("（定投补仓）")
 
 
@@ -169,18 +175,109 @@ def test_propose_trade_sell_nets_out_fees():
             tax=0.5,
         )
     # 卖出是现金流入：100 × 1800 − 5 − 0.5 = 179994.5
-    assert "约收入 179994.50" in result["summary"]
+    assert "约收入 CNY 179994.50" in result["summary"]
 
 
-def test_propose_trade_renders_currency_code_from_account_base():
+def test_propose_trade_renders_currency_code_from_market():
     with _patch_accounts(_ACCOUNTS_CNY):
         result = _handle_propose_portfolio_trade(
             account_id=1, symbol="600519", side="buy", quantity=100, price=1800
         )
     assert "@ CNY 1800" in result["summary"]
     assert "约支出 CNY 180000.00" in result["summary"]
-    # 账户本位币只用于展示，不能当成成交价币种写进请求体
+    # 账户字段只参与解析展示币种，不能当成成交价币种写进请求体
     assert "currency" not in result["proposal"]
+
+
+def test_propose_trade_card_currency_follows_the_market_not_the_account_base():
+    """market 与 base_currency 不一致时，卡片必须写**落库**的那个币种。
+
+    `PortfolioService.record_trade` 用的是 `currency or default_currency_for_market(market or
+    account.market)`，完全不看 `base_currency`；这里若退回账户本位币，卡片就会把 USD 的记录
+    写成「约支出 CNY …」——用户唯一要确认的量级带着错的单位。
+    """
+    with _patch_accounts(_ACCOUNTS_US_MARKET_CNY_BASE):
+        result = _handle_propose_portfolio_trade(
+            account_id=1, symbol="AAPL", side="buy", quantity=10, price=180
+        )
+    assert "@ USD 180" in result["summary"]
+    assert "约支出 USD 1800.00" in result["summary"]
+    assert "CNY" not in result["summary"]
+
+
+@pytest.fixture()
+def temp_portfolio_service(tmp_path, monkeypatch):
+    """真实 ``PortfolioService`` + 临时 SQLite（同 ``tests/test_portfolio_service.py`` 的做法），
+    用于把工具的产出与真正落库的结果对照，而不是与另抄一份的期望值对照。"""
+    from src.config import Config
+    from src.services.portfolio_service import PortfolioService
+    from src.storage import DatabaseManager
+
+    env_path = tmp_path / ".env"
+    db_path = tmp_path / "portfolio_test.db"
+    env_path.write_text(
+        "\n".join(
+            [
+                "STOCK_LIST=600519",
+                "GEMINI_API_KEY=test",
+                "ADMIN_AUTH_ENABLED=false",
+                f"DATABASE_PATH={db_path}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ENV_FILE", str(env_path))
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    Config.reset_instance()
+    DatabaseManager.reset_instance()
+    try:
+        yield PortfolioService()
+    finally:
+        DatabaseManager.reset_instance()
+        Config.reset_instance()
+
+
+@pytest.mark.parametrize(
+    ("market", "base_currency"),
+    [("us", "CNY"), ("hk", "CNY"), ("cn", "USD")],
+)
+def test_card_currency_equals_the_currency_the_service_records(
+    temp_portfolio_service, market, base_currency
+):
+    """F1 的端到端对照，期望币种不写死：账户由真实服务创建、工具读同一个服务，
+    再把工具产出的 proposal **原样**交给 ``record_trade`` 落库，最后把「卡片上印的币种」
+    与「记录里存下的币种」直接比对。工具侧若退回账户本位币（旧实现），第 2、3 组会转红——
+    不依赖任何人记得同步两处映射。
+    """
+    service = temp_portfolio_service
+    account = service.create_account(
+        name="港美股", broker="Demo", market=market, base_currency=base_currency
+    )
+    result = _handle_propose_portfolio_trade(
+        account_id=account["id"], symbol="AAPL", side="buy", quantity=10, price=180
+    )
+    assert "error" not in result
+
+    proposal = result["proposal"]
+    service.record_trade(
+        account_id=proposal["account_id"],
+        symbol=proposal["symbol"],
+        trade_date=date.fromisoformat(proposal["trade_date"]),
+        side=proposal["side"],
+        quantity=proposal["quantity"],
+        price=proposal["price"],
+        fee=proposal["fee"],
+        tax=proposal["tax"],
+        market=proposal.get("market"),
+        currency=proposal.get("currency"),
+    )
+    stored = service.list_trade_events(account_id=account["id"])["items"][0]
+
+    assert f"约支出 {stored['currency']} 1800.00" in result["summary"]
+    assert "@ " + stored["currency"] + " 180" in result["summary"]
+    # 这几组夹具故意让本位币与落库币种不同：上一条断言才有区分度
+    assert stored["currency"] != base_currency
 
 
 def test_propose_trade_renders_usd_account():
@@ -429,7 +526,7 @@ def test_watchlist_hint_skips_names_that_cannot_round_trip():
     assert "用户同意" in result["error"]
 
 
-def test_reason_is_length_bounded_in_both_proposal_tools():
+def test_reason_is_length_bounded_in_the_action_tools():
     """reason 会流进 summary → SSE 事件 → 确认卡片，模型不能往里塞几 KB 文本。"""
     watchlist = _handle_propose_watchlist_change(
         action="add", symbol="600519", reason="很" * 5000
@@ -476,6 +573,10 @@ def test_emitter_rejects_malformed_summary_and_proposal():
         {"kind": "portfolio_trade", "summary": 1, "proposal": {"a": 1}},
         {"kind": "portfolio_trade", "summary": "x", "proposal": "nope"},
         {"kind": ["portfolio_trade"], "summary": "x", "proposal": {"a": 1}},
+        # 空白摘要：前端 `parseActionProposalEvent` 会丢弃它，runner 若放行就会「发射成功、
+        # 卡片不存在，且把 {"message": ""} 回给模型」——模型据此宣称已生成卡片，用户什么也没看到。
+        {"kind": "portfolio_trade", "summary": "", "proposal": {"a": 1}},
+        {"kind": "portfolio_trade", "summary": "   ", "proposal": {"a": 1}},
     ):
         raw = json.dumps(payload)
         assert _maybe_emit_action_proposal(tc, raw, events.append, step=1) == raw

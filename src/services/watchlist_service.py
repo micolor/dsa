@@ -22,7 +22,12 @@ if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注；见下方说明
     # 工具/Agent 侧的轻量入口，不应为此付出这个代价。
     from src.services.system_config_service import SystemConfigService
 
-# Stock code validation patterns (aligned with frontend validateStockCode)
+# 股票代码格式。**意图**是与前端 `validateStockCode`
+# （`apps/dsa-web/src/utils/validation.ts` 的 `STOCK_CODE_PATTERNS`）保持一致，
+# 但没有任何测试强制两者相同——这条注释不构成「已验证一致」的声明。
+# 实测差异只有一个方向：本正则严格**更窄**，前端还接受日/韩 Yahoo 后缀
+# （`7203.T` / `005930.KS` / `035720.KQ`，而 market 枚举里确有 jp/kr），这里会拒。
+# 要真正对齐需同时改两处并补一条跨语言一致性测试，属独立改动。
 STOCK_CODE_RE = re.compile(
     r"^(?:\d{6}"                              # A-share 6-digit
     r"|(?:SH|SZ|BJ)\d{6}"                     # exchange-prefixed A-share

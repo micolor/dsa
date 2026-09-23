@@ -83,8 +83,36 @@ _REASON_LIMIT = 200
 
 
 def _normalize_reason(reason: Any) -> str:
-    """收敛提案理由：去空白并限制长度，避免模型把长文本塞进卡片与 SSE 事件。"""
+    """收敛提案理由：去空白并限制长度，避免模型把长文本塞进卡片与 SSE 事件。
+
+    三个提案工具（含 ``alert_tools._handle_propose_alert``）共用这一份：它们的 reason 走
+    同一条 summary → SSE → 卡片通道，各写一份长度上限就会漂移。
+    """
     return str(reason or "").strip()[:_REASON_LIMIT]
+
+
+def _resolve_display_currency(
+    norm_currency: str, norm_market: Optional[str], account: Dict[str, Any]
+) -> str:
+    """Return the currency the confirmed trade will actually be stored under.
+
+    与 ``PortfolioService.record_trade``（``src/services/portfolio_service.py:252``）**同源**：
+    那里把 ``currency or default_currency_for_market(market or account.market)`` 写进
+    ``portfolio_trades.currency``。卡片上的金额是用户唯一要确认的量级，币种必须等于落库币种，
+    否则会出现「卡片说约支出 CNY …、账本里是 USD」这种单位错误。``market`` 与 ``base_currency``
+    是彼此独立的两个字段，港美股账户（``market="us"``）配人民币本位币是真实存在的组合，
+    此时**账户本位币不是落库币种**。
+
+    因此这里直接调用服务里那个模块级函数，而不是在工具侧再抄一份 ``{"hk": HKD, "us": USD, ...}``：
+    抄一份就等于在同一仓库里放第二条规则（服务侧也用它，见 ``default_currency_for_market``）。
+    延迟 import 是刻意的——本模块的调用方包含轻量入口，模块级 import 会把服务侧的依赖拖进工具面；
+    而走到这里时 ``_resolve_account`` 已经在同一调用路径上 import 过 ``PortfolioService``
+    （import 失败会在那一步返回 ``{"error": ...}``），所以这一行的 import 不会失败、也不会多付一次代价。
+    """
+    market = norm_market or str(account.get("market") or "").strip().lower()
+    from src.services.portfolio_service import default_currency_for_market
+
+    return norm_currency or default_currency_for_market(market)
 
 
 # ============================================================
@@ -215,9 +243,9 @@ def _handle_propose_portfolio_trade(
     if norm_note:
         proposal["note"] = norm_note[:255]
 
-    # 成交价币种优先用模型显式给出的（标的计价币种），其次退到账户本位币；后者只用于
-    # 文案展示，不写进 proposal —— 美元账户买 A 股时价仍是 CNY，不能混为一谈。
-    display_currency = norm_currency or str(account.get("base_currency") or "").strip().upper()
+    # 展示币种按服务侧的落库规则解析（成交价币种优先用模型显式给出的，否则按市场取默认币种），
+    # 但它只用于文案展示，不写进 proposal —— 美元账户买 A 股时价仍是 CNY，不能混为一谈。
+    display_currency = _resolve_display_currency(norm_currency, norm_market, account)
 
     action_label = "买入" if norm_side == "buy" else "卖出"
     if norm_side == "buy":
@@ -247,7 +275,8 @@ propose_portfolio_trade_tool = ToolDefinition(
     description=(
         "当用户要求把某笔买入/卖出记入持仓账户，或对话中已确认份额、成本、账户时，"
         "用本工具生成一条持仓录入提案交给用户确认。只生成提案，不写入任何数据。\n"
-        "account_id 必填：先用 get_portfolio_snapshot 读取账户的 account_id / account_name；"
+        "account_id 必填：先用 get_portfolio_snapshot 读取 snapshot.accounts[] 里的"
+        "account_id / account_name（账户信息在 snapshot 下，没有顶层 accounts 键）；"
         "多个账户而用户未指明时必须先追问用户，不要猜。\n"
         "trade_date 省略时按今天记账；用户要补记历史交易必须显式给出 YYYY-MM-DD。"
     ),
@@ -255,7 +284,7 @@ propose_portfolio_trade_tool = ToolDefinition(
         ToolParameter(
             name="account_id",
             type="integer",
-            description="目标账户 id，取自 get_portfolio_snapshot 返回的 accounts[].account_id",
+            description="目标账户 id，取自 get_portfolio_snapshot 返回的 snapshot.accounts[].account_id",
             required=True,
         ),
         ToolParameter(name="symbol", type="string", description="股票/基金代码，如 600519 / 005827 / HK00700 / AAPL", required=True),

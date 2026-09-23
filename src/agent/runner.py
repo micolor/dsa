@@ -659,6 +659,11 @@ def _maybe_emit_action_proposal(
         return result_str
     if not isinstance(proposal, dict) or not isinstance(summary, str):
         return result_str
+    # 空白摘要与前端 `parseActionProposalEvent`（types/actionProposal.ts）的拒绝条件逐字对齐：
+    # 前端丢弃它、后端却当成功并回写 `{"message": ""}`，模型会照此宣称「已生成确认卡片」，
+    # 而用户什么也没看到——两层判断必须同一套，谁都不许单独放宽。
+    if not summary.strip():
+        return result_str
     progress_callback(
         stream_event("action_proposal", kind=kind, proposal=proposal, summary=summary)
     )

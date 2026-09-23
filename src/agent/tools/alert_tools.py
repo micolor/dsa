@@ -12,6 +12,9 @@ existing validation, permission and notification paths.
 from typing import Any, Dict
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter, ToolPolicy
+# reason 的长度上限与 action_tools 的两个提案工具共用一份：三个工具的 reason 都汇进同一条
+# summary → SSE 事件 → 确认卡片通道，各写一份上限迟早会漂移。
+from src.agent.tools.action_tools import _normalize_reason
 from src.services.alert_service import (
     AlertService,
     AlertServiceError,
@@ -141,8 +144,9 @@ def _handle_propose_alert(
     }
 
     summary = _build_summary(norm_target, alert_type, norm_params)
-    if str(reason or "").strip():
-        summary = f"{summary}（{reason}）"
+    norm_reason = _normalize_reason(reason)
+    if norm_reason:
+        summary = f"{summary}（{norm_reason}）"
 
     return {"kind": "alert", "summary": summary, "proposal": proposal}
 

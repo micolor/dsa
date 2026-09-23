@@ -2482,6 +2482,83 @@ describe('watchlist button with code variants', () => {
     expect(await screen.findByText('已提交')).toBeInTheDocument();
   });
 
+  it('refreshes the watchlist state after confirming a watchlist proposal', async () => {
+    // 首次读到的自选里还有 300750（按钮因此渲染成「从自选删除」），确认移出后再读是空的。
+    mockGetWatchlist.mockResolvedValueOnce(['300750']).mockResolvedValue([]);
+    mockRemoveFromWatchlist.mockResolvedValue([]);
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '分析 300750' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成提案',
+        actionProposals: [
+          {
+            kind: 'watchlist_remove',
+            summary: '把「300750」移出自选',
+            proposal: { stock_code: '300750', list_name: null },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('从自选删除')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(mockRemoveFromWatchlist).toHaveBeenCalledWith('300750', undefined));
+    // 卡片路径必须重取自选：不重取的话按钮仍按挂载时的旧快照渲染成「从自选删除」，
+    // 用户刚确认完移出，页面却还在说它在自选里。
+    expect(await screen.findByText('加入自选')).toBeInTheDocument();
+    expect(screen.queryByText('从自选删除')).not.toBeInTheDocument();
+  });
+
+  it('does not refetch the watchlist after a non-watchlist proposal', async () => {
+    mockCreateAlertRule.mockResolvedValue({ id: 1 });
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '分析 600519' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成提案',
+        actionProposals: [
+          {
+            kind: 'alert',
+            summary: '「600519」价格上穿 ¥1800',
+            proposal: {
+              name: '600519 price above 1800',
+              target_scope: 'single_symbol',
+              target: '600519',
+              alert_type: 'price_cross',
+              parameters: { direction: 'above', price: 1800 },
+              severity: 'info',
+            },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('「600519」价格上穿 ¥1800')).toBeInTheDocument();
+    await waitFor(() => expect(mockGetWatchlist).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(mockCreateAlertRule).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    // 交易/告警不碰这份状态，不该多打一次配置接口
+    expect(mockGetWatchlist).toHaveBeenCalledTimes(1);
+  });
+
   it('renders one card per proposal and tracks their status independently', async () => {
     mockAddToWatchlist.mockResolvedValue(['600519']);
     mockCreateAlertRule.mockResolvedValue({ id: 2 });
