@@ -5,6 +5,12 @@
 > 按工具名硬编码在三层的**约定**而非机制；本次把它收敛为单一的 `action_proposal`
 > 通道，新增动作只需加一个工具 + 一个 kind + 一个 apply 分支。
 
+> **关于文中的 `文件:行号`**：行号是**设计阶段**的定位锚，实现落地后普遍下移了若干行
+> （已核对：`ChatPage.tsx` 的卡片渲染 `:1055-1105` → `:1060` 起，挂载点 `:1500` → `:1510`；
+> `agentChatStore.ts` 的两处 attach `:642`/`:662` → `:647`/`:667`；`runner.py` 的两个
+> `_maybe_emit_action_proposal` 调用点 `:758`/`:804` → `:785`/`:831`）。**函数名、字段名、
+> 契约描述是权威，行号只用于检索**；引用具体行为时以文中描述为准。
+
 ## 1. 背景与现状
 
 ### 1.1 用户问题
@@ -119,8 +125,11 @@ _ALLOWED_PROPOSAL_KINDS = frozenset({
 1. `tc.name` 不在 `_PROPOSAL_TOOL_NAMES`，或没有 `progress_callback` → 放行（现有）
 2. 结果不是可解析的 JSON dict → 放行（现有）。**工具报错天然走这条**：`{"error": ...}`
    没有 `proposal`/`summary` 键，因此不需要单独的 error 分支
-3. `proposal` 不是 dict 或 `summary` 不是 str → 放行（现有，**不收紧**为空串判断，
-   与 `agentChatStore.ts:566` 的前端判断保持一致）
+3. `proposal` 不是 dict、`summary` 不是 str、或 **`summary` 去掉首尾空白后为空** → 放行。
+   空白判断与前端 `parseActionProposalEvent`（`types/actionProposal.ts`）的拒绝条件**逐字
+   一致**，两层必须同一套：前端丢弃空白摘要、后端却当成功并回写 `{"message": ""}` 的话，
+   模型会据此宣称「已生成确认卡片」，而用户什么也看不到，且没有任何一层报错——工具今天都
+   产不出空白摘要，所以这条裂隙只可能由「某一层单独放宽」引入
 4. **`kind` 不在 `_ALLOWED_PROPOSAL_KINDS` 内 → 放行（新增）**，防止工具发出前端无法
    分发的 kind
 
@@ -150,7 +159,9 @@ bot（`bot/commands/ask.py:268`），本次一并改；该事件名未写入 `do
 ## 4. 两个新工具与校验同源
 
 新增 `src/agent/tools/action_tools.py`，导出 `ALL_ACTION_TOOLS`，在 `factory.py` 与
-`ALL_ALERT_TOOLS` 并列注册。`propose_alert` 留在 `alert_tools.py` 不动（避免无谓 import 抖动）。
+`ALL_ALERT_TOOLS` 并列注册。`propose_alert` 的工具定义留在 `alert_tools.py`（避免无谓 import
+抖动）；但三个提案工具的 reason 长度上限共用 `action_tools` 的 `_normalize_reason`，因此
+`alert_tools.py` 会 import 该模块——它们同属一条 summary → SSE → 卡片通道，上限写两份就会漂移。
 
 两工具策略与 `propose_alert` 逐字对齐：
 
@@ -166,7 +177,11 @@ ToolPolicy.declared(read_only=True, side_effects=[], permissions=[],
 
 参数：`account_id`(int, 必填)、`symbol`(str, 必填)、`side`(enum `buy`/`sell`, 必填)、
 `quantity`(number>0, 必填)、`price`(number>0, 必填)、`trade_date`(str `YYYY-MM-DD`, 可选)、
-`fee`/`tax`(number, 可选, 默认 0)、`market`(enum, 可选)、`note`(可选)、`reason`(可选)。
+`fee`/`tax`(number, 可选, 默认 0)、`market`(enum, 可选)、`currency`(str, 3-8 位货币代码,
+可选)、`note`(可选)、`reason`(可选)。
+
+`currency` 是**唯一**会被写进 `proposal.currency` 的币种来源（成交价的标的计价币种），
+只在它与账户本位币不同时才该给出；下方币种段落描述的展示规则依赖它。
 
 校验（逐条对齐 `PortfolioTradeCreateRequest`，`api/v1/schemas/portfolio.py:45-57`）：
 
@@ -181,9 +196,15 @@ summary 形如：`在「A股主账户」记一笔买入 005827 25900 @ CNY 1.670
 
 - 金额：买入为 `quantity × price + fee + tax`，卖出为 `quantity × price - fee - tax`（费用在卖出时是
   **扣掉**而非加上），并用 `约支出` / `约收入` 标出方向，避免卖出卡片高估净收入。
-- 币种：优先级 `proposal.currency`（模型显式给的标的计价币种）→ `account.base_currency` → 仅数字。
-  一律渲染**币种代码**而非符号：成交价是标的的计价币种，未必等于账户本位币（美元账户买 A 股，价是
-  CNY），而 `¥` 本身在 CNY/JPY 之间存在歧义（`market` 枚举里确有 `jp`）。
+- 币种：卡片上写的必须是**落库币种**——优先级 `proposal.currency`（模型显式给的标的计价币种）→
+  否则 `default_currency_for_market(market or account.market)`（`hk`→HKD、`us`→USD、其余→CNY），
+  也就是 `PortfolioService.record_trade` 落库时用的同一条规则（工具直接调用服务里那个函数，
+  不另抄一份映射；见 `portfolio_service.py` 的 `default_currency_for_market`）。
+  **`account.base_currency` 不参与**：`market` 与 `base_currency` 是两个互相独立的字段，
+  港美股账户（`market="us"`）配人民币本位币是真实组合，此时落库的是 USD；卡片若退回本位币，
+  就会把 `约支出 CNY …` 印在一笔 USD 记录上——金额是用户唯一要确认的量级，单位与账本不一致
+  等于看错数。币种一律渲染**代码**而非符号：成交价是标的的计价币种，未必等于账户本位币
+  （美元账户买 A 股，价是 CNY），而 `¥` 本身在 CNY/JPY 之间存在歧义（`market` 枚举里确有 `jp`）。
 - **刻意不写「股」或「份」**：账户层把 quantity 当纯数字，而按裸代码可靠区分股票与场外基金没有现成
   能力，硬猜单位会在另一类标的上写错。
 - 所有数值字段必须拒绝非有限浮点（`math.isfinite`）。`json.loads('{"price": 1e999}')` 会得到 `inf`，
@@ -193,10 +214,10 @@ summary 形如：`在「A股主账户」记一笔买入 005827 25900 @ CNY 1.670
 
 ### 4.2 `propose_watchlist_change`
 
-参数：`action`(enum `add`/`remove`, 必填)、`stock_code`(str, 必填)、`list_name`(str, 可选)、
-`reason`(可选)。
+参数：`action`(enum `add`/`remove`, 必填)、`symbol`(str, 必填)、`list_name`(str, 可选)、
+`reason`(可选)。参数名是 `symbol` 而不是 `stock_code`，原因见 §4.3。
 
-- `stock_code` 用**共享的** `validate_and_normalize_stock_code`（见 §5）校验；非法 → `{"error": ...}`
+- `symbol` 用**共享的** `validate_and_normalize_stock_code`（见 §5）校验；非法 → `{"error": ...}`
 - `list_name` 给出时，必须命中已存在的 `WATCHLIST_<NAME>`（用共享的 `list_named_watchlists`
   枚举），否则 `{"error": ...}` 并列出合法列表名。**这条校验是必需的**：不校验的话，模型
   编一个列表名就会静默新建一个命名自选列表（真实的配置写入副作用）
@@ -222,10 +243,17 @@ summary 形如：`把「600519」加入自选` / `把「600519」移出自选`�
 
 - 卖出提案无法预先排除 `PortfolioOversellError`（409，可卖数量不足）——预判需要模拟持仓，
   超出本次范围。该失败走卡片的「提交失败，请重试」分支，用户可重试或放弃。
-- **提案不幂等**：工具不暴露 `trade_uid`，而 `PortfolioTradeCreateRequest` 也没有 `dedup_hash`
-  字段，所以同一笔交易被确认两次会插入两条记录。这是**刻意**的：卡片在 `applying` 期间禁用按钮
-  已覆盖误触双击，而给一个确定性 `trade_uid` 会拦住用户合法地记录两笔同日同价交易。若将来要
-  幂等，需先给请求体加 `dedup_hash` 字段。
+- **提案不幂等**：工具不暴露 `trade_uid`，`PortfolioTradeCreateRequest` 也没有 `dedup_hash`
+  字段，所以同一笔交易被确认两次会插入两条记录。误触双击由卡片在 `applying` 期间禁用按钮覆盖，
+  真正的**残余风险**在别处：确认动作是「客户端发请求 → 服务端提交」，两端之间没有幂等键，
+  服务端已 `record_trade` 落库而响应在返回途中丢失（或前端超时先放弃）时，用户按卡片提示重试，
+  第二次请求就会再插一条——**服务端提交与客户端认知之间无法对账**。
+  幂等的底座其实已经存在：`PortfolioService.record_trade` 接受 `dedup_hash`，经
+  `_validate_trade_identity` 在冲突时抛 `PortfolioConflictError`（409），`portfolio_trades`
+  表上也有对应的唯一索引（`src/storage.py:580` 的 `dedup_hash` 列）。缺的只是把它接到契约上：
+  请求体加 `dedup_hash` 字段、由卡片按提案内容算一个确定性值再提交（**结构性修复超出本次范围**，
+  作为已知残余风险记录在此）。确定性 `trade_uid` 不能替代它：那会拦住用户合法地记录两笔
+  同日同价交易。
 - **未来日期被接受**：与端点一致（端点的 `date` 无上下界）。日期会显示在确认卡片上，确认前可见。
 
 ## 5. `watchlist_service` 提取（本次唯一动的存量后端代码）
@@ -243,6 +271,11 @@ summary 形如：`把「600519」加入自选` / `把「600519」移出自选`�
 `api/v1/endpoints/stocks.py` 中的同名私有函数**保留函数名与 400 语义**，函数体改为调用
 service 并在 `ValueError` 处转成 `HTTPException(400, ...)`——5 个调用点（`:436`、`:473`、
 `:524`、`:597` 等）一行都不用改，API 契约不变。
+
+（后续修正轮还在 `src/services/portfolio_service.py` 做了一处**文件内**改动，与本节的分层
+提取无关：原本私有的 `PortfolioService._default_currency_for_market` 提升为模块级函数
+`default_currency_for_market`，让提案工具能直接调用服务端落库用的同一条币种规则而不必实例化
+service 或另抄一份映射，见 §4.1 的币种段落。）
 
 ## 6. 前端
 
@@ -273,7 +306,18 @@ export interface ActionProposal {
   /** 对应写接口的请求体，保持后端原样的 snake_case，类型未知 */
   proposal: unknown;
 }
+
+export function isActionProposalKind(value: unknown): value is ActionProposalKind;
+
+export function parseActionProposalEvent(event: unknown): ActionProposal | undefined;
 ```
+
+两个函数是本模块的导出面之一：`isActionProposalKind` 是 kind 守卫，`parseActionProposalEvent`
+把一条 SSE 事件解析成 `ActionProposal`（或 `undefined`）——**它是「事件进入前端」的唯一入口**，
+store 只消费它，不在 store 里做字段校验（见 §6.2）。**放在 `types/` 而不是 `utils/`**：`utils/`
+一侧是 apply 边界（把已接受的提案送到写接口，见 §6.3），这里做的是校验与拒绝。判定的分界线是
+「未通过校验的事件一律不渲染卡片」——只有处在接受侧才拦得住，挪到 apply 侧时事件早已进了
+`msg.actionProposals`。
 
 跨三个域，不塞进 `types/alerts.ts`。`proposal` 保持 `unknown`：各 kind 形状不同，硬塞泛型
 只会堆断言；`switch (p.kind)` 收窄的是 `kind` 本身，每个分支内再把 `proposal` 断成该接口
@@ -295,8 +339,9 @@ export interface ActionProposal {
   `parseActionProposalEvent(event)` 解析后 **push 进数组**，**不再在 store 里 `toCamelCase`**
 - 卡片状态表的键从 `msg.id` 改为 `` `${msg.id}#${index}` ``——一条消息可能有多张卡片，
   按 `msg.id` 记会让它们的状态互相覆盖
-- kind 守卫**从 `types/actionProposal.ts` import `ACTION_PROPOSAL_KINDS`**，不在 store 里另声明
-  一份数组（见 §6.1：那份数组是唯一权威，store 只消费它）
+- kind 守卫**从 `types/actionProposal.ts` import `parseActionProposalEvent`**（它内部用
+  `isActionProposalKind` 对着唯一的 `ACTION_PROPOSAL_KINDS` 判定，见 §6.1），store 里不另写
+  一份 kind 数组、也不在 store 里做字段校验
 - `done` 时才 attach 的既有防竞态注释与结构（`:424-425`、`:630-670`）保持不变
 
 把 camelCase 转换从 store 挪到 apply 边界：现在有三种 payload 类型、各有各的客户端签名，
@@ -334,7 +379,8 @@ export async function applyActionProposal(p: ActionProposal): Promise<void>
 - `AlertProposalStatus` → `ActionProposalStatus`（五态不变）；`alertProposalStatus` map →
   `actionProposalStatus`，**键为 `` `${msg.id}#${index}` ``**（见 §6.2：一条消息可能有多张卡片）
 - `handleCreateAlertProposal`（`:370-385`）→ `handleApplyActionProposal(cardKey, proposal)`，
-  内部只调 `applyActionProposal`；成功/失败态语义不变
+  成功时先置 `applied`，watchlist 类提案（`watchlist_add` / `watchlist_remove`）随后**重新拉一次
+  自选列表状态**（`loadWatchlist()`），其余 kind 不重取；失败态语义不变
 - `renderAlertProposalCard`（`:1055-1105`）→ `renderActionProposalCard(msg, proposal, index)`；
   挂载点（`:1500`）改为对 `msg.actionProposals` **逐个渲染**（`?.map(...)`），一条消息 N 张卡片
 - 「取消」仍是纯前端状态（卡片消失），不落任何东西
@@ -467,7 +513,7 @@ Codex 面在**列举工具时**就按 `cancellation_safe_only=True` 过滤掉了
    `progressSteps`（`agentChatStore.ts:578`），表现为**卡片不出现但不报错**；而 Docker
    镜像前后端同源构建，该窗口实际不存在。
 2. **校验不同源导致"提案通过但确认时 400"**。已用共享校验消除；唯一无法预先排除的是
-   卖出 409（§4.3）。
+   卖出 409（§4.4）。
 3. **模型编造列表名造成配置写入副作用**。已用 `list_name` 存在性校验消除（§4.2）。
 4. **模型仍然口头拒绝**。新增规则 7/8 明确赋予提案能力并要求不得自称只读；端到端手工
    验证（§10.3）就是验证这一点。
