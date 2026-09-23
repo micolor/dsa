@@ -39,16 +39,41 @@ ANALYSIS_FORBIDDEN_TOOLS = ("propose_alert",) + PROPOSAL_TOOL_NAMES
 _BACKTICKED_PROPOSAL_TOOL = re.compile(r"`(propose_[a-z_]+)`")
 
 
+def _rules_block(prompt: str) -> str:
+    """截取 `## 规则` 小节的正文（跳过标题后的空行，到小节末尾的空行为止）。
+
+    下面两个助手原先按行首编号筛**全文**，与所在小节无关。今天没出错只是因为
+    ``executor.py`` 这五份提示词里 `6.`–`9.` 开头的行恰好都落在各自的规则区
+    （分析报告提示词另有自己的一套 1–6 条规则），那是巧合而非契约：任何一处
+    新增的 `7.`/`8.`/`9.` 开头行（编号列表、示例块等）都会混进「规则 7–9 逐字
+    一致」的比较。这里把「只看规则区」写成显式前提。`## 规则` 的存在由
+    `test_guard_scans_the_real_prompt_constants` 钉住；Codex 提示词没有这一节，
+    所以这两个助手只对 `CHAT_PROMPTS` 有意义。
+    """
+    lines = prompt.splitlines()
+    start = lines.index("## 规则") + 1
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    block = []
+    for line in lines[start:]:
+        if not line.strip():
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
 def _rules_7_to_9(prompt: str) -> str:
     """抽取 7/8/9 三条规则原文，用于确认两个对话变体逐字一致。"""
-    lines = [line for line in prompt.splitlines() if line[:2] in ("7.", "8.", "9.")]
-    return "\n".join(lines)
+    return "\n".join(
+        line for line in _rules_block(prompt).splitlines() if line[:2] in ("7.", "8.", "9.")
+    )
 
 
 def _rules_6_to_9(prompt: str) -> str:
     """抽取 6/7/8/9 四条提案规则原文，用于对注册表核名。"""
-    lines = [line for line in prompt.splitlines() if line[:2] in ("6.", "7.", "8.", "9.")]
-    return "\n".join(lines)
+    return "\n".join(
+        line for line in _rules_block(prompt).splitlines() if line[:2] in ("6.", "7.", "8.", "9.")
+    )
 
 
 def _named_proposal_tools_in_rules(prompt: str) -> set:
@@ -74,11 +99,15 @@ class TestChatPromptProposalRules(unittest.TestCase):
                 self.assertIn(tool_name, prompt, msg=f"对话提示词缺少 {tool_name} 提案规则")
 
     def test_chat_prompts_forbid_claiming_read_only(self):
+        """两条反拒绝禁令都要在：规则 9 的通用条款 + 规则 7 的限定条款。
+
+        规则 7 那条必须限定在「有对应提案工具」的情形，否则规则 9 的「如实说明」
+        会被读成「写操作都可以拒绝」的许可证，把整个任务的目的（不再回答
+        「我无法写入」）反过来。规则 9 的通用条款则是补上规则 7 限定后留下的缺口：
+        自选（规则 8）与告警（规则 6）的小节都没有写禁令，只有规则 9 覆盖得到。
+        """
         for prompt in CHAT_PROMPTS:
-            self.assertIn("声称自己只能查询、无法写入", prompt)
-            # 规则 7 的禁令必须限定在「有对应提案工具」的情形，否则规则 9 的
-            # 「如实说明」会被读成「写操作都可以拒绝」的许可证，把整个任务的
-            # 目的（不再回答「我无法写入」）反过来。
+            self.assertIn("对能通过提案工具完成的写操作，不得声称自己只能查询、无法写入", prompt)
             self.assertIn("在该笔录入有对应提案工具时声称自己只能查询、无法写入", prompt)
 
     def test_chat_prompts_keep_the_unrecoverable_clauses(self):
@@ -163,7 +192,12 @@ class TestPromptNamedToolsExistInRegistry(unittest.TestCase):
                 msg=f"规则里点名的工具未注册：{sorted(named - registered)}",
             )
 
-    def test_chat_prompts_name_exactly_those_tools(self):
+    def test_chat_prompts_name_every_listed_tool(self):
+        """名单里的每个工具都必须仍被提示词以反引号点名。
+
+        只钉「名单里的名字在不在」，不钉「提示词里有没有别的工具名」——后者由
+        `test_rules_name_no_unregistered_proposal_tool` 从原文反向扫描负责。
+        """
         for prompt in CHAT_PROMPTS:
             for tool_name in PROMPT_NAMED_TOOLS:
                 self.assertIn(f"`{tool_name}`", prompt)
