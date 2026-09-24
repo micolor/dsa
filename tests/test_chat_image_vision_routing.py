@@ -109,6 +109,7 @@ def test_wire_model_is_idempotent_for_openai_route():
 def test_wire_model_never_invents_a_provider_for_a_bare_name():
     """没有 provider 前缀的裸名不得被硬加前缀（解析不出 provider 就不该发明一个）。"""
     assert ex._vision_wire_model("deepseek-v4-flash") == "deepseek-v4-flash"
+    assert ex._vision_wire_model("deepseek") == "deepseek"   # 裸名恰好等于集合成员时也不得被改写
 
 
 def test_wire_model_prefers_deployment_model_over_caller_model():

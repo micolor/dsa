@@ -84,7 +84,7 @@ VISION_API_TIMEOUT = 60  # seconds; avoid long blocks on network/API issues
 # litellm 的 provider 专属路由不会转发 image_url 内容块（实测：deepseek/ 下模型回
 # 「未收到图片」或 "[]"，而同一个 endpoint 用 openai/ 通用路由能正确读出图中代码）。
 # 证据与逐层定位过程见 docs/superpowers/specs/2026-09-23-chat-image-paste-design.md §1.2
-# （Task 7 会把这条写进 CHANGELOG）。
+# （见 CHANGELOG 的 [Unreleased]）。
 # 只有**实测过**会剥图的路由才加进来——不要凭猜测往这里添，也不要泛化成「非原生前缀
 # 一律改走 openai/」：azure/ 需要 api_version 与自己的认证头，bedrock/、ollama/、
 # openrouter/、openai/responses/… 与 Hermes 路由被改写后会**静默**改变 api_base 与
