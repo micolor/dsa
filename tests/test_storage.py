@@ -557,6 +557,61 @@ class TestStorage(unittest.TestCase):
 
         DatabaseManager.reset_instance()
 
+    def test_chat_session_title_ignores_the_pasted_image_scaffolding(self):
+        """带图首轮持久化的就是注入后的文本，标题必须是用户问的那句话。
+
+        标题取自第一条用户消息的前 60 字，而带图那一轮存进库里的正是
+        `【图片内容】…【用户问题】<原话>\\n<原话>`（设计 §9.1 的哨兵约定）。不剥脚手架时
+        侧边栏标题会显示成「【图片内容】」+ 视觉模型对图的描述，而不是用户的问题。
+
+        这里故意用**真正的** `_resolve_image_message` 造那段文本，而不是手抄一份字面量：
+        要钉住的正是"端点写进库的形状"与"storage 派生标题"之间的契约，手抄的形状会漂移。
+        """
+        import base64
+        import io
+
+        from PIL import Image
+
+        from api.v1.endpoints.agent import ChatRequest, _resolve_image_message
+
+        question = "把图里这些加入自选"
+        buf = io.BytesIO()
+        Image.new("RGB", (2, 2), "white").save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+
+        with patch(
+            "api.v1.endpoints.agent.build_image_context",
+            return_value="【图片内容】\n图中是自选股列表：600519 贵州茅台。\n【用户问题】" + question,
+        ):
+            injected = _resolve_image_message(
+                ChatRequest(message=question, image_base64=b64, image_mime="image/png")
+            )
+        self.assertIn("【图片内容】", injected)  # 先确认喂给 storage 的确实是注入后的文本
+
+        DatabaseManager.reset_instance()
+        db = DatabaseManager(db_url="sqlite:///:memory:")
+        db.save_conversation_message("pasted-image:chat", "user", injected)
+
+        sessions = db.get_chat_sessions(session_prefix="pasted-image")
+
+        self.assertEqual([item["title"] for item in sessions], [question])
+
+        DatabaseManager.reset_instance()
+
+    def test_chat_session_title_keeps_plain_user_text(self):
+        """不带图的轮次没有哨兵，标题仍是原文前 60 字（剥脚手架不得改变原有行为）。"""
+        DatabaseManager.reset_instance()
+        db = DatabaseManager(db_url="sqlite:///:memory:")
+        long_text = "帮我看看茅台最近的走势，" + "再对比一下五粮液。" * 10
+        self.assertGreater(len(long_text), 60)  # 确认下面真的在验截断
+        db.save_conversation_message("plain:chat", "user", long_text)
+
+        sessions = db.get_chat_sessions(session_prefix="plain")
+
+        self.assertEqual([item["title"] for item in sessions], [long_text[:60]])
+
+        DatabaseManager.reset_instance()
+
     def test_conversation_summary_upsert_and_delete_with_session(self):
         DatabaseManager.reset_instance()
         db = DatabaseManager(db_url="sqlite:///:memory:")

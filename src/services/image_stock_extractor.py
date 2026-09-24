@@ -34,6 +34,16 @@ class _LiteLLMPlaceholder:
 # Keep a patchable module attribute while still avoiding a hard import at module load.
 litellm = sys.modules.get("litellm") or _LiteLLMPlaceholder()
 
+
+class VisionNotConfiguredError(ValueError):
+    """没有配置可用的视觉模型（VISION_MODEL 为空且推断不出任何带 Key 的模型）。
+
+    单独成型是为了让上层能把「配置缺失」与「这一次调用失败」分开：前者重试、换图、
+    检查网络都无济于事，只能去设置页配置 VISION_MODEL。继承 ``ValueError`` 是为了
+    不打断既有按 ``ValueError`` 捕获的调用方（本模块多处按此约定抛错）。
+    """
+
+
 EXTRACT_PROMPT = """请分析这张股票市场截图或图片，提取其中所有可见的股票代码及名称。
 
 重要：若图中同时显示股票名称和代码（如自选股列表、ETF 列表），必须同时提取两者，每个元素必须包含 code 和 name 字段。
@@ -342,7 +352,7 @@ def _call_litellm_vision_with_prompt(
     cfg = get_config()
     model = _resolve_vision_model()
     if not model:
-        raise ValueError("未配置 Vision API。请设置 LITELLM_MODEL 或相关 API Key。")
+        raise VisionNotConfiguredError("未配置 Vision API。请设置 LITELLM_MODEL 或相关 API Key。")
     if route_has_hermes(getattr(cfg, "llm_model_list", []) or [], model):
         raise ValueError("Hermes Vision 未验证：VISION_MODEL 不能选择包含 Hermes deployment 的 route。")
 

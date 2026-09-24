@@ -19,7 +19,7 @@ from api.v1.endpoints import agent as agent_endpoint
 from api.v1.endpoints.agent import CHAT_IMAGE_MAX_BYTES, ChatRequest, _resolve_image_message
 from src.config import Config
 from src.services.agent_chat_session_service import AgentChatSessionService
-from src.services.chat_image_context import ImageContextError
+from src.services.chat_image_context import ImageContextError, VisionNotConfiguredError
 from src.storage import DatabaseManager
 
 
@@ -107,6 +107,43 @@ def test_vision_failure_surfaces_as_503_not_a_blind_answer():
     assert "图片未能读取" in str(e.value.detail)
 
 
+def test_missing_vision_model_gets_an_actionable_message():
+    """没配视觉模型时不能给"稍后重试或换一张图"——那两件事永远不会让它成功。
+
+    本仓库对依赖缺失的惯例是给**具体可行动的**指令（见 history.py 的
+    ``share_image_unavailable``，它点名了缺失的工具），所以这里换成引导去设置页配置。
+    """
+    b64 = base64.b64encode(_png_bytes()).decode()
+    with mock.patch("api.v1.endpoints.agent.build_image_context",
+                    side_effect=VisionNotConfiguredError("图片未能读取：未配置可用的视觉模型")):
+        with pytest.raises(HTTPException) as e:
+            _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
+    assert e.value.status_code == 503
+    assert e.value.detail["error"] == "vision_not_configured"
+    assert e.value.detail["message"] == "未配置可用的视觉模型，请在设置页配置后重试"
+    # 这一条同样是固定文案：不能因为多了个分支就把上游文本带出来。
+    assert "稍后重试" not in e.value.detail["message"]
+
+
+def test_not_configured_message_never_echoes_the_upstream_error(caplog):
+    """新增的那条文案同样不许回显上游文本（api_base / 模型名 / provider 名）。"""
+    b64 = base64.b64encode(_png_bytes()).decode()
+    upstream = "litellm.BadRequestError: api_base=https://secret.internal/v1 model=deepseek-vl"
+    with mock.patch("api.v1.endpoints.agent.build_image_context",
+                    side_effect=VisionNotConfiguredError(upstream)):
+        with caplog.at_level(logging.WARNING, logger="api.v1.endpoints.agent"):
+            with pytest.raises(HTTPException) as e:
+                _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
+    body = str(e.value.detail)
+    assert e.value.status_code == 503
+    for leak in ("secret.internal", "deepseek-vl", "litellm"):
+        assert leak not in body
+    assert caplog.records, "配置缺失也必须留下一条诊断日志"
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "secret.internal" not in logged
+    assert "vision_not_configured" in logged
+
+
 def test_vision_failure_does_not_echo_the_upstream_error(caplog):
     """上游异常原文只进日志：它可能带 api_base / 模型名，甚至回显 base64 图片本身；
     超时类文本还会被前端 error.ts 的关键词分类器判成"连接上游服务超时"，
@@ -128,11 +165,14 @@ def test_vision_failure_does_not_echo_the_upstream_error(caplog):
         assert leak not in body
     assert e.value.detail["message"] == "图片未能读取，请稍后重试或换一张图"
 
-    # 日志这一侧同样不许落盘图片内容（设计 §2 的"不落盘"覆盖日志）。
+    # 日志这一侧同样不许落盘图片内容（设计 §2 的"不落盘"覆盖日志）。端点这层现在**不打**
+    # 异常原文了——原文（脱敏后）只由 build_image_context 打一条，同一次失败打两行几乎相同的
+    # WARNING 没有价值；脱敏本身仍由 tests/test_chat_image_context.py 钉住。
     assert caplog.records, "视觉失败必须留下一条诊断日志"
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert echoed[:40] not in logged
-    assert "<redacted>" in logged
+    # 换成正向断言：这一层要记的是"被映射成了哪个固定错误码"。
+    assert "image_unreadable" in logged
 
 
 def test_invalid_base64_is_rejected():

@@ -22,7 +22,11 @@ from api.v1.schemas.system_config import AgentBackendStatusResponse
 from src.config import get_config
 from src.services.agent_chat_session_service import AgentChatSessionService
 from src.services.agent_model_service import list_agent_model_deployments
-from src.services.chat_image_context import ImageContextError, _sanitize_for_log, build_image_context
+from src.services.chat_image_context import (
+    ImageContextError,
+    VisionNotConfiguredError,
+    build_image_context,
+)
 from src.services.image_stock_extractor import ALLOWED_MIME, _verify_image_magic_bytes
 
 # Tool name -> Chinese display name mapping
@@ -122,12 +126,21 @@ def _resolve_image_message(request: ChatRequest) -> str:
 
     try:
         block = build_image_context(request.image_base64, mime, request.message)
+    except VisionNotConfiguredError as exc:
+        # 子类必须先接：它的成因（没配 VISION_MODEL）不是"重试/换图"能解决的，
+        # 给用户"稍后重试"只会让他白试。文案同样固定，不带任何上游文本。
+        logger.warning("chat image request rejected: 503 vision_not_configured")
+        raise api_error(
+            503, "vision_not_configured", "未配置可用的视觉模型，请在设置页配置后重试"
+        ) from exc
     except ImageContextError as exc:
-        # 上游异常原文只进日志，且落盘前必须脱敏：litellm 的报错可能带上 api_base、模型名，
-        # 某些 provider 还会在错误体里回显请求内容（含 base64 图片本身）；而且超时类文本会被
-        # 前端 error.ts 的关键词分类器判成"连接上游服务超时"，把用户引向网络/代理——他的图
-        # 根本没被读到。设计 §2 的"不落盘"承诺覆盖日志。
-        logger.warning("chat image context failed: %s", _sanitize_for_log(exc))
+        # 上游异常原文只由 build_image_context 打一条**脱敏**日志（litellm 的报错可能带上
+        # api_base、模型名，某些 provider 还会在错误体里回显请求内容含 base64 图片本身；
+        # 设计 §2 的"不落盘"承诺覆盖日志）。这一层不再重复打原文，只记"这次失败被映射成
+        # 哪个固定错误码"——否则同一次失败会留下两行几乎一样的 WARNING。
+        # 另外，上游文本也绝不能进 body：超时类文本会被前端 error.ts 的关键词分类器判成
+        # "连接上游服务超时"，把用户引向网络/代理设置——而他的图根本没被读到。
+        logger.warning("chat image request rejected: 503 image_unreadable")
         raise api_error(503, "image_unreadable", "图片未能读取，请稍后重试或换一张图") from exc
 
     # 注入块在前、用户原话在后：模型先读图，再对着问题回答。
@@ -289,7 +302,7 @@ async def agent_chat(
     session_id = request.session_id or str(uuid.uuid4())
 
     # 必须在下面那个兜底 except Exception 之前：HTTPException 也是 Exception，
-    # 放进 try 里会被统一改写成 500，400/502 就永远传不出去。
+    # 放进 try 里会被统一改写成 500，400/503 就永远传不出去。
     message_text = await asyncio.to_thread(_resolve_image_message, request)
 
     try:
@@ -623,7 +636,7 @@ async def agent_chat_stream(
     stream_ctx = _build_agent_chat_context(request, config, skills)
 
     # 图片校验与视觉调用必须先于 StreamingResponse 完成：一旦开始流式，HTTPException
-    # 就无法再变成 400/502 响应，只会退化成一条通用流错误（见设计说明）。也必须在下面
+    # 就无法再变成 400/503 响应，只会退化成一条通用流错误（见设计说明）。也必须在下面
     # 的 codex 注册之前：注册是有副作用的，中途失败会留下一条永远不会被清理的
     # _ACTIVE_CODEX_STREAMS 记录，让同一个 request_id 之后一直被 409 挡掉。
     message_text = await asyncio.to_thread(_resolve_image_message, request)

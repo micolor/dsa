@@ -13,7 +13,10 @@ import logging
 import re
 from typing import Optional
 
-from src.services.image_stock_extractor import _call_litellm_vision_with_prompt
+from src.services.image_stock_extractor import (
+    VisionNotConfiguredError as _VisionNotConfiguredError,
+    _call_litellm_vision_with_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,15 @@ _BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
 
 class ImageContextError(RuntimeError):
     """图片无法被读取（未配置视觉模型、调用失败、或返回内容为空）。"""
+
+
+class VisionNotConfiguredError(ImageContextError):
+    """没有配置可用的视觉模型。
+
+    与其它 ``ImageContextError`` 分开，是因为对用户的建议完全不同：调用失败时"稍后重试
+    或换一张图"是对的，而模型压根没配时重试与换图**永远**不会成功，只能去设置页配置。
+    端点为这两类映射到各自固定的文案（见设计 §8 的失败矩阵）。
+    """
 
 
 IMAGE_CONTEXT_PROMPT = """你在帮一个股票分析助手读取用户贴的图片。
@@ -69,6 +81,10 @@ def build_image_context(image_b64: str, mime_type: str, question: str = "") -> s
     except Exception as exc:  # noqa: BLE001 - 统一转成可读错误给用户
         # 这一层同样要脱敏：异常原文里可能回显着 base64 图片，而日志是要落盘的。
         logger.warning("chat image context failed: %s", _sanitize_for_log(exc))
+        if isinstance(exc, _VisionNotConfiguredError):
+            # "没配视觉模型"是可行动的原因，必须原样传成子类让端点换一套文案；
+            # 这里用固定措辞，不把上游文本带进异常消息。
+            raise VisionNotConfiguredError("图片未能读取：未配置可用的视觉模型") from exc
         raise ImageContextError(f"图片未能读取：{exc}") from exc
 
     text = (raw or "").strip()

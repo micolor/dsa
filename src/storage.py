@@ -3700,6 +3700,24 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             return session.execute(stmt).scalar() is not None
 
+    # 带图的那一轮持久化的用户消息**就是**注入后的文本（`【图片内容】…【用户问题】…`，
+    # 见设计 §9.1 的哨兵约定），所以标题不能直接截前 60 字：那会变成
+    # 「【图片内容】」+ 视觉模型对图的描述，而不是用户问的那句话。只派生标题，不改持久化。
+    _INJECTED_QUESTION_MARKER = "【用户问题】"
+
+    @staticmethod
+    def _session_title_from_message(text: Optional[str]) -> str:
+        """从第一条用户消息派生会话标题，剥掉贴图注入的脚手架。
+
+        含 `【用户问题】` 时取其后**第一行**：`agent.py` 在注入块之后又追加了一次用户原话
+        （注入文本形如 `…【用户问题】<原话>\\n<原话>`），整段取下来会把换行与重复的原话
+        一起带进标题。不带图的轮次没有这个哨兵，原样截断。
+        """
+        marker = DatabaseManager._INJECTED_QUESTION_MARKER
+        if text and marker in text:
+            text = text.split(marker, 1)[1].split("\n", 1)[0].strip()
+        return (text or "新对话")[:60]
+
     def get_chat_sessions(
         self,
         limit: int = 50,
@@ -3767,7 +3785,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     .order_by(ConversationMessage.created_at)
                     .limit(1)
                 ).scalar()
-                title = (first_user_msg or "新对话")[:60]
+                title = DatabaseManager._session_title_from_message(first_user_msg)
 
                 results.append({
                     "session_id": sid,

@@ -7,22 +7,23 @@ Covers:
 - _call_litellm_vision(): request payload / timeout / error handling
 - extract_stock_codes_from_image(): magic bytes check, parsing
 """
-import sys
 from unittest.mock import MagicMock
 
-# Stub out litellm and heavy chain-imports before any project code is loaded,
-# so these tests run without the package installed in this environment.
-if "litellm" not in sys.modules:
-    sys.modules["litellm"] = MagicMock()
-# Stub google.generativeai if absent (imported transitively by some modules)
-for _stub in ("google.generativeai", "google.genai", "anthropic"):
-    if _stub not in sys.modules:
-        sys.modules[_stub] = MagicMock()
-
+# 这里**故意不**把 litellm 塞进 sys.modules。原先的 collection 期注入
+# （`sys.modules["litellm"] = MagicMock()`）会把 mock 留在 sys.modules 里跑完整个会话，
+# 而 `src.services.image_stock_extractor` 是在 import 时就把 `sys.modules["litellm"]` 绑成
+# 模块全局的：于是 tests/test_chat_image_vision_routing.py 那条「图真的到达模型了吗」的
+# 网络守卫拿到的是 MagicMock，两种文件顺序下都必然失败——那正是它存在时要抓的假绿。
+# 本文件的每个用例都显式 patch `...litellm.completion`，两条路径都能工作：
+# 没装 litellm 时 `_LiteLLMPlaceholder`（模块为此而留的可 patch 占位）顶上，装了就是真模块。
+#
+# 同理，google.generativeai / google.genai / anthropic 也不再预注入：它们与 litellm 共用
+# sys.modules，预注入同样会让真实调用走进 MagicMock。
 import pytest
 from unittest.mock import patch
 
 from src.services.image_stock_extractor import (
+    VisionNotConfiguredError,
     _resolve_vision_model,
     _get_api_keys_for_model,
     _call_litellm_vision,
@@ -261,10 +262,17 @@ class TestCallLitellmVision:
         mock_comp.assert_not_called()
 
     def test_raises_when_model_not_configured(self):
+        """没配模型必须是**可分辨**的类型：上层据此换成「去设置页配置」而不是「稍后重试」。
+
+        只断言 ValueError 的话，把异常改回基类（或干脆换成"调用失败"）这条测试仍然绿，
+        而用户会一直收到永远不可能成功的"重试/换图"建议。
+        """
         cfg = _cfg(openai_vision_model=None, litellm_model="", gemini_api_keys=[], anthropic_api_keys=[], openai_api_keys=[])
         with patch("src.services.image_stock_extractor.get_config", return_value=cfg):
-            with pytest.raises(ValueError, match="未配置 Vision API"):
+            with pytest.raises(VisionNotConfiguredError, match="未配置 Vision API") as exc_info:
                 _call_litellm_vision("b64", "image/jpeg")
+        # 继承 ValueError 是既有调用方的契约：本模块多处按 ValueError 抛错。
+        assert isinstance(exc_info.value, ValueError)
 
     def test_raises_when_no_key_for_model(self):
         cfg = _cfg(openai_vision_model="openai/gpt-4o-mini", openai_api_keys=[])

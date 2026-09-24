@@ -66,6 +66,38 @@ def test_image_context_error_is_a_runtime_error():
     assert issubclass(ctx.ImageContextError, RuntimeError)
 
 
+def test_missing_vision_model_is_mapped_to_its_own_subclass():
+    """「没配视觉模型」必须原样传成子类，端点才能换一套可行动的文案。
+
+    这里喂的是 extractor 真实抛出的那个类型。把映射丢掉（或把子类并回基类）时端点只能
+    给"稍后重试或换一张图"——而配置缺失时重试与换图**永远**不会成功。
+    """
+    from src.services.image_stock_extractor import VisionNotConfiguredError as ExtractorNotConfigured
+
+    with mock.patch.object(
+        ctx,
+        "_call_litellm_vision_with_prompt",
+        side_effect=ExtractorNotConfigured("未配置 Vision API。请设置 LITELLM_MODEL 或相关 API Key。"),
+    ):
+        with pytest.raises(ctx.VisionNotConfiguredError) as exc_info:
+            ctx.build_image_context("b64", "image/png", "问题")
+
+    # 子类关系是既有捕获点的契约（agent.py 先接子类、再接基类）。
+    assert isinstance(exc_info.value, ctx.ImageContextError)
+    # 上游文本不进异常消息：这层不该把 VISION_MODEL 之外的内部配置名往外带。
+    assert "LITELLM_MODEL" not in str(exc_info.value)
+
+
+def test_ordinary_failures_stay_in_the_base_class():
+    """只有"没配模型"走子类：别的失败必须留在基类，否则端点会给错建议。"""
+    with mock.patch.object(
+        ctx, "_call_litellm_vision_with_prompt", side_effect=ValueError("调用超时")
+    ):
+        with pytest.raises(ctx.ImageContextError) as exc_info:
+            ctx.build_image_context("b64", "image/png", "问题")
+    assert not isinstance(exc_info.value, ctx.VisionNotConfiguredError)
+
+
 def test_log_sanitizer_redacts_base64_and_truncates():
     exc = ValueError("bad request: " + "A" * 500 + " end")
     out = ctx._sanitize_for_log(exc)
