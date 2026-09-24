@@ -7,7 +7,14 @@ from importlib import import_module
 
 
 def ensure_litellm_stub() -> None:
-    """Install a minimal litellm stub unless a test already provided one."""
+    """Install a minimal litellm stub unless the real module is importable.
+
+    判断依据是"litellm 到底能不能 import"，不是"它有没有已经在 sys.modules 里"。收集期的
+    stub 会长期留在 sys.modules：`src/services/image_stock_extractor` 在 import 期就把
+    ``sys.modules["litellm"]`` 绑成模块全局，于是 stub（它的 ``completion`` 返回 None）会让
+    "图真的被转发了吗"那条网络守卫（tests/test_chat_image_vision_routing.py）在全量跑里必然
+    失败——那条守卫正是"图没被转发"这类静默失效的唯一看守。
+    """
     existing = sys.modules.get("litellm")
     if getattr(existing, "__dsa_test_stub__", False):
         return
@@ -18,6 +25,12 @@ def ensure_litellm_stub() -> None:
         except ModuleNotFoundError:
             for module_name in ("litellm.types.utils", "litellm.types", "litellm"):
                 sys.modules.pop(module_name, None)
+
+    try:
+        import_module("litellm")
+        return
+    except ImportError:
+        pass
 
     litellm_stub = types.ModuleType("litellm")
     litellm_stub.__dsa_test_stub__ = True

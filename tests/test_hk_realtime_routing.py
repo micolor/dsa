@@ -8,7 +8,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-if "litellm" not in sys.modules:
+# 只在 litellm 真的装不上时才注入：收集期塞进 sys.modules 的 mock 会被
+# `src/services/image_stock_extractor` 绑成模块全局，让"图真的被转发了吗"那条网络守卫
+# （tests/test_chat_image_vision_routing.py）在全量跑里必然失败。装了真模块就用真的。
+try:
+    import litellm  # noqa: F401
+except ModuleNotFoundError:
     sys.modules["litellm"] = MagicMock()
 if "json_repair" not in sys.modules:
     sys.modules["json_repair"] = MagicMock()

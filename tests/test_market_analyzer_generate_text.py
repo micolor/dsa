@@ -9,15 +9,21 @@ Covers:
 - Any provider configuration (Gemini / Anthropic / OpenAI / LLM_CHANNELS)
   does NOT trigger AttributeError (regression guard for the old bypass bug)
 """
+import importlib
 import json
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-# Stub heavy dependencies before project imports
+# Stub heavy dependencies before project imports —— 但只在真的 import 不了时才 stub。
+# 收集期把 MagicMock 塞进 sys.modules 影响的不只是本文件：`src/services/image_stock_extractor`
+# 在 import 期取 `sys.modules["litellm"]` 绑成模块全局，于是"图真的被转发了吗"那条网络守卫
+# （tests/test_chat_image_vision_routing.py）在全量跑里会拿到 MagicMock 而必然失败。
 for _mod in ("litellm", "google.generativeai", "google.genai", "anthropic"):
-    if _mod not in sys.modules:
+    try:
+        importlib.import_module(_mod)
+    except ImportError:
         sys.modules[_mod] = MagicMock()
 
 import pytest

@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-if "litellm" not in sys.modules:
+# 只在 litellm 真的装不上时才注入：`src/services/image_stock_extractor` 在 import 期就把
+# `sys.modules["litellm"]` 绑成模块全局，收集期注入的 mock 会让"图真的被转发了吗"那条网络
+# 守卫（tests/test_chat_image_vision_routing.py）拿到 MagicMock 并在全量跑里必然失败——
+# 而那条守卫正是"图没被转发"这一类静默失效的唯一看守。装了真模块就直接用真的。
+try:
+    import litellm  # noqa: F401
+except ModuleNotFoundError:
     sys.modules["litellm"] = MagicMock()
 if "json_repair" not in sys.modules:
     sys.modules["json_repair"] = MagicMock()
