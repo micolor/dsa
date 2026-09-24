@@ -897,6 +897,7 @@ git commit -m "feat(web): accept pasted or dropped images in the chat composer"
 > **⚠️ 本 Task 之前先做三条 Part 0（都来自 Task 5 的实现与审查）：**
 >
 > **P1. 发送成功后清掉待发送缩略图。** Task 5 刻意没清（留给本 Task 决定）：chip 是**输入**的载体，不是"已发送"的指示；发送后应当清空 `pendingImage`，图片改由消息里的 `imageDataUrl` 渲染（来自 `meta`）。
+> **清理的时机**：放在 `onAccepted` 里、与 `setInput('')` **同一处**（`ChatPage.tsx:880-881` 一带），**不要**放在 `await startStream(...)` 之后——否则整个流式期间 chip 还挂在输入框上，而气泡里那张图已经渲染成"已发送"，读起来像"还在排队"。
 >
 > **P2. 给 chip 的三个标签补 i18n。** Task 5 里它们是硬编码中文（`待发送的图片` / `移除图片` / `添加图片`），与相邻 composer 的既有风格一致，但在英文界面下是可见缺口。补 `chat.pendingImageAlt` / `chat.removeImage` / `chat.addImage` 三个键（zh + en 两段），并把测试里的断言改为断言 **zh 渲染结果**（测试环境是中文，字符串不变，所以断言不必改字面量——但要确认确实如此）。
 >
