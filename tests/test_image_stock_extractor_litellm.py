@@ -7,6 +7,8 @@ Covers:
 - _call_litellm_vision(): request payload / timeout / error handling
 - extract_stock_codes_from_image(): magic bytes check, parsing
 """
+import base64
+import logging
 from unittest.mock import MagicMock
 
 # 这里**故意不**把 litellm 塞进 sys.modules。原先的 collection 期注入
@@ -551,6 +553,38 @@ class TestExtractStockCodesFromImage:
 
         assert mock_completion.call_count == 3
         assert [item.args[0] for item in mock_sleep.call_args_list] == [1, 2]
+
+    def test_network_failure_message_does_not_echo_upstream_text(self, caplog):
+        """最终文案不得插值上游异常原文（设计 §8：上游原文只进脱敏日志）。
+
+        有些 provider 会在错误体里回显请求内容，`{e}` 会把 base64 图片与 `api_base` 一并带进
+        这个异常；`api/v1/endpoints/stocks.py` 又把它原样回吐给客户端，于是图片会落进浏览器
+        devtools、前端错误上报与反向代理日志。诊断信息必须留在（脱敏后的）日志里，而不是用户
+        可见的错误文案里。
+        """
+        cfg = _cfg(gemini_api_keys=[_GEMINI_KEY])
+        jpeg = _make_jpeg_bytes()
+        # 用真实图片字节的 base64：脱敏判据是「≥40 个 [A-Za-z0-9+/=] 字符的长串」，所以要长到
+        # 那条阈值以上，否则测的就不是脱敏而是别的东西。真实截图远大于此。
+        leaked_b64 = base64.b64encode(jpeg * 20).decode("ascii")
+        assert len(leaked_b64) >= 40
+        upstream = RuntimeError(f"500 from https://secret.internal/v1/chat: body=…{leaked_b64}…")
+        with caplog.at_level(logging.WARNING, logger="src.services.image_stock_extractor"), \
+             patch("src.services.image_stock_extractor.get_config", return_value=cfg), \
+             patch("src.services.image_stock_extractor.litellm.completion",
+                   side_effect=upstream), \
+             patch("src.services.image_stock_extractor.time.sleep"):
+            with pytest.raises(ValueError) as exc_info:
+                extract_stock_codes_from_image(jpeg, "image/jpeg")
+
+        message = str(exc_info.value)
+        assert "请检查 API Key 与网络" in message, "文案仍要给出可行动指引"
+        assert "secret.internal" not in message, "上游原文（api_base）不得进用户可见文案"
+        assert leaked_b64 not in message, "base64 图片不得进用户可见文案"
+
+        logged = "\n".join(record.getMessage() for record in caplog.records)
+        assert "secret.internal" in logged, "诊断信息应留在日志里，脱敏不等于不记录"
+        assert leaked_b64 not in logged, "base64 长串在日志里也必须被脱敏（设计 §2：图片二进制不落盘）"
 
     def test_missing_vision_model_is_not_retried(self):
         """配置缺失不可重试，且最终文案要可行动。

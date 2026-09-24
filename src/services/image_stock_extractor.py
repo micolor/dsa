@@ -44,6 +44,19 @@ class VisionNotConfiguredError(ValueError):
     """
 
 
+# 与 `chat_image_context._sanitize_for_log` 等价：设计 §2 承诺「图片二进制不落盘」，这个承诺
+# **覆盖日志**——provider 会在错误体里回显请求内容（含 base64 图片），日志会被轮转/打包/上传。
+# 之所以在这里重写一份而不是 import：`chat_image_context` 是往下依赖本模块的，反向 import 会成环。
+# 两处的判据（长串抹成 <redacted>、截断到 200 字符）必须保持一致。
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def _sanitize_for_log(exc: BaseException, *, limit: int = 200) -> str:
+    """把上游异常文本裁剪并抹掉疑似 base64 长串，避免图片内容落盘。"""
+    text = _BASE64_RUN_RE.sub("<redacted>", str(exc))[:limit]
+    return f"{type(exc).__name__}: {text}"
+
+
 EXTRACT_PROMPT = """请分析这张股票市场截图或图片，提取其中所有可见的股票代码及名称。
 
 重要：若图中同时显示股票名称和代码（如自选股列表、ETF 列表），必须同时提取两者，每个元素必须包含 code 和 name 字段。
@@ -486,9 +499,15 @@ def extract_stock_codes_from_image(
             last_error = e
             if attempt < 2:
                 delay = 2 ** attempt
-                logger.warning(f"[ImageExtractor] 尝试 {attempt + 1}/3 失败，{delay}s 后重试: {e}")
+                logger.warning(
+                    f"[ImageExtractor] 尝试 {attempt + 1}/3 失败，{delay}s 后重试: "
+                    f"{_sanitize_for_log(e)}"
+                )
                 time.sleep(delay)
 
+    # 文案不插值上游原文：这个消息会被 `api/v1/endpoints/stocks.py` 原样回吐给客户端，而
+    # provider 可能在错误体里回显请求内容（base64 图片）与 api_base（设计 §8：上游原文只进
+    # 脱敏日志，不进用户可见通道）。上游原文继续由上面那条 warning 写进脱敏日志。
     raise ValueError(
-        f"Vision API 调用失败，请检查 API Key 与网络: {last_error}"
+        "Vision API 调用失败，请检查 API Key 与网络"
     ) from last_error
