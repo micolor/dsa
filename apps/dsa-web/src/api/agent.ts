@@ -18,6 +18,9 @@ export function isAbortError(error: unknown): boolean {
 export interface ChatRequest {
   message: string;
   skills?: string[];
+  /** 贴图：base64 与原图 mime，成对出现（后端校验）。二进制不落盘。 */
+  image_base64?: string;
+  image_mime?: string;
 }
 
 export interface ChatStreamRequest extends ChatRequest {

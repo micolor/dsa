@@ -583,6 +583,36 @@ describe('agentChatStore.startStream', () => {
     });
   });
 
+  it('carries the pasted image onto the committed user message', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        accepted('request-image'),
+        'data: {"type":"done","success":true,"content":"这是一张 K 线图"}',
+      ]),
+    );
+
+    await useAgentChatStore.getState().startStream(
+      {
+        message: '这是什么',
+        session_id: 'session-test',
+        request_id: 'request-image',
+        image_base64: 'iVBORw==',
+        image_mime: 'image/png',
+      },
+      { imageDataUrl: 'data:image/png;base64,iVBORw==' },
+    );
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages[0]).toMatchObject({
+      role: 'user',
+      content: '这是什么',
+      imageDataUrl: 'data:image/png;base64,iVBORw==',
+    });
+    // 图只属于用户那一轮，不是每轮都挂上。
+    expect(state.messages[1].role).toBe('assistant');
+    expect(state.messages[1].imageDataUrl).toBeUndefined();
+  });
+
   it('reports an interrupted accepted stream without appending an empty assistant message', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([

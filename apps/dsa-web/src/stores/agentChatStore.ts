@@ -64,11 +64,15 @@ export interface Message {
    * `utils/actionProposal` 的 apply 分支里做。
    */
   actionProposals?: ActionProposal[];
+  /** 用户贴的图（仅会话内存在；刷新即失，与"不存二进制"一致）。 */
+  imageDataUrl?: string;
 }
 
 export interface StreamMeta {
   skillNames?: string[];
   skillName?: string;
+  /** 用户贴的图（仅用于会话内渲染；不上后端、不持久化）。 */
+  imageDataUrl?: string;
   onAccepted?: (event: StreamAcceptedEvent) => void;
 }
 
@@ -410,6 +414,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       skill: payload.skills?.[0],
       skillNames,
       skillName,
+      imageDataUrl: meta?.imageDataUrl,
     };
 
     set({

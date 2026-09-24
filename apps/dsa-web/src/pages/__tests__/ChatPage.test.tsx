@@ -2973,3 +2973,154 @@ describe('chat composer image input', () => {
     await act(async () => {});
   });
 });
+
+describe('chat image thread', () => {
+  it('sends the pasted image with the message', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+    await screen.findByAltText('待发送的图片');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '这是什么' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(1));
+    const [payload, meta] = mockStartStream.mock.calls[0];
+    expect(payload.message).toBe('这是什么');
+    expect(payload.image_mime).toBe('image/png');
+    expect(payload.image_base64).toBe('iVBORw==');
+    // 图片只走 meta：后端没有 imageDataUrl 这个字段，混进 payload 会被静默忽略。
+    expect(payload.imageDataUrl).toBeUndefined();
+    expect(meta.imageDataUrl).toBe('data:image/png;base64,iVBORw==');
+  });
+
+  it('omits the image fields when no image is attached', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '分析 600519' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(1));
+    const [payload] = mockStartStream.mock.calls[0];
+    // 后端要求两个字段成对出现，所以没有图时它们必须整个缺席（而不是空串）。
+    expect('image_base64' in payload).toBe(false);
+    expect('image_mime' in payload).toBe(false);
+  });
+
+  it('renders the sent image in the user bubble and nothing when the message has none', async () => {
+    mockStoreState.messages = [
+      { id: 'm-1', role: 'user', content: '这是什么', imageDataUrl: 'data:image/png;base64,iVBORw==' },
+      { id: 'm-2', role: 'assistant', content: '一张 K 线图' },
+      { id: 'm-3', role: 'user', content: '那明天呢' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('这是什么')).toBeInTheDocument();
+    expect(screen.getByAltText('已发送的图片')).toHaveAttribute('src', 'data:image/png;base64,iVBORw==');
+
+    // 对照：没有 imageDataUrl 的用户消息（刷新后还原的会话就是这一条形状）里不能冒出图片。
+    const bubbleWithoutImage = screen.getByText('那明天呢').closest('.chat-bubble-user');
+    expect(bubbleWithoutImage?.querySelector('img')).toBeNull();
+  });
+
+  it('collapses the injected image block in a restored user message', async () => {
+    mockStoreState.messages = [
+      {
+        id: 'm-1',
+        role: 'user',
+        content: '【图片内容】\n一张 K 线截图\n【用户问题】这是什么',
+      },
+      { id: 'm-2', role: 'assistant', content: '这是 K 线图' },
+      { id: 'm-3', role: 'user', content: '那明天呢' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    // 带图那一轮持久化的就是注入块，不能整段当成用户自己敲的话倒出来。
+    const toggle = await screen.findByRole('button', { name: '[图片] 已由 AI 读取' });
+    expect(screen.queryByText('一张 K 线截图')).not.toBeInTheDocument();
+    expect(screen.queryByText('【图片内容】')).not.toBeInTheDocument();
+    // 对照：普通消息照旧直接显示，也不带折叠按钮。
+    expect(screen.getByText('那明天呢')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByText('【图片内容】')).toBeInTheDocument();
+    expect(screen.getByText('【用户问题】这是什么')).toBeInTheDocument();
+  });
+
+  it('does not restore a compare-mode context from an injected image block', async () => {
+    // 块里列了 2 个代码，用户真正问的是其中一只：只解析块会静默切进「对比模式」、丢掉上下文。
+    mockStoreState.messages = [
+      {
+        id: 'm-1',
+        role: 'user',
+        content: '【图片内容】\n一张 K 线截图\n【图中股票】600519 贵州茅台；300750 宁德时代\n【用户问题】分析 300750',
+      },
+      { id: 'm-2', role: 'assistant', content: '300750 走势' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('chat-workspace')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
+      target: { value: '继续看支撑位' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalled());
+    const [payload] = mockStartStream.mock.calls[0];
+    expect(payload.context).toEqual({ stock_code: '300750', stock_name: null });
+  });
+
+  it('keeps a normal multi-code message in compare mode', async () => {
+    // 负对照：同样 ≥2 个代码，但这是用户自己敲的对比问题，仍然不能写进活跃标的。
+    mockStoreState.messages = [
+      { id: 'm-1', role: 'user', content: '600519 和 300750 有什么不同' },
+      { id: 'm-2', role: 'assistant', content: '两者差别如下' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('chat-workspace')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
+      target: { value: '继续看支撑位' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalled());
+    const [payload] = mockStartStream.mock.calls[0];
+    expect(payload.context).toBeUndefined();
+  });
+});

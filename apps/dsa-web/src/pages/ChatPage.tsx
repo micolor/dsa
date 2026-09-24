@@ -211,13 +211,29 @@ const resolveActiveStockContextFromMessage = (
   };
 };
 
+// 带图那一轮持久化的用户消息**就是**注入后的文本（`【图片内容】…【用户问题】…`，哨兵由后端
+// chat_image_context._render_block 固定在最前）。刷新/切会话后从库里还原时，不能把整段当成
+// 用户自己敲的话，也不能拿块里列的代码去推断活跃标的（设计 §9.1）——哨兵是后端契约的副本。
+const IMAGE_BLOCK_SENTINEL = '【图片内容】';
+const INJECTED_QUESTION_MARKER = '【用户问题】';
+
+/** 注入块里用户真正打过的那部分：`【用户问题】` 之后（用户没打字时块里没有这一行）。 */
+const getUserAuthoredText = (content: string): string => {
+  if (!content.startsWith(IMAGE_BLOCK_SENTINEL)) {
+    return content;
+  }
+  const markerIndex = content.indexOf(INJECTED_QUESTION_MARKER);
+  return markerIndex === -1 ? '' : content.slice(markerIndex + INJECTED_QUESTION_MARKER.length);
+};
+
 const restoreActiveStockContextFromMessages = (messages: Message[]): ActiveStockContext | null => {
   let restoredContext: ActiveStockContext | null = null;
   for (const message of messages) {
     if (message.role !== 'user') {
       continue;
     }
-    const resolution = resolveActiveStockContextFromMessage(message.content, restoredContext);
+    // 只看用户那部分：块里列出 ≥2 个代码时，整段解析会让会话在刷新后静默切进「对比模式」。
+    const resolution = resolveActiveStockContextFromMessage(getUserAuthoredText(message.content), restoredContext);
     if (resolution) {
       restoredContext = resolution.context;
     }
@@ -237,6 +253,7 @@ const ChatPage: React.FC = () => {
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [mobileSkillPickerOpen, setMobileSkillPickerOpen] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  const [expandedImageBlocks, setExpandedImageBlocks] = useState<Set<string>>(new Set());
   const [deleteToastId, setDeleteToastId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -874,6 +891,8 @@ const ChatPage: React.FC = () => {
         ...(requestedSkillIds !== null
           ? { skills: normalizeSelectedSkillIds(requestedSkillIds) }
           : {}),
+        // 有图才带这两个字段（后端要求成对）
+        ...(pendingImage ? { image_base64: pendingImage.base64, image_mime: pendingImage.mime } : {}),
         context: contextForSend ?? undefined,
       };
       // 后端在流开始之前完成读图，所以 accepted 到达即意味着读图阶段结束。
@@ -881,6 +900,8 @@ const ChatPage: React.FC = () => {
       await startStream(payload, {
         skillNames: usedSkillNames,
         skillName: usedSkillNames.join('、'),
+        // 只走 meta：后端没有这个字段，混进 payload 会被 Pydantic 静默忽略。
+        imageDataUrl: pendingImage?.dataUrl,
         onAccepted: () => {
           setReadingImage(false);
           followUpHydrationTokenRef.current += 1;
@@ -1002,6 +1023,59 @@ const ChatPage: React.FC = () => {
       else next.add(msgId);
       return next;
     });
+  };
+
+  const toggleImageBlock = (msgId: string) => {
+    setExpandedImageBlocks((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  };
+
+  // 还原后的带图轮次，内容就是注入块。默认折叠成一行，否则用户会看到一整段
+  // `【图片内容】…【用户问题】…`，像是自己敲的。展开才给看原文。
+  const renderUserMessageContent = (msg: Message) => {
+    const lines = msg.content
+      .split('\n')
+      .map((line, i) => (
+        <p key={i} className="mb-1 last:mb-0 leading-relaxed">
+          {line || '\u00A0'}
+        </p>
+      ));
+
+    if (!msg.content.startsWith(IMAGE_BLOCK_SENTINEL)) {
+      return lines;
+    }
+
+    const isExpanded = expandedImageBlocks.has(msg.id);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => toggleImageBlock(msg.id)}
+          aria-expanded={isExpanded}
+          className="flex items-center gap-1.5 text-xs text-muted-text hover:text-secondary-text transition-colors"
+        >
+          <svg
+            className={`w-3 h-3 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+          {t('chat.imageBlockCollapsed')}
+        </button>
+        {isExpanded && <div className="mt-2 animate-fade-in">{lines}</div>}
+      </>
+    );
   };
 
   const copyMessageToClipboard = async (msgId: string, content: string) => {
@@ -1630,16 +1704,16 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      msg.content
-                        .split('\n')
-                        .map((line, i) => (
-                          <p
-                            key={i}
-                            className="mb-1 last:mb-0 leading-relaxed"
-                          >
-                            {line || '\u00A0'}
-                          </p>
-                        ))
+                      <>
+                        {msg.imageDataUrl && (
+                          <img
+                            src={msg.imageDataUrl}
+                            alt="已发送的图片"
+                            className="mb-2 max-h-40 rounded-lg border border-subtle"
+                          />
+                        )}
+                        {renderUserMessageContent(msg)}
+                      </>
                     )}
                   </div>
                 </div>
