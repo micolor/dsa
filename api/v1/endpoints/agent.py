@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from api.deps import get_agent_chat_session_service
+from api.v1.errors import api_error
 from api.v1.schemas.system_config import AgentBackendStatusResponse
 from src.config import get_config
 from src.services.agent_chat_session_service import AgentChatSessionService
@@ -84,42 +85,49 @@ class ChatRequest(BaseModel):
 CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 
 
-def _image_error(message: str) -> HTTPException:
-    return HTTPException(status_code=400, detail={"error": "invalid_image", "message": message})
-
-
 def _resolve_image_message(request: ChatRequest) -> str:
     """Return the message to hand to the agent, with image context injected when present.
 
-    校验失败 → 400（参数问题）；视觉失败 → 502（外部依赖问题）。**不降级成"看不到图也照样
+    校验失败 → 400（参数问题）；视觉失败 → 503（所需依赖不可用）。**不降级成"看不到图也照样
     回答"**：那种回答既无用又会伪装成成功（见设计文档 §8）。
     """
     if not request.image_base64 and not request.image_mime:
         return request.message
     if bool(request.image_base64) != bool(request.image_mime):
-        raise _image_error("image_base64 与 image_mime 必须同时提供")
+        raise api_error(400, "invalid_image", "image_base64 与 image_mime 必须同时提供")
 
     mime = str(request.image_mime or "").strip().lower()
     if mime not in ALLOWED_MIME:
-        raise _image_error(f"不支持的图片类型：{mime or '(空)'}；支持 {', '.join(sorted(ALLOWED_MIME))}")
+        raise api_error(
+            400,
+            "invalid_image",
+            f"不支持的图片类型：{mime or '(空)'}；支持 {', '.join(sorted(ALLOWED_MIME))}",
+        )
 
     try:
         raw = base64.b64decode(request.image_base64, validate=True)
     except Exception as exc:
-        raise _image_error(f"图片数据不是合法 base64：{exc}") from exc
+        raise api_error(400, "invalid_image", f"图片数据不是合法 base64：{exc}") from exc
 
     if len(raw) > CHAT_IMAGE_MAX_BYTES:
-        raise _image_error(f"图片过大（{len(raw) // 1024}KB），上限 2MB")
+        # 向上取整到 0.1MB：截断成 KB 时，比上限多 1 字节的图会显示「2048KB，上限 2MB」，
+        # 用户看到的数字正好等于你告诉他"超过了"的那个上限。
+        over_mb = math.ceil(len(raw) / 1024 / 1024 * 10) / 10
+        raise api_error(400, "invalid_image", f"图片过大（{over_mb:.1f}MB），上限 2MB")
 
     try:
         _verify_image_magic_bytes(raw, mime)
     except Exception as exc:
-        raise _image_error(f"图片内容与声明的类型不符：{exc}") from exc
+        raise api_error(400, "invalid_image", f"图片内容与声明的类型不符：{exc}") from exc
 
     try:
         block = build_image_context(request.image_base64, mime, request.message)
     except ImageContextError as exc:
-        raise HTTPException(status_code=502, detail={"error": "image_unreadable", "message": str(exc)}) from exc
+        # 上游异常原文只进日志：litellm 的报错可能带上 api_base、模型名，某些 provider 还会
+        # 在错误体里回显请求内容（含 base64 图片本身）；而且超时类文本会被前端 error.ts 的
+        # 关键词分类器判成"连接上游服务超时"，把用户引向网络/代理——他的图根本没被读到。
+        logger.warning("chat image context failed: %s", exc)
+        raise api_error(503, "image_unreadable", "图片未能读取，请稍后重试或换一张图") from exc
 
     # 注入块在前、用户原话在后：模型先读图，再对着问题回答。
     return f"{block}\n{request.message}"

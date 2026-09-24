@@ -11,11 +11,25 @@ from unittest import mock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
+from api.app import create_app
 from api.v1.endpoints import agent as agent_endpoint
 from api.v1.endpoints.agent import CHAT_IMAGE_MAX_BYTES, ChatRequest, _resolve_image_message
+from src.config import Config
 from src.services.agent_chat_session_service import AgentChatSessionService
 from src.services.chat_image_context import ImageContextError
+from src.storage import DatabaseManager
+
+
+def setup_function() -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
+
+
+def teardown_function() -> None:
+    DatabaseManager.reset_instance()
+    Config.reset_instance()
 
 
 def _png_bytes(w: int = 2, h: int = 2) -> bytes:
@@ -56,6 +70,9 @@ def test_unsupported_mime_is_rejected():
     with pytest.raises(HTTPException) as e:
         _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/bmp"))
     assert e.value.status_code == 400
+    # 钉住是这个守卫拒的：magic-byte 守卫也会以"无法验证类型"拦下 image/bmp，
+    # 只断言 400 的话删掉 MIME 守卫这条测试仍然绿。
+    assert "不支持的图片类型" in str(e.value.detail)
 
 
 def test_oversized_image_is_rejected_with_clear_message():
@@ -63,7 +80,12 @@ def test_oversized_image_is_rejected_with_clear_message():
     with pytest.raises(HTTPException) as e:
         _resolve_image_message(_req(message="x", image_base64=big, image_mime="image/png"))
     assert e.value.status_code == 400
-    assert "2MB" in str(e.value.detail)
+    detail = str(e.value.detail)
+    assert "上限 2MB" in detail
+    # 边界：这张图只比上限多 9 字节。截断成 KB 会写成「2048KB，上限 2MB」——用户看到的
+    # 数字正好等于那个他"超过"的上限。必须向上取整到 0.1MB。
+    assert "2.1MB" in detail
+    assert "2048KB" not in detail
 
 
 def test_bad_magic_bytes_are_rejected():
@@ -73,15 +95,32 @@ def test_bad_magic_bytes_are_rejected():
     assert e.value.status_code == 400
 
 
-def test_vision_failure_surfaces_as_502_not_a_blind_answer():
+def test_vision_failure_surfaces_as_503_not_a_blind_answer():
     """视觉失败必须让请求失败——不许降级成"看不到图也照样回答"。"""
     b64 = base64.b64encode(_png_bytes()).decode()
     with mock.patch("api.v1.endpoints.agent.build_image_context",
-                    side_effect=ImageContextError("图片未能读取：未配置视觉模型")):
+                    side_effect=ImageContextError("未配置视觉模型")):
         with pytest.raises(HTTPException) as e:
             _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
-    assert e.value.status_code == 502
+    assert e.value.status_code == 503
     assert "图片未能读取" in str(e.value.detail)
+
+
+def test_vision_failure_does_not_echo_the_upstream_error():
+    """上游异常原文只进日志：它可能带 api_base / 模型名，甚至回显 base64 图片本身；
+    超时类文本还会被前端 error.ts 的关键词分类器判成"连接上游服务超时"，
+    把用户引向网络与代理设置——而他的图根本没被读到。"""
+    b64 = base64.b64encode(_png_bytes()).decode()
+    upstream = "litellm.Timeout: api_base=https://secret.internal/v1 model=deepseek-vl timeout"
+    with mock.patch("api.v1.endpoints.agent.build_image_context",
+                    side_effect=ImageContextError(upstream)):
+        with pytest.raises(HTTPException) as e:
+            _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
+    body = str(e.value.detail)
+    assert e.value.status_code == 503
+    for leak in ("secret.internal", "deepseek-vl", "litellm", "timeout"):
+        assert leak not in body
+    assert e.value.detail["message"] == "图片未能读取，请稍后重试或换一张图"
 
 
 def test_invalid_base64_is_rejected():
@@ -152,3 +191,38 @@ def test_chat_endpoint_image_error_is_not_swallowed_into_a_500():
         )
     assert e.value.status_code == 400
     assert e.value.detail["error"] == "invalid_image"
+
+
+def test_http_bodies_are_what_the_frontend_actually_reads(tmp_path):
+    """断言真正发出去的 body，而不只是 exc.detail。
+
+    api/middlewares/error_handler.py:39 只在 detail 含 error + message 时原样透传，
+    前端 extractErrorCode 读的是 detail.error——所以光断言 exc.detail 的话，改个键名
+    这些测试仍然全绿，而前端的错误分类已经坏了。
+    """
+    b64 = base64.b64encode(_png_bytes()).decode()
+    client = TestClient(create_app(static_dir=tmp_path / "static"))
+    upstream = "litellm.Timeout: api_base=https://secret.internal/v1 timeout"
+
+    with mock.patch("api.middlewares.auth.is_auth_enabled", return_value=False), \
+         mock.patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config()):
+        bad = client.post(
+            "/api/v1/agent/chat",
+            json={"message": "x", "image_base64": "abc"},  # 缺 image_mime
+        )
+        with mock.patch("api.v1.endpoints.agent.build_image_context",
+                        side_effect=ImageContextError(upstream)):
+            unreadable = client.post(
+                "/api/v1/agent/chat",
+                json={"message": "x", "image_base64": b64, "image_mime": "image/png"},
+            )
+
+    assert bad.status_code == 400
+    assert bad.json()["error"] == "invalid_image"
+    assert bad.json()["message"]
+
+    assert unreadable.status_code == 503
+    assert unreadable.json()["error"] == "image_unreadable"
+    assert unreadable.json()["message"] == "图片未能读取，请稍后重试或换一张图"
+    assert "secret.internal" not in unreadable.text
+    assert "timeout" not in unreadable.text
