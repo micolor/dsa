@@ -873,6 +873,8 @@ composer 区（既有的 `flex items-end gap-3` 容器）加上。**该容器已
 - 外层容器加 `onDrop={handleDrop}` 与 `onDragOver={(e) => e.preventDefault()}`
 - 缩略图 chip：`pendingImage && (<span className="..."><img src={pendingImage.dataUrl} alt="待发送的图片" className="h-16 w-16 rounded object-cover" /><button type="button" aria-label="移除图片" onClick={() => setPendingImage(null)}>×</button></span>)`
 - 隐藏 file input + 触发按钮（照 `IntelligentImport.tsx:320-326` 的 `ref` + `type="file"` + `accept=".jpg,.jpeg,.png,.webp,.gif"` + `className="hidden"` 写法）
+- **发送按钮的启用条件必须一起改**：现在是 `disabled={!input.trim() || loading || !agentAvailable}`，而"只贴图不打字"是受支持的一轮（后端为此把 `message` 改成可选并给了明确 400，见 Task 3/4 的说明），所以改为
+  `disabled={(!input.trim() && !pendingImage) || loading || !agentAvailable}` —— 否则贴了图但没打字时按钮是灰的，用户无从发送。补一条断言：仅有 `pendingImage`、输入为空时，发送按钮**可点**。
 
 > 报错/提示请复用本文件**既有**的提示机制（该文件里已有 toast / `createParsedApiError` 等用法，先搜再动手），不要为了这个功能新造一套提示组件。
 
