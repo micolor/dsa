@@ -894,6 +894,16 @@ git commit -m "feat(web): accept pasted or dropped images in the chat composer"
 
 ### Task 6: 前端传参 + 消息内渲染
 
+> **⚠️ 本 Task 之前先做三条 Part 0（都来自 Task 5 的实现与审查）：**
+>
+> **P1. 发送成功后清掉待发送缩略图。** Task 5 刻意没清（留给本 Task 决定）：chip 是**输入**的载体，不是"已发送"的指示；发送后应当清空 `pendingImage`，图片改由消息里的 `imageDataUrl` 渲染（来自 `meta`）。
+>
+> **P2. 给 chip 的三个标签补 i18n。** Task 5 里它们是硬编码中文（`待发送的图片` / `移除图片` / `添加图片`），与相邻 composer 的既有风格一致，但在英文界面下是可见缺口。补 `chat.pendingImageAlt` / `chat.removeImage` / `chat.addImage` 三个键（zh + en 两段），并把测试里的断言改为断言 **zh 渲染结果**（测试环境是中文，字符串不变，所以断言不必改字面量——但要确认确实如此）。
+>
+> **P3. 不要"修"快速提问 + 待发送图并存的情况。** Task 5 报告：若 chip 未发送就点快速提问，那次发送会带上图片并因此显示"正在读取图片…"。**这是正确行为**（那个图确实被附上了、确实在读），不是缺陷；不要为它加守卫或特判。若审查者在本 Task 里提这条，引用本行说明。
+
+
+
 **Files:**
 - Modify: `apps/dsa-web/src/api/agent.ts`（`ChatRequest` `:18-21`）
 - Modify: `apps/dsa-web/src/pages/ChatPage.tsx`（发送体构造 `:856-863`；用户消息渲染处）
