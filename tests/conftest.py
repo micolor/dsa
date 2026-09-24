@@ -21,6 +21,28 @@ import pytest
 import starlette.testclient
 from anyio._backends import _asyncio
 
+# 测试进程不该读开发机的 ``.env``。``litellm`` 在 import 期会执行
+# ``if os.getenv("LITELLM_MODE", "DEV") == "DEV": dotenv.load_dotenv(...)``
+# （litellm/__init__.py:26-27），把仓库 ``.env`` 里的键灌进 ``os.environ``——包括
+# ``LITELLM_FALLBACK_MODELS``，于是 ``SystemConfigService.validate`` 这类读环境的
+# 测试开始依赖开发机而不是依赖代码。
+#
+# 这行必须早于任何测试模块 import litellm：``load_dotenv`` 只发生在**第一次** import。
+# 本文件（rootdir conftest）在收集测试模块之前执行，所以放在模块体里就够早。
+# ``setdefault`` 是为了尊重外部显式设置的值（CI 或开发者自己设的 LITELLM_MODE）。
+# 判据是"不等于 DEV"（litellm 只比较 ``== "DEV"``），PROD 只是取一个明确非 DEV 的值。
+os.environ.setdefault("LITELLM_MODE", "PROD")
+
+# 同理：第一次 import litellm 时它会去 GitHub 拉 ``model_prices_and_context_window.json``
+# （httpx, timeout=5，litellm/litellm_core_utils/get_model_cost_map.py），这在测试里是
+# 一次不受欢迎的外网访问——``-m "not network"`` 的会话一样会发出去，而且耗时在 5~22s 之间
+# 抖动（实测：本机拉失败时走本地备份 2980 条，耗时 12~22s；不读 .env 时拉成功 7s / 4318 条）。
+# ``tests/test_provider_cache.py`` 那个起子进程的用例给子进程的预算只有 15s，子进程 import
+# litellm 时正撞上这段网络抖动，于是时红时绿。litellm 自己为此提供了开关（模块 docstring：
+# "This can be disabled by setting the LITELLM_LOCAL_MODEL_COST_MAP ... to True"），打开后
+# 直接用包内自带的本地备份，测试进程不再出网、结果也不随网络变化。
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_default_database(tmp_path_factory):
