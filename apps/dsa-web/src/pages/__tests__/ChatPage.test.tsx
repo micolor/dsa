@@ -2674,7 +2674,9 @@ describe('watchlist button with code variants', () => {
     expect(screen.queryByText('「600519」价格上穿 ¥1800')).not.toBeInTheDocument();
     expect(mockCreateAlertRule).not.toHaveBeenCalled();
   });
+});
 
+describe('chat composer image input', () => {
   it('accepts a pasted image and shows a removable thumbnail', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
@@ -2794,5 +2796,34 @@ describe('watchlist button with code variants', () => {
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
 
     expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
+  });
+
+  it('hides the reading-image banner once no request is in flight', async () => {
+    // 永不 accepted 的流：把横幅留在「读图窗口」内，才能观察它被什么清掉。
+    mockStartStream.mockImplementation(async () => {});
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+    await screen.findByAltText('待发送的图片');
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText('正在读取图片…')).toBeInTheDocument();
+
+    // 点 Stop / 切会话 / 新建对话都只让 store 的 loading 转 false，不会设 chatError
+    //（abort 在 store 里是静默的）。横幅必须跟着消失，否则会永久挂在输入框上方。
+    mockStoreState.loading = true;
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'x' } });
+    expect(screen.getByText('正在读取图片…')).toBeInTheDocument();
+
+    mockStoreState.loading = false;
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'xy' } });
+    expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
   });
 });

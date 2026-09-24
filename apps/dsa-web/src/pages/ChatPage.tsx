@@ -950,11 +950,13 @@ const ChatPage: React.FC = () => {
     e.target.value = '';
   }, [handleImageFile]);
 
-  // 读图失败时后端不会发 accepted（错误在流开始前就返回了），所以「正在读取图片…」
-  // 得靠流错误兜底关掉，否则那行字会一直挂着。
+  // 「没有请求在飞」是读图横幅该消失的充要条件：成功路径在 accepted 那一刻清（那时
+  // loading 仍为 true，所以这条 effect 不会抢跑），而读图失败、点停止、切会话/新建对话
+  // 这几条路径都只表现为 loading 转 false —— 它们不一定设 chatError（abort 在 store 里
+  // 是静默的），所以只靠 chatError 兜底会漏掉中止路径，横幅就永久挂在输入框上方了。
   useEffect(() => {
-    if (chatError) setReadingImage(false);
-  }, [chatError]);
+    if (!loading) setReadingImage(false);
+  }, [loading]);
 
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
