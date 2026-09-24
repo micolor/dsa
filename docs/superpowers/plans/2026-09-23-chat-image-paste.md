@@ -730,10 +730,17 @@ git commit -m "feat(agent): tell chat prompts when to propose watchlist adds fro
   - `CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024`（与后端常量一致，放在文件顶部并加注释说明必须同步）
 
 > **⚠️ 必须给"正在读取图片"的反馈。** 视觉前置意味着带图那一轮，**SSE 流要等图片读完才开始**
-> （后端 `VISION_API_TIMEOUT` 上限 60 秒；实测通常 1–2 秒）。若发送后界面没有任何变化，用户看到的是
-> 一个**死掉的请求**，会重复点击或以为坏了。因此发送期间必须在 composer 附近显示明确的"正在读取图片…"
-> 状态（复用该文件既有的 loading/禁用机制，别新造一套），并且**在流真正开始后**切换到既有的生成中状态。
-> 这一条不写测试也可以，但**没有它这个功能在体感上是坏的**。
+> （后端 `VISION_API_TIMEOUT` 上限 60 秒；实测通常 1–2 秒）。
+>
+> 现状核实：该文件已有 `loading` 驱动的通用指示（textarea 与发送按钮都 `disabled={loading || !agentAvailable}`，
+> 且 `:1003` 有 `t('chat.thinking')` 的行）。所以图片轮**不是"没有任何反馈"**——但显示的是"思考中"，
+> 而且最长会显示 60 秒，用户会以为卡住。
+>
+> 具体做法（用**既有**钩子，不要新造状态机）：发送时若带图，置一个 `readingImage` 本地状态；清除它的时机用
+> **既有的** `StreamMeta.onAccepted` 回调（后端是在流开始**之前**完成图片读取的，所以 `accepted` 到达
+> 就意味着读图阶段结束——`startStream(payload, { onAccepted })` 这个钩子 ChatPage 已在用）。渲染时
+> `readingImage` 为真就把那句话换成"正在读取图片…"，否则维持 `t('chat.thinking')`。加一条测试断言带图发送
+> 后出现该文案即可。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -817,12 +824,22 @@ const CHAT_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 > `showSendFeedback` 是本文件既有的提示机制（`:896-900`，配 `sendToast` + `<AutoDismissToast>`）：签名是 `(nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => void`。复用它，不要新造一套提示。
 
 
-composer 区（`)` 里既有的 `flex items-end gap-3` 容器）加上：
+composer 区（既有的 `flex items-end gap-3` 容器）加上。**拖放与隐藏 input 的机制照抄 `IntelligentImport.tsx` 的既有写法**（已核实原文）：
 
-- textarea 上：`onPaste={(e) => { const f = e.clipboardData?.files?.[0]; if (f) { e.preventDefault(); handleImageFile(f); } }}`
-- 外层加 `onDrop` / `onDragOver`（照 `IntelligentImport.tsx:203-209` 的写法）
-- 缩略图 chip：`pendingImage && (<span className="..."><img src={pendingImage.dataUrl} alt="待发送的图片" .../><button type="button" aria-label="移除图片" onClick={() => setPendingImage(null)}>×</button></span>)`
-- 隐藏 file input + 一个触发按钮（`accept=".jpg,.jpeg,.png,.webp,.gif"`）
+```tsx
+  // 拖放：机制与 IntelligentImport.tsx:198-213 一致（preventDefault + 取 files[0]），
+  // 但这里按 MIME 校验（后端也是按 MIME + magic byte 校验，扩展名可伪造）。
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) handleImageFile(f);
+  }, [handleImageFile]);
+```
+
+- textarea 上：`onPaste={(e) => { const f = e.clipboardData?.files?.[0]; if (f) { e.preventDefault(); handleImageFile(f); } }}`（**粘贴是主入口**）
+- 外层容器加 `onDrop={handleDrop}` 与 `onDragOver={(e) => e.preventDefault()}`
+- 缩略图 chip：`pendingImage && (<span className="..."><img src={pendingImage.dataUrl} alt="待发送的图片" className="h-16 w-16 rounded object-cover" /><button type="button" aria-label="移除图片" onClick={() => setPendingImage(null)}>×</button></span>)`
+- 隐藏 file input + 触发按钮（照 `IntelligentImport.tsx:320-326` 的 `ref` + `type="file"` + `accept=".jpg,.jpeg,.png,.webp,.gif"` + `className="hidden"` 写法）
 
 > 报错/提示请复用本文件**既有**的提示机制（该文件里已有 toast / `createParsedApiError` 等用法，先搜再动手），不要为了这个功能新造一套提示组件。
 
@@ -947,7 +964,7 @@ export interface ChatRequest {
   /** 用户贴的图（仅会话内存在；刷新即失，与"不存二进制"一致）。 */
   imageDataUrl?: string;
   ```
-- 建用户消息处（`:407` 的 `role: 'user'`）带上 `imageDataUrl: meta?.imageDataUrl`
+- **建用户消息处已核实为 `:404-412`** 的 `const userMessage: Message = { id, role: 'user', content: payload.message, skills, skill, skillNames, skillName }` —— 在其中加上 `imageDataUrl: meta?.imageDataUrl`（`meta` 在该作用域内已可用）。
 
 用户消息渲染处加：
 
