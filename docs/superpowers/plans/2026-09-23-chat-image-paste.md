@@ -612,14 +612,28 @@ git commit -m "feat: accept and inject a pasted image in the agent chat endpoint
 
 > **⚠️ 本 Task 之前先做两条 Part 0 修复**（都是本次审查查出来的、与本功能直接相关的问题）：
 >
-> **P1. 修 `tests/test_image_stock_extractor_litellm.py` 的 `sys.modules` 泄漏。**
-> 该文件在 **import/collection 时**执行 `if "litellm" not in sys.modules: sys.modules["litellm"] = MagicMock()`
-> 且**从不还原**（`tests/test_image_stock_extractor_litellm.py:15-16`）——于是真实 litellm 在整个测试
-> 会话里被替换，**全量跑必现**、两种文件顺序都失败。后果之一很严重：Task 1 那条**承重网络守卫**在
-> 有凭据的开发机上跑全量测试时会拿到 MagicMock 并**失败**，看起来像"图不再被转发"——而它本该守住的
-> 正是这件事。修法是让该 mock 可还原（例如保存原值 + `finally` 还原，或改为在需要处用 `unittest.mock.patch`
-> 局部注入），并验证：`pytest tests/test_image_stock_extractor_litellm.py tests/test_chat_image_vision_routing.py -q -m network`
-> 与反序都能通过。**这条属于既有的测试隔离缺陷，但它使我们的守卫在全量跑里失效，所以在本计划内修。**
+> **P1. 修收集期的 `sys.modules["litellm"]` 注入（范围比初版以为的大）。**
+> 初版只点了 `tests/test_image_stock_extractor_litellm.py`，实际范围经穷举后是 **6 个危险形态的注入点**
+> （"不在 `sys.modules` 就注入"，即 litellm 可 import 时也注入）：
+> `test_fetcher_source_optimization.py`、`test_hk_realtime_routing.py`、`test_stock_code_bse.py`、
+> `test_market_analyzer_generate_text.py`、`tests/agent/test_runtime_facts.py`（初版 grep 只扫了
+> `tests/*.py`，漏了子目录），以及 **`tests/litellm_stub.py` 的 `ensure_litellm_stub`（被 40 个文件在 import 期调用）**。
+> 机制：`image_stock_extractor.py` 在 import 时把 `sys.modules.get("litellm")` **绑成模块全局**，所以
+> 只要有任何一处在收集期注入 MagicMock，**Task 1 那条承重网络守卫在全量跑里就拿到 MagicMock 并失败**
+> ——看起来像"图不再被转发"，而它本该守住的正是这件事。修法统一为"先真 import，只有
+> `ModuleNotFoundError`/`ImportError` 才注入"，保留各文件"没有 litellm 的环境也能跑"的原意。
+>
+> **连带发现（必须一起处理，否则会多出 20 条红）**：禁用 stub 后真实 litellm 会被 import，而它在
+> import 期会执行 `dotenv.load_dotenv()`（`litellm/__init__.py`：`if os.getenv("LITELLM_MODE","DEV")=="DEV"`），
+> 于是**把仓库 `.env` 读进测试进程的 `os.environ`**；`.env` 里的 `LITELLM_FALLBACK_MODELS` 会让
+> `test_system_config_service`（17）/`test_system_config_api`（2）/`test_provider_cache`（1）共 20 条
+> 对"未声明的 fallback"报错——这 20 条是**既有**的测试隔离缺陷，此前被 stub 掩盖着。
+> **正确终点是两个都要**：守卫工作**且**测试进程不读开发机 `.env`。做法是在 `tests/conftest.py` 模块级
+> `os.environ.setdefault("LITELLM_MODE", "PROD")`（早于任何 litellm import，`setdefault` 尊重外部显式设置），
+> 从根上让那行 `load_dotenv` 不执行。**不要**改那 20 条的期望值，也**不要**用事后清理 `os.environ` 的
+> fixture 遮盖（挡不住收集期已发生的 `load_dotenv`）。
+>
+> **这条属于既有的测试隔离缺陷，但它使我们的守卫在全量跑里失效，所以在本计划内修。**
 >
 > **P2. 会话标题不要被注入块污染。** `src/storage.py:3770` 用「第一条持久化的用户消息前 60 字」当会话标题，
 > 而带图那一轮持久化的正是注入后的文本 → 侧边栏标题会变成 `【图片内容】` + 模型对图片描述的开头，
@@ -732,15 +746,34 @@ git commit -m "feat(agent): tell chat prompts when to propose watchlist adds fro
 > **⚠️ 必须给"正在读取图片"的反馈。** 视觉前置意味着带图那一轮，**SSE 流要等图片读完才开始**
 > （后端 `VISION_API_TIMEOUT` 上限 60 秒；实测通常 1–2 秒）。
 >
-> 现状核实：该文件已有 `loading` 驱动的通用指示（textarea 与发送按钮都 `disabled={loading || !agentAvailable}`，
-> 且 `:1003` 有 `t('chat.thinking')` 的行）。所以图片轮**不是"没有任何反馈"**——但显示的是"思考中"，
-> 而且最长会显示 60 秒，用户会以为卡住。
+> 现状核实（**初版计划在这点上写错了，已更正**）：该文件在 `loading` 期间的实际反馈是"textarea 禁用 +
+> 发送按钮 `isLoading` 转圈"（`disabled={loading || !agentAvailable}`、`isLoading={loading}`）；而
+> `t('chat.thinking')` 的值是 **'思考过程'**——那是**可折叠思考区块的标题**，不是加载提示。所以读图期间
+> 用户看到的是"转圈但不知道在干什么"，最长 60 秒。
 >
 > 具体做法（用**既有**钩子，不要新造状态机）：发送时若带图，置一个 `readingImage` 本地状态；清除它的时机用
 > **既有的** `StreamMeta.onAccepted` 回调（后端是在流开始**之前**完成图片读取的，所以 `accepted` 到达
 > 就意味着读图阶段结束——`startStream(payload, { onAccepted })` 这个钩子 ChatPage 已在用）。渲染时
-> `readingImage` 为真就把那句话换成"正在读取图片…"，否则维持 `t('chat.thinking')`。加一条测试断言带图发送
-> 后出现该文案即可。
+> `readingImage` 为真就在 composer 附近显示一行"正在读取图片…"（不动既有转圈）。
+>
+> i18n 锚点（已核实）：新键加在 `chat.actionProposal*` 那一组旁边——`uiText.ts` zh `:1056-1061`、
+> en `:2203-2208`，两段都要加（`en` 是 `Record<UiTextKey, string>`，漏一段 `tsc -b` 会红）：
+> `'chat.readingImage': '正在读取图片…'` / `'Reading image…'`。
+>
+> 测试形态（该文件的 mock 已支持）：既有用例在 `:235` 用
+> `mockStartStream.mockImplementation(async (_payload, meta) => {...})` 拿到过 `meta`，所以你可以在测试里
+> 捕获它、再手动触发确认读图阶段结束：
+>
+> ```tsx
+>     let capturedMeta: { onAccepted?: () => void } | undefined;
+>     mockStartStream.mockImplementation(async (_payload, meta) => { capturedMeta = meta; });
+>     // 贴图 + 发送 ...
+>     expect(await screen.findByText('正在读取图片…')).toBeInTheDocument();
+>     act(() => { capturedMeta?.onAccepted?.(); });
+>     expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
+> ```
+>
+> 文案 key 走 i18n（新增 `chat.readingImage`，zh/en 两段都要补，否则 `tsc -b` 会红）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -824,7 +857,7 @@ const CHAT_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 > `showSendFeedback` 是本文件既有的提示机制（`:896-900`，配 `sendToast` + `<AutoDismissToast>`）：签名是 `(nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => void`。复用它，不要新造一套提示。
 
 
-composer 区（既有的 `flex items-end gap-3` 容器）加上。**拖放与隐藏 input 的机制照抄 `IntelligentImport.tsx` 的既有写法**（已核实原文）：
+composer 区（既有的 `flex items-end gap-3` 容器）加上。**该容器已核实结构**：它是「textarea + （Stop 或 Send 按钮）」两栏；因此**附件按钮作为该行的第一个子元素**（textarea 之前），而**缩略图 chip 放在该行所在的外层容器里、该行之上**（不要塞进 `items-end` 那一行，否则会和 textarea 底对齐错位）。**拖放与隐藏 input 的机制照抄 `IntelligentImport.tsx` 的既有写法**（已核实原文）：
 
 ```tsx
   // 拖放：机制与 IntelligentImport.tsx:198-213 一致（preventDefault + 取 files[0]），
