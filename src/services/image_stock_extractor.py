@@ -81,6 +81,11 @@ ALLOWED_MIME = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 VISION_API_TIMEOUT = 60  # seconds; avoid long blocks on network/API issues
 
+# litellm 的 provider 专属路由不会转发 image_url 内容块（实测：deepseek/ 下模型回
+# 「未收到图片」或 "[]"，而同一个 endpoint 用 openai/ 通用路由能正确读出图中代码）。
+# 只有**实测过**会剥图的路由才加进来——不要凭猜测往这里添。
+_PROVIDER_ROUTES_WITHOUT_IMAGE_FORWARDING = frozenset({"deepseek"})
+
 # Magic bytes for server-side MIME validation (client Content-Type can be forged)
 _IMAGE_SIGNATURES = {
     "image/jpeg": [b"\xff\xd8\xff"],
@@ -88,6 +93,22 @@ _IMAGE_SIGNATURES = {
     "image/gif": [b"GIF87a", b"GIF89a"],
     "image/webp": [b"RIFF"],  # bytes[8:12] must be WEBP, checked separately
 }
+
+
+def _vision_wire_model(model: str, deployment_params: Optional[Dict[str, Any]] = None) -> str:
+    """Return the litellm model string to use for a vision call.
+
+    deployment 里显式写的 model 优先（与既有 wire_model 解析一致）；若该 provider 的
+    专属路由实测会剥掉图片，则改走 litellm 的通用 ``openai/`` 兼容路由（``api_base``
+    由调用方按 deployment 传入，因此仍打同一个 endpoint）。
+    """
+    wire = str((deployment_params or {}).get("model") or model).strip()
+    if "/" not in wire:
+        return wire
+    prefix, _, rest = wire.partition("/")
+    if prefix.lower() in _PROVIDER_ROUTES_WITHOUT_IMAGE_FORWARDING:
+        return f"openai/{rest}"
+    return wire
 
 
 def _verify_image_magic_bytes(image_bytes: bytes, mime_type: str) -> None:
@@ -306,8 +327,10 @@ def _deployment_allows_empty_api_key(deployment: Dict[str, Any]) -> bool:
     return channel_allows_empty_api_key(protocol, params.get("api_base"))
 
 
-def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] = None) -> str:
-    """Extract stock codes from an image using litellm (all providers via OpenAI vision format)."""
+def _call_litellm_vision_with_prompt(
+    prompt: str, image_b64: str, mime_type: str, api_key: Optional[str] = None
+) -> str:
+    """Call a vision model with an arbitrary prompt and one image (OpenAI vision format)."""
     global litellm
     cfg = get_config()
     model = _resolve_vision_model()
@@ -341,7 +364,7 @@ def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] 
             deployment_params = dict(deployment.get("litellm_params") or {})
     if key is None and not deployment_params:
         raise ValueError(f"No API key found for vision model {model}")
-    wire_model = str(deployment_params.get("model") or model).strip()
+    wire_model = _vision_wire_model(model, deployment_params)
 
     data_url = f"data:{mime_type};base64,{image_b64}"
     call_kwargs: dict = {
@@ -350,7 +373,7 @@ def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] 
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": EXTRACT_PROMPT},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }
@@ -379,6 +402,11 @@ def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] 
     if response and response.choices and response.choices[0].message.content:
         return response.choices[0].message.content
     raise ValueError("LiteLLM vision returned empty response")
+
+
+def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] = None) -> str:
+    """Extract stock codes from an image using litellm (all providers via OpenAI vision format)."""
+    return _call_litellm_vision_with_prompt(EXTRACT_PROMPT, image_b64, mime_type, api_key)
 
 
 def extract_stock_codes_from_image(
