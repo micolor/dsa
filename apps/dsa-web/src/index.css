@@ -1521,6 +1521,34 @@ select option:checked {
   transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
+/* Chat composer icon button（附件、移除待发送图片）。与 .chat-copy-btn 同约定：
+   1.75rem（28px）见方的命中区，高于 WCAG 2.5.8 的 24px 最小目标尺寸；键盘焦点样式
+   与 .chat-copy-btn 共用下面那条 focus-visible 规则。 */
+.chat-composer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  cursor: pointer;
+  color: hsl(var(--muted-text));
+  background: hsl(var(--card) / 0.7);
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.chat-composer-icon-btn:hover:not(:disabled) {
+  color: hsl(var(--foreground));
+  background: hsl(var(--hover));
+}
+
+.chat-composer-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .chat-message-actions {
   position: absolute;
   top: 0;
@@ -1572,6 +1600,7 @@ select option:checked {
 }
 
 .chat-copy-btn:focus-visible,
+.chat-composer-icon-btn:focus-visible,
 .session-item:focus-visible,
 .session-item-row .delete-btn:focus-visible {
   outline: none;

@@ -2775,6 +2775,10 @@ describe('chat composer image input', () => {
       </MemoryRouter>,
     );
 
+    // 拖放与附件按钮共用 gate（loading / agentAvailable），所以先等 composer 就绪再拖，
+    // 否则这里测到的是「agent 状态还没到」而不是拖放本身。
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加图片' })).toBeEnabled());
+
     const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
     fireEvent.drop(screen.getByRole('textbox'), {
       dataTransfer: { files: [file], items: [], types: ['Files'] },
@@ -2818,6 +2822,12 @@ describe('chat composer image input', () => {
 
     // 点 Stop / 切会话 / 新建对话都只让 store 的 loading 转 false，不会设 chatError
     //（abort 在 store 里是静默的）。横幅必须跟着消失，否则会永久挂在输入框上方。
+    //
+    // 手法说明：这个 stubbed store 是个普通函数、没有订阅，改 mockStoreState 不会自己触发
+    // 重渲染（本文件其它用例都在 render 之前改它）。所以下面两处 fireEvent.change 只是借
+    // textarea 的 onChange → setInput 强制重渲染一次，让组件重读 mockStoreState；'x' / 'xy'
+    // 是任意值，断言不依赖它们。副作用是：它向一个此刻渲染成 disabled 的 textarea 派发
+    // change（真实浏览器不会这样做），这里只关心「重读」这一个效果。
     mockStoreState.loading = true;
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'x' } });
     expect(screen.getByText('正在读取图片…')).toBeInTheDocument();
@@ -2825,5 +2835,75 @@ describe('chat composer image input', () => {
     mockStoreState.loading = false;
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'xy' } });
     expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
+  });
+
+  it('does not show the reading-image banner for a text-only send', async () => {
+    // 同样永不 accepted：如果横幅被无条件打开，它就会一直留着，断言因此看得见它。
+    mockStartStream.mockImplementation(async () => {});
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '分析 600519' } });
+    // 等发送按钮真的可点（agent 状态到位）再点，否则 handleSend 会因为 agent 未就绪直接返回。
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
+  });
+
+  it('leaves a text-only paste to the textarea instead of swallowing it', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    // fireEvent 返回 dispatchEvent 的结果：事件被 preventDefault 过就是 false。
+    // 粘贴纯文字时不能拦默认行为，否则文字插不进输入框（jsdom 不实现插入本身，
+    // 所以这里断言的是「没有拦」，而不是插进去的结果）。
+    const notPrevented = fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [], items: [], types: ['text/plain'], getData: () => '分析 600519' },
+    });
+
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+  });
+
+  it('ignores a dropped image while a request is in flight', async () => {
+    mockStoreState.loading = true;
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    // 等 agent 状态到位：否则 agentAvailable 也是 false，drop 被拦的原因就不是 loading 了。
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    await act(async () => {});
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    const dropOnce = () => fireEvent.drop(screen.getByRole('textbox'), {
+      dataTransfer: { files: [file], items: [], types: ['Files'] },
+    });
+
+    dropOnce();
+    // FileReader 是异步的：不冲掉这一轮任务，断言在两条分支上都会先绿（空转）。
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    // chip 一旦挂上，本轮发不出去却会静默作用于下一轮 —— 所以 gate 掉，而不是只灰按钮。
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+
+    // 同一场景下只把 loading 放掉，drop 就该生效：证明上一条是 loading 拦下的，
+    // 而不是这个环境里 drop 本来就挂不上。
+    mockStoreState.loading = false;
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'x' } });
+    dropOnce();
+
+    expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
   });
 });

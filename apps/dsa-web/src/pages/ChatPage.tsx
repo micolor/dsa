@@ -40,7 +40,11 @@ type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>
 
 type ActionProposalStatus = 'pending' | 'applying' | 'applied' | 'error' | 'cancelled';
 
-// 与后端 api/v1/endpoints/agent.py 的 CHAT_IMAGE_MAX_BYTES 必须一致；改一处要同时改另一处。
+// 这两个常量是后端契约的副本，必须同步改：
+//   CHAT_IMAGE_MAX_BYTES ← api/v1/endpoints/agent.py 的 CHAT_IMAGE_MAX_BYTES
+//   CHAT_IMAGE_MIME      ← src/services/image_stock_extractor.py 的 ALLOWED_MIME
+// （agent.py 从那里 import 它，所以 MIME 的真身在服务层。）
+// tests/chat_image_contract.test.ts 会直接读这两个 Python 源文件比对，漂移会让前端测试变红。
 const CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const CHAT_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
@@ -239,6 +243,9 @@ const ChatPage: React.FC = () => {
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
   const [sendToast, setSendToast] = useState<{
     type: 'success' | 'error';
+    /* 覆盖默认标题（默认是「发送成功」/「发送失败」）。图片替换之类的提示不是发送结果，
+       沿用默认标题会自相矛盾，所以这类提示自带标题。 */
+    title?: string;
     message: string;
     durationMs: number;
   } | null>(null);
@@ -906,7 +913,7 @@ const ChatPage: React.FC = () => {
 
   // 自动消失的计时交给 AutoDismissToast：同一提示换新时它会重新计时。
   const showSendFeedback = useCallback(
-    (nextToast: { type: 'success' | 'error'; message: string }, durationMs: number) => {
+    (nextToast: { type: 'success' | 'error'; title?: string; message: string }, durationMs: number) => {
       setSendToast({ ...nextToast, durationMs });
     },
     [],
@@ -916,32 +923,45 @@ const ChatPage: React.FC = () => {
     setSendToast(null);
   }, []);
 
-  // 图片只留在这一层的待发送状态里；真正发给后端是 Task 6 的事。
-  const handleImageFile = useCallback((file: File) => {
+  // 图片只在这一层预览、暂存在待发送状态里；随 payload 发出去是发送路径的事。
+  const handleImageFile = useCallback((file: File, ignoredCount = 0) => {
     if (!CHAT_IMAGE_MIME.includes(file.type)) {
       showSendFeedback({ type: 'error', message: `不支持的图片类型：${file.type || '(未知)'}；支持 jpg/png/webp/gif` }, 4000);
       return;
     }
     if (file.size > CHAT_IMAGE_MAX_BYTES) {
-      showSendFeedback({ type: 'error', message: '图片过大（上限 2MB），请压缩后再试' }, 4000);
+      showSendFeedback({ type: 'error', message: `图片过大（上限 ${CHAT_IMAGE_MAX_BYTES / 1024 / 1024}MB），请压缩后再试` }, 4000);
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result || '');
       const base64 = dataUrl.split(',', 2)[1] || '';
+      const replacedOld = pendingImage !== null;
       setPendingImage({ dataUrl, base64, mime: file.type });
+      // 每轮只带 1 张，所以「替换」和「多选丢弃」都得说一声，不能静默。同一 tick 里
+      // 只有最后一条提示会留下，因此多选丢弃优先——它是更需要被解释的那个。
+      if (ignoredCount > 0) {
+        showSendFeedback({ type: 'error', title: '部分图片未加入', message: `每轮只带 1 张图片，已忽略其余 ${ignoredCount} 张` }, 4000);
+      } else if (replacedOld) {
+        showSendFeedback({ type: 'success', title: '图片已替换', message: '每轮只带 1 张图片，已用新图替换上一张' }, 3000);
+      }
     };
     reader.readAsDataURL(file);
-  }, [showSendFeedback]);
+  }, [pendingImage, showSendFeedback]);
 
-  // 拖放：机制与 IntelligentImport.tsx 的 onDrop 一致（preventDefault + 取 files[0]），
-  // 但这里按 MIME 校验（后端也是按 MIME + magic byte 校验，扩展名可伪造）。
+  // 拖放：与附件按钮、隐藏 input 同一套 gate —— 流式期间或 agent 不可用时不能换图，
+  // 否则会挂上一个本轮发不出去、却静默作用于下一轮的 chip。取 files[0] 的写法与
+  // IntelligentImport.tsx 的 onDrop 相同（那边同样先判 disabled/isLoading 再取文件），
+  // 剩下的张数交给 handleImageFile 提示；MIME 也由它按白名单校验。
   const handleImageDrop = useCallback((e: React.DragEvent) => {
+    // 先拦默认行为：落点不在 composer 上时，浏览器会直接打开文件、把 SPA 卸载掉。
     e.preventDefault();
-    const f = e.dataTransfer?.files?.[0];
-    if (f) handleImageFile(f);
-  }, [handleImageFile]);
+    if (loading || !agentAvailable) return;
+    const files = e.dataTransfer?.files;
+    const f = files?.[0];
+    if (f) handleImageFile(f, (files?.length ?? 1) - 1);
+  }, [agentAvailable, handleImageFile, loading]);
 
   const handleImageInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -950,10 +970,24 @@ const ChatPage: React.FC = () => {
     e.target.value = '';
   }, [handleImageFile]);
 
-  // 「没有请求在飞」是读图横幅该消失的充要条件：成功路径在 accepted 那一刻清（那时
-  // loading 仍为 true，所以这条 effect 不会抢跑），而读图失败、点停止、切会话/新建对话
-  // 这几条路径都只表现为 loading 转 false —— 它们不一定设 chatError（abort 在 store 里
-  // 是静默的），所以只靠 chatError 兜底会漏掉中止路径，横幅就永久挂在输入框上方了。
+  // 拖到 composer 之外（消息列表、侧栏）松手会命中浏览器默认行为：直接打开那个文件，
+  // SPA 被卸载、已经输入的内容随之丢失。全应用没有 window 级兜底，这里补上。
+  // 只 preventDefault，不 stopPropagation —— composer 自己的 onDrop 仍会收到文件。
+  useEffect(() => {
+    const preventDefaultDrag = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', preventDefaultDrag);
+    window.addEventListener('drop', preventDefaultDrag);
+    return () => {
+      window.removeEventListener('dragover', preventDefaultDrag);
+      window.removeEventListener('drop', preventDefaultDrag);
+    };
+  }, []);
+
+  // 横幅还在 ⟹ 有请求在飞：成功路径在 accepted 那一刻就清了，而那时 loading 仍为 true，
+  // 所以这条 effect 不会抢跑（accepted 早于流结束）。
+  // 反过来，loading 转 false 说明这一轮已经结束 —— 读图失败、点停止、切会话/新建对话
+  // 这三条路径都不一定设 chatError（abort 在 store 里是静默的），只表现为 loading 转 false，
+  // 所以横幅必须跟着消失，否则会永久挂在输入框上方。
   useEffect(() => {
     if (!loading) setReadingImage(false);
   }, [loading]);
@@ -1909,9 +1943,9 @@ const ChatPage: React.FC = () => {
                     type="button"
                     aria-label="移除图片"
                     onClick={() => setPendingImage(null)}
-                    className="absolute -right-2 -top-2 rounded-full bg-card border border-white/10 p-0.5 text-muted-text transition-colors hover:text-foreground"
+                    className="chat-composer-icon-btn absolute -right-2 -top-2 rounded-full"
                   >
-                    <X className="h-3 w-3" aria-hidden="true" />
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
               )}
@@ -1928,7 +1962,7 @@ const ChatPage: React.FC = () => {
                   aria-label="添加图片"
                   onClick={() => chatImageInputRef.current?.click()}
                   disabled={loading || !agentAvailable}
-                  className="flex-shrink-0 rounded-xl border border-white/10 p-2.5 text-muted-text transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                  className="chat-composer-icon-btn flex-shrink-0"
                 >
                   <ImagePlus className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -1945,10 +1979,12 @@ const ChatPage: React.FC = () => {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={(e) => {
-                    const f = e.clipboardData?.files?.[0];
+                    const files = e.clipboardData?.files;
+                    const f = files?.[0];
                     if (f) {
+                      // preventDefault 必须留在这个分支里：粘贴纯文字时不能拦，否则文字进不去。
                       e.preventDefault();
-                      handleImageFile(f);
+                      handleImageFile(f, (files?.length ?? 1) - 1);
                     }
                   }}
                   placeholder={t('chat.inputPlaceholder')}
@@ -2001,7 +2037,7 @@ const ChatPage: React.FC = () => {
           <InlineAlert
             elevated
             variant={sendToast.type === 'success' ? 'success' : 'danger'}
-            title={sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')}
+            title={sendToast.title ?? (sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed'))}
             message={sendToast.message}
             action={(
               <button
