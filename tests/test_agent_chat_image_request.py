@@ -48,6 +48,20 @@ def test_no_image_returns_message_unchanged():
     assert _resolve_image_message(_req(message="你好")) == "你好"
 
 
+def test_empty_message_without_an_image_is_rejected_as_400():
+    """无图 + 空白消息是 400（不是 422）：图片问题的校验刻意都收在 `_resolve_image_message`。
+
+    `message` 放宽成可选后，"必须有内容"这条语义得在这一层补回来——否则空请求会一路走到
+    agent 去拿一个空问题。
+    """
+    for blank in ("", "   ", "\n\t "):
+        with pytest.raises(HTTPException) as e:
+            _resolve_image_message(_req(message=blank))
+        assert e.value.status_code == 400
+        assert e.value.detail["error"] == "empty_message"
+        assert e.value.detail["message"] == "消息不能为空"
+
+
 def test_image_is_injected_before_the_user_text():
     b64 = base64.b64encode(_png_bytes()).decode()
     with mock.patch("api.v1.endpoints.agent.build_image_context",
@@ -55,6 +69,23 @@ def test_image_is_injected_before_the_user_text():
         out = _resolve_image_message(_req(message="这是什么", image_base64=b64, image_mime="image/png"))
     assert out.startswith("【图片内容】")
     assert out.endswith("这是什么")
+
+
+def test_image_only_turn_is_accepted_and_gets_the_image_block():
+    """只贴图不打字是受支持的一轮（设计 §6）：`message` 必填时 pydantic 会回 422。
+
+    块体用真正的 `_render_block` 造，顺带钉住"用户没打字就没有 `【用户问题】` 那一行"。
+    """
+    from src.services.chat_image_context import _render_block
+
+    b64 = base64.b64encode(_png_bytes()).decode()
+    request = _req(image_base64=b64, image_mime="image/png")  # 不带 message：不应 422
+    with mock.patch("api.v1.endpoints.agent.build_image_context",
+                    return_value=_render_block("图中是自选股列表", "")):
+        out = _resolve_image_message(request)
+    assert out.startswith("【图片内容】")
+    assert "图中是自选股列表" in out
+    assert "【用户问题】" not in out
 
 
 def test_mime_and_base64_must_appear_together():

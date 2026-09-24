@@ -64,7 +64,10 @@ _ACTIVE_CODEX_STREAMS_LOCK = threading.Lock()
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    message: str
+    # 只贴图不打字是受支持的一轮（设计 §6）：message 不能必填，否则那种请求会被 pydantic
+    # 回 422 `Field required`——同一种输入问题在这里变成另一种形状。空白消息由
+    # `_resolve_image_message` 显式拒成 400（见那里的 empty_message）。
+    message: str = ""
     session_id: Optional[str] = None
     request_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     skills: Optional[List[str]] = Field(
@@ -95,6 +98,11 @@ def _resolve_image_message(request: ChatRequest) -> str:
     校验失败 → 400（参数问题）；视觉失败 → 503（所需依赖不可用）。**不降级成"看不到图也照样
     回答"**：那种回答既无用又会伪装成成功（见设计文档 §8）。
     """
+    # message 放宽成可选之后，这里补回"必须有内容"：没有图就必须有话。放在图片字段校验
+    # 之前是刻意的——这样"空消息"永远是 400 + 明确文案，而不是 422 或别的形状。
+    if not request.image_base64 and not request.message.strip():
+        raise api_error(400, "empty_message", "消息不能为空")
+
     if not request.image_base64 and not request.image_mime:
         return request.message
     if bool(request.image_base64) != bool(request.image_mime):
