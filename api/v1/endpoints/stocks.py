@@ -52,6 +52,7 @@ from src.services.watchlist_service import (
     write_watchlist_codes,
 )
 from src.services.system_config_service import SystemConfigService
+from src.utils.sanitize import redact_for_log
 from data_provider.base import normalize_stock_code
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,9 @@ def extract_from_image(
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"error": "extract_failed", "message": str(e)})
     except Exception as e:
-        logger.error(f"图片提取失败: {e}", exc_info=True)
+        # 不走 exc_info：traceback 会把异常链（含 provider 回显的 base64 图片体）原样再打一遍，
+        # 等于从后门把刚脱敏掉的内容写回日志。诊断需要的类型/状态码/主机名已在文本里。
+        logger.error("图片提取失败: %s", redact_for_log(e))
         raise HTTPException(
             status_code=500,
             detail={"error": "internal_error", "message": "图片提取失败"},

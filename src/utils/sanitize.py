@@ -72,6 +72,19 @@ _TOKEN_LIKE_PATTERN = re.compile(
     r"\b(?:sk-[a-z0-9_\-]{16,}|xox[baprs]-[a-z0-9\-]{16,}|gh[pousr]_[a-z0-9_]{20,})\b",
     re.IGNORECASE,
 )
+# 图片类失败的上游异常常常整段回显请求体，base64 图片就是一条几百上千字符的 [A-Za-z0-9+/=] 长串。
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def redact_for_log(exc: BaseException, *, limit: int = 200) -> str:
+    """把异常渲染成可安全写进日志的文本：保留类型与诊断信息，抹掉疑似 base64 长串。
+
+    provider 会在错误体里回显请求内容（含 base64 图片）与 api_base，而日志会被轮转、打包、
+    上传，比数据库更难回收——设计 §2 承诺「图片二进制不落盘」，这个承诺覆盖日志。诊断信息
+    （异常类型、状态码、主机名）必须保留，否则这条日志就失去存在意义。
+    """
+    text = _BASE64_RUN_RE.sub("<redacted>", str(exc))[:limit]
+    return f"{type(exc).__name__}: {text}"
 
 
 def sanitize_diagnostic_text(text: Any, *, max_length: int = 300) -> str:

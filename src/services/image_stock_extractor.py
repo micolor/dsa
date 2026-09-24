@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import Config, channel_allows_empty_api_key, get_config
 from src.llm.hermes import route_has_hermes
+from src.utils.sanitize import redact_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +43,6 @@ class VisionNotConfiguredError(ValueError):
     检查网络都无济于事，只能去设置页配置 VISION_MODEL。继承 ``ValueError`` 是为了
     不打断既有按 ``ValueError`` 捕获的调用方（本模块多处按此约定抛错）。
     """
-
-
-# 与 `chat_image_context._sanitize_for_log` 等价：设计 §2 承诺「图片二进制不落盘」，这个承诺
-# **覆盖日志**——provider 会在错误体里回显请求内容（含 base64 图片），日志会被轮转/打包/上传。
-# 之所以在这里重写一份而不是 import：`chat_image_context` 是往下依赖本模块的，反向 import 会成环。
-# 两处的判据（长串抹成 <redacted>、截断到 200 字符）必须保持一致。
-_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
-
-
-def _sanitize_for_log(exc: BaseException, *, limit: int = 200) -> str:
-    """把上游异常文本裁剪并抹掉疑似 base64 长串，避免图片内容落盘。"""
-    text = _BASE64_RUN_RE.sub("<redacted>", str(exc))[:limit]
-    return f"{type(exc).__name__}: {text}"
 
 
 EXTRACT_PROMPT = """请分析这张股票市场截图或图片，提取其中所有可见的股票代码及名称。
@@ -501,7 +489,7 @@ def extract_stock_codes_from_image(
                 delay = 2 ** attempt
                 logger.warning(
                     f"[ImageExtractor] 尝试 {attempt + 1}/3 失败，{delay}s 后重试: "
-                    f"{_sanitize_for_log(e)}"
+                    f"{redact_for_log(e)}"
                 )
                 time.sleep(delay)
 
