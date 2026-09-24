@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, Check, ChevronDown, Copy, Download, SlidersHorizontal, User, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, Copy, Download, ImagePlus, SlidersHorizontal, User, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
@@ -39,6 +39,10 @@ import { useUiLanguage } from '../contexts/UiLanguageContext';
 type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>;
 
 type ActionProposalStatus = 'pending' | 'applying' | 'applied' | 'error' | 'cancelled';
+
+// 与后端 api/v1/endpoints/agent.py 的 CHAT_IMAGE_MAX_BYTES 必须一致；改一处要同时改另一处。
+const CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const CHAT_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 const QUICK_QUESTIONS: Array<{
   label: string;
@@ -222,6 +226,8 @@ const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [input, setInput] = useState('');
+  const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string; mime: string } | null>(null);
+  const [readingImage, setReadingImage] = useState(false);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [defaultSkillIds, setDefaultSkillIds] = useState<string[]>([]);
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
@@ -265,6 +271,7 @@ const ChatPage: React.FC = () => {
     agentStatus?.backend === 'codex_app_server',
   );
   const watchlistMessageTimerRef = useRef<number | null>(null);
+  const chatImageInputRef = useRef<HTMLInputElement>(null);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -816,7 +823,8 @@ const ChatPage: React.FC = () => {
       overrideStockContext?: ActiveStockContext,
     ) => {
       const msgText = (overrideMessage ?? input).trim();
-      if (!msgText || loading || !agentAvailable || !agentStatus) return;
+      // 只贴图不打字是受支持的一轮（后端为此把 message 改成可选），所以不能在这里用空文本拦掉。
+      if ((!msgText && !pendingImage) || loading || !agentAvailable || !agentStatus) return;
       showIntroToast();
       if (overrideMessage !== undefined) {
         setInput(msgText);
@@ -861,10 +869,13 @@ const ChatPage: React.FC = () => {
           : {}),
         context: contextForSend ?? undefined,
       };
+      // 后端在流开始之前完成读图，所以 accepted 到达即意味着读图阶段结束。
+      if (pendingImage) setReadingImage(true);
       await startStream(payload, {
         skillNames: usedSkillNames,
         skillName: usedSkillNames.join('、'),
         onAccepted: () => {
+          setReadingImage(false);
           followUpHydrationTokenRef.current += 1;
           followUpContextRef.current = null;
           setIsFollowUpContextLoading(false);
@@ -878,7 +889,7 @@ const ChatPage: React.FC = () => {
         },
       });
     },
-    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, showIntroToast, startStream, stockIndex],
+    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, pendingImage, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, showIntroToast, startStream, stockIndex],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -904,6 +915,46 @@ const ChatPage: React.FC = () => {
   const dismissSendToast = useCallback(() => {
     setSendToast(null);
   }, []);
+
+  // 图片只留在这一层的待发送状态里；真正发给后端是 Task 6 的事。
+  const handleImageFile = useCallback((file: File) => {
+    if (!CHAT_IMAGE_MIME.includes(file.type)) {
+      showSendFeedback({ type: 'error', message: `不支持的图片类型：${file.type || '(未知)'}；支持 jpg/png/webp/gif` }, 4000);
+      return;
+    }
+    if (file.size > CHAT_IMAGE_MAX_BYTES) {
+      showSendFeedback({ type: 'error', message: '图片过大（上限 2MB），请压缩后再试' }, 4000);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const base64 = dataUrl.split(',', 2)[1] || '';
+      setPendingImage({ dataUrl, base64, mime: file.type });
+    };
+    reader.readAsDataURL(file);
+  }, [showSendFeedback]);
+
+  // 拖放：机制与 IntelligentImport.tsx 的 onDrop 一致（preventDefault + 取 files[0]），
+  // 但这里按 MIME 校验（后端也是按 MIME + magic byte 校验，扩展名可伪造）。
+  const handleImageDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) handleImageFile(f);
+  }, [handleImageFile]);
+
+  const handleImageInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleImageFile(f);
+    // 允许重新选同一个文件时再次触发 change。
+    e.target.value = '';
+  }, [handleImageFile]);
+
+  // 读图失败时后端不会发 accepted（错误在流开始前就返回了），所以「正在读取图片…」
+  // 得靠流错误兜底关掉，否则那行字会一直挂着。
+  useEffect(() => {
+    if (chatError) setReadingImage(false);
+  }, [chatError]);
 
   const toggleThinking = (msgId: string) => {
     setExpandedThinking((prev) => {
@@ -1610,7 +1661,11 @@ const ChatPage: React.FC = () => {
 
           {/* Input area */}
           <div className="border-t border-white/6 bg-card/88 p-4 md:p-6 relative z-20">
-            <div className="space-y-3">
+            <div
+              className="space-y-3"
+              onDrop={handleImageDrop}
+              onDragOver={(e) => e.preventDefault()}
+            >
               {/* 发送/分析状态提示统一走右上角容器。这些都是持续型状态，不自动消失 ——
                   带按钮的提示若几秒后自己没了，用户就再也点不到「去设置」。 */}
               <ToastPortal>
@@ -1841,11 +1896,59 @@ const ChatPage: React.FC = () => {
               </div>
             )}
 
+              {pendingImage && (
+                <div className="relative w-fit">
+                  <img
+                    src={pendingImage.dataUrl}
+                    alt="待发送的图片"
+                    className="h-16 w-16 rounded object-cover border border-white/10"
+                  />
+                  <button
+                    type="button"
+                    aria-label="移除图片"
+                    onClick={() => setPendingImage(null)}
+                    className="absolute -right-2 -top-2 rounded-full bg-card border border-white/10 p-0.5 text-muted-text transition-colors hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+
+              {readingImage && (
+                <div role="status" className="text-xs text-secondary-text">
+                  {t('chat.readingImage')}
+                </div>
+              )}
+
               <div className="flex items-end gap-3">
+                <button
+                  type="button"
+                  aria-label="添加图片"
+                  onClick={() => chatImageInputRef.current?.click()}
+                  disabled={loading || !agentAvailable}
+                  className="flex-shrink-0 rounded-xl border border-white/10 p-2.5 text-muted-text transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ImagePlus className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <input
+                  ref={chatImageInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.gif"
+                  className="hidden"
+                  onChange={handleImageInput}
+                  disabled={loading || !agentAvailable}
+                />
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={(e) => {
+                    const f = e.clipboardData?.files?.[0];
+                    if (f) {
+                      e.preventDefault();
+                      handleImageFile(f);
+                    }
+                  }}
                   placeholder={t('chat.inputPlaceholder')}
                   disabled={loading || !agentAvailable}
                   rows={1}
@@ -1870,7 +1973,7 @@ const ChatPage: React.FC = () => {
                   <Button
                     variant="primary"
                     onClick={() => handleSend()}
-                    disabled={!input.trim() || loading || !agentAvailable}
+                    disabled={(!input.trim() && !pendingImage) || loading || !agentAvailable}
                     isLoading={loading}
                     className="btn-primary flex-shrink-0"
                   >

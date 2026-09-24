@@ -2674,4 +2674,125 @@ describe('watchlist button with code variants', () => {
     expect(screen.queryByText('「600519」价格上穿 ¥1800')).not.toBeInTheDocument();
     expect(mockCreateAlertRule).not.toHaveBeenCalled();
   });
+
+  it('accepts a pasted image and shows a removable thumbnail', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    const textarea = screen.getByRole('textbox');
+    fireEvent.paste(textarea, {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+
+    // 缩略图出现，并且在发送前可以删掉
+    expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '移除图片' }));
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+  });
+
+  it('rejects an oversized image before sending', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' });
+    const textarea = screen.getByRole('textbox');
+    fireEvent.paste(textarea, { clipboardData: { files: [big], items: [], types: ['Files'] } });
+
+    expect(await screen.findByText(/图片过大/)).toBeInTheDocument();
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+  });
+
+  it('rejects an unsupported file type before sending', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'report.pdf', { type: 'application/pdf' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [pdf], items: [], types: ['Files'] },
+    });
+
+    expect(await screen.findByText(/不支持的图片类型/)).toBeInTheDocument();
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+  });
+
+  it('keeps the send button enabled when only an image is attached', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+    await screen.findByAltText('待发送的图片');
+
+    // 只贴图不打字是受支持的一轮（后端为此把 message 改成可选），所以按钮必须可点
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
+  });
+
+  it('shows a reading-image state while the image is being processed', async () => {
+    let capturedMeta: { onAccepted?: () => void } | undefined;
+    mockStartStream.mockImplementation(async (_payload, meta) => { capturedMeta = meta; });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+    await screen.findByAltText('待发送的图片');
+
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    // 视觉前置最多 60 秒，没有这句用户看到的是一个死请求
+    expect(await screen.findByText('正在读取图片…')).toBeInTheDocument();
+    act(() => { capturedMeta?.onAccepted?.(); });
+    expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
+  });
+
+  it('accepts an image dropped onto the composer', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.drop(screen.getByRole('textbox'), {
+      dataTransfer: { files: [file], items: [], types: ['Files'] },
+    });
+
+    expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
+  });
+
+  it('accepts an image chosen from the file picker', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    const fileInput = container.querySelector('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
+  });
 });
