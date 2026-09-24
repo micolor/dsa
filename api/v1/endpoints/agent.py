@@ -4,6 +4,7 @@ Agent API endpoints.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import math
@@ -20,6 +21,8 @@ from api.v1.schemas.system_config import AgentBackendStatusResponse
 from src.config import get_config
 from src.services.agent_chat_session_service import AgentChatSessionService
 from src.services.agent_model_service import list_agent_model_deployments
+from src.services.chat_image_context import ImageContextError, build_image_context
+from src.services.image_stock_extractor import ALLOWED_MIME, _verify_image_magic_bytes
 
 # Tool name -> Chinese display name mapping
 TOOL_DISPLAY_NAMES: Dict[str, str] = {
@@ -65,10 +68,61 @@ class ChatRequest(BaseModel):
     )
     context: Optional[Dict[str, Any]] = None  # Previous analysis context for data reuse
 
+    # 贴图：base64 + mime 成对出现。二进制不落盘，只在当轮转成文本注入（见设计文档 §2/§5）。
+    # 成对校验刻意放在 _resolve_image_message 里而不是 model_validator：那样所有图片问题
+    # 都是同一套 400 + 明确 message，而不是"成对错误回 422、其余回 400"。
+    image_base64: Optional[str] = None
+    image_mime: Optional[str] = None
+
     @property
     def effective_skills(self) -> Optional[List[str]]:
         """Return skill ids from the unified request shape."""
         return self.skills
+
+
+# 聊天请求体是 JSON 且还带会话上下文，base64 会放大 ~1.33 倍，因此上限比提取接口的 5MB 窄。
+CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _image_error(message: str) -> HTTPException:
+    return HTTPException(status_code=400, detail={"error": "invalid_image", "message": message})
+
+
+def _resolve_image_message(request: ChatRequest) -> str:
+    """Return the message to hand to the agent, with image context injected when present.
+
+    校验失败 → 400（参数问题）；视觉失败 → 502（外部依赖问题）。**不降级成"看不到图也照样
+    回答"**：那种回答既无用又会伪装成成功（见设计文档 §8）。
+    """
+    if not request.image_base64 and not request.image_mime:
+        return request.message
+    if bool(request.image_base64) != bool(request.image_mime):
+        raise _image_error("image_base64 与 image_mime 必须同时提供")
+
+    mime = str(request.image_mime or "").strip().lower()
+    if mime not in ALLOWED_MIME:
+        raise _image_error(f"不支持的图片类型：{mime or '(空)'}；支持 {', '.join(sorted(ALLOWED_MIME))}")
+
+    try:
+        raw = base64.b64decode(request.image_base64, validate=True)
+    except Exception as exc:
+        raise _image_error(f"图片数据不是合法 base64：{exc}") from exc
+
+    if len(raw) > CHAT_IMAGE_MAX_BYTES:
+        raise _image_error(f"图片过大（{len(raw) // 1024}KB），上限 2MB")
+
+    try:
+        _verify_image_magic_bytes(raw, mime)
+    except Exception as exc:
+        raise _image_error(f"图片内容与声明的类型不符：{exc}") from exc
+
+    try:
+        block = build_image_context(request.image_base64, mime, request.message)
+    except ImageContextError as exc:
+        raise HTTPException(status_code=502, detail={"error": "image_unreadable", "message": str(exc)}) from exc
+
+    # 注入块在前、用户原话在后：模型先读图，再对着问题回答。
+    return f"{block}\n{request.message}"
 
 
 def _build_agent_chat_context(request: ChatRequest, config, skills: Optional[List[str]]) -> Dict[str, Any]:
@@ -224,7 +278,11 @@ async def agent_chat(
         )
     
     session_id = request.session_id or str(uuid.uuid4())
-    
+
+    # 必须在下面那个兜底 except Exception 之前：HTTPException 也是 Exception，
+    # 放进 try 里会被统一改写成 500，400/502 就永远传不出去。
+    message_text = await asyncio.to_thread(_resolve_image_message, request)
+
     try:
         skill_selection = session_service.resolve_skill_selection(
             config,
@@ -241,7 +299,7 @@ async def agent_chat(
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: executor.chat(message=request.message, session_id=session_id,
+            lambda: executor.chat(message=message_text, session_id=session_id,
                                   context=ctx, selected_skill_ids=selected_skill_ids),
         )
 
@@ -555,6 +613,12 @@ async def agent_chat_stream(
     selected_skill_ids = skill_selection.selected_skill_ids_update
     stream_ctx = _build_agent_chat_context(request, config, skills)
 
+    # 图片校验与视觉调用必须先于 StreamingResponse 完成：一旦开始流式，HTTPException
+    # 就无法再变成 400/502 响应，只会退化成一条通用流错误（见设计说明）。也必须在下面
+    # 的 codex 注册之前：注册是有副作用的，中途失败会留下一条永远不会被清理的
+    # _ACTIVE_CODEX_STREAMS 记录，让同一个 request_id 之后一直被 409 挡掉。
+    message_text = await asyncio.to_thread(_resolve_image_message, request)
+
     if backend_id == "codex_app_server":
         with _ACTIVE_CODEX_STREAMS_LOCK:
             if request_id in _ACTIVE_CODEX_STREAMS:
@@ -620,7 +684,7 @@ async def agent_chat_stream(
                 stream_wait_timeout = _resolve_stream_wait_timeout(executor)
                 turn = await asyncio.to_thread(
                     executor.prepare_turn,
-                    message=request.message,
+                    message=message_text,
                     session_id=session_id,
                     context=stream_ctx,
                     selected_skill_ids=selected_skill_ids,
