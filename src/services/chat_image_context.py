@@ -1,0 +1,62 @@
+# -*- coding: utf-8 -*-
+"""把用户贴的图片转成一段可注入对话的文本块。
+
+问股采用「视觉前置 + 文本注入」：图片在进入 agent 之前先被视觉模型看一遍，结果作为文本
+注入当轮用户消息。这样做的好处是 agent 主模型、工具循环与消息构造**全都不用改**，注入后的
+文本还会自然进入会话历史（因此后续轮次 AI 仍"记得"它看到了什么，但看不到原图——图片二进制
+不落盘是有意的取舍，见设计文档 §2）。
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+from src.services.image_stock_extractor import _call_litellm_vision_with_prompt
+
+logger = logging.getLogger(__name__)
+
+
+class ImageContextError(RuntimeError):
+    """图片无法被读取（未配置视觉模型、调用失败、或返回内容为空）。"""
+
+
+IMAGE_CONTEXT_PROMPT = """你在帮一个股票分析助手读取用户贴的图片。
+
+【用户的问题】{question}
+
+请输出两部分，用中文，不要客套话：
+1. 与用户问题相关的图片内容：只写与问题有关的、你在图上真实看到的信息（图表形态、数值、
+   文字、指标等）。看不清或图上没有就直说，不要推测、不要补全。
+2. 若图中出现了股票代码或股票名称，另起一行以 `【图中股票】` 开头，逐个列出「代码 名称」，
+   用「；」分隔。图中没有股票就省略这一行。
+
+只输出上述内容，不要解释你的任务。"""
+
+
+def _render_block(model_text: str, question: str) -> str:
+    lines = ["【图片内容】", model_text.strip()]
+    if question.strip():
+        lines += ["【用户问题】" + question.strip()]
+    return "\n".join(lines)
+
+
+def build_image_context(image_b64: str, mime_type: str, question: str = "") -> str:
+    """Ask the vision model about the image and return a text block for injection.
+
+    Raises ``ImageContextError`` on any failure: no vision model, call failure, or an
+    empty/whitespace reply. Partial success is deliberately not accepted — an empty
+    injection would look like success while the model never saw the image.
+    """
+    prompt = IMAGE_CONTEXT_PROMPT.replace("{question}", question.strip() or "（用户没有提具体问题，请总结这张图里与股票分析相关的信息）")
+    try:
+        raw: Optional[str] = _call_litellm_vision_with_prompt(prompt, image_b64, mime_type)
+    except Exception as exc:  # noqa: BLE001 - 统一转成可读错误给用户
+        logger.warning("chat image context failed: %s", exc)
+        raise ImageContextError(f"图片未能读取：{exc}") from exc
+
+    text = (raw or "").strip()
+    if not text:
+        logger.warning("chat image context returned empty content")
+        raise ImageContextError("图片未能读取：视觉模型没有返回可用内容")
+    return _render_block(text, question)
