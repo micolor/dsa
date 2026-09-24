@@ -901,6 +901,13 @@ git commit -m "feat(web): accept pasted or dropped images in the chat composer"
 > **P2. 给 chip 的三个标签补 i18n。** Task 5 里它们是硬编码中文（`待发送的图片` / `移除图片` / `添加图片`），与相邻 composer 的既有风格一致，但在英文界面下是可见缺口。补 `chat.pendingImageAlt` / `chat.removeImage` / `chat.addImage` 三个键（zh + en 两段），并把测试里的断言改为断言 **zh 渲染结果**（测试环境是中文，字符串不变，所以断言不必改字面量——但要确认确实如此）。
 >
 > **P3. 不要"修"快速提问 + 待发送图并存的情况。** Task 5 报告：若 chip 未发送就点快速提问，那次发送会带上图片并因此显示"正在读取图片…"。**这是正确行为**（那个图确实被附上了、确实在读），不是缺陷；不要为它加守卫或特判。若审查者在本 Task 里提这条，引用本行说明。
+>
+> **P4. Task 5 那条 reading-image 测试的 mock 不具代表性（记录用，本 Task 别照抄）。**
+> 它用的 mock **立即 resolve 且从不触发 `accepted`**——而真实 store 在这种情况下会抛
+> `Agent stream ended before accepted`，即那个流在现实中不存在。后果是"清除读图状态"只能选满足这条假流的
+> 机制（`chatError` effect），而它在 **abort 路径**上会永久卡住横幅（store 对 abort 不设 `chatError`，
+> 横幅又没有 `loading` 守卫）。Task 5 已补 `useEffect(() => { if (!loading) setReadingImage(false) }, [loading])`
+> 覆盖该路径。**若将来重写这条测试，应让它模拟"先真发 `accepted` 再失败"的真实形状。**
 
 
 
