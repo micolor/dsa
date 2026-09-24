@@ -557,15 +557,12 @@ class TestStorage(unittest.TestCase):
 
         DatabaseManager.reset_instance()
 
-    def test_chat_session_title_ignores_the_pasted_image_scaffolding(self):
-        """带图首轮持久化的就是注入后的文本，标题必须是用户问的那句话。
+    @staticmethod
+    def _injected_image_message(question: str, block: str) -> str:
+        """用**真正的**端点把一张假图解析成"将要落库的那段文本"。
 
-        标题取自第一条用户消息的前 60 字，而带图那一轮存进库里的正是
-        `【图片内容】…【用户问题】<原话>\\n<原话>`（设计 §9.1 的哨兵约定）。不剥脚手架时
-        侧边栏标题会显示成「【图片内容】」+ 视觉模型对图的描述，而不是用户的问题。
-
-        这里故意用**真正的** `_resolve_image_message` 造那段文本，而不是手抄一份字面量：
-        要钉住的正是"端点写进库的形状"与"storage 派生标题"之间的契约，手抄的形状会漂移。
+        不手抄字面量：要钉住的是"端点写进库的形状"与"storage 派生标题"之间的契约，
+        手抄的形状会漂移（哨兵改了、块尾多加一行，手抄的版本都看不出来）。
         """
         import base64
         import io
@@ -574,18 +571,29 @@ class TestStorage(unittest.TestCase):
 
         from api.v1.endpoints.agent import ChatRequest, _resolve_image_message
 
-        question = "把图里这些加入自选"
         buf = io.BytesIO()
         Image.new("RGB", (2, 2), "white").save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
-
-        with patch(
-            "api.v1.endpoints.agent.build_image_context",
-            return_value="【图片内容】\n图中是自选股列表：600519 贵州茅台。\n【用户问题】" + question,
-        ):
-            injected = _resolve_image_message(
-                ChatRequest(message=question, image_base64=b64, image_mime="image/png")
+        with patch("api.v1.endpoints.agent.build_image_context", return_value=block):
+            return _resolve_image_message(
+                ChatRequest(
+                    message=question,
+                    image_base64=base64.b64encode(buf.getvalue()).decode(),
+                    image_mime="image/png",
+                )
             )
+
+    def test_chat_session_title_ignores_the_pasted_image_scaffolding(self):
+        """带图首轮持久化的就是注入后的文本，标题必须是用户问的那句话。
+
+        标题取自第一条用户消息的前 60 字，而带图那一轮存进库里的正是
+        `【图片内容】…【用户问题】<原话>\\n<原话>`（设计 §9.1 的哨兵约定）。不剥脚手架时
+        侧边栏标题会显示成「【图片内容】」+ 视觉模型对图的描述，而不是用户的问题。
+        """
+        question = "把图里这些加入自选"
+        injected = self._injected_image_message(
+            question,
+            "【图片内容】\n图中是自选股列表：600519 贵州茅台。\n【用户问题】" + question,
+        )
         self.assertIn("【图片内容】", injected)  # 先确认喂给 storage 的确实是注入后的文本
 
         DatabaseManager.reset_instance()
@@ -595,6 +603,28 @@ class TestStorage(unittest.TestCase):
         sessions = db.get_chat_sessions(session_prefix="pasted-image")
 
         self.assertEqual([item["title"] for item in sessions], [question])
+
+        DatabaseManager.reset_instance()
+
+    def test_chat_session_title_handles_an_image_without_any_text(self):
+        """只贴图不说话：块里没有 `【用户问题】`，标题不能停在哨兵那一行。
+
+        这种轮次持久化的是 `【图片内容】\\n<描述>\\n`（用户没打字，`_render_block` 就不会
+        写 `【用户问题】` 那一行）。若只认标记，标题就是「【图片内容】」+ 描述——而哨兵本身
+        不是用户说的任何话，那正是这条派生规则要消掉的污染。剥掉哨兵后标题落回描述上。
+        """
+        description = "图中是自选股列表：600519 贵州茅台、000858 五粮液。"
+        injected = self._injected_image_message("", "【图片内容】\n" + description)
+        self.assertTrue(injected.startswith("【图片内容】"))
+        self.assertNotIn("【用户问题】", injected)  # 确认这轮真的没有标记可回退
+
+        DatabaseManager.reset_instance()
+        db = DatabaseManager(db_url="sqlite:///:memory:")
+        db.save_conversation_message("pasted-image-only:chat", "user", injected)
+
+        sessions = db.get_chat_sessions(session_prefix="pasted-image-only")
+
+        self.assertEqual([item["title"] for item in sessions], [description])
 
         DatabaseManager.reset_instance()
 

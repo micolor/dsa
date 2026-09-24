@@ -3704,6 +3704,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     # 见设计 §9.1 的哨兵约定），所以标题不能直接截前 60 字：那会变成
     # 「【图片内容】」+ 视觉模型对图的描述，而不是用户问的那句话。只派生标题，不改持久化。
     _INJECTED_QUESTION_MARKER = "【用户问题】"
+    # 与 `chat_image_context._render_block` 写进块首的哨兵、以及前端折叠用的那个前缀
+    # 是同一个（设计 §9.1：哨兵必须在注入时就存在，事后无法追溯）。
+    _IMAGE_BLOCK_SENTINEL = "【图片内容】"
 
     @staticmethod
     def _session_title_from_message(text: Optional[str]) -> str:
@@ -3711,11 +3714,18 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
         含 `【用户问题】` 时取其后**第一行**：`agent.py` 在注入块之后又追加了一次用户原话
         （注入文本形如 `…【用户问题】<原话>\\n<原话>`），整段取下来会把换行与重复的原话
-        一起带进标题。不带图的轮次没有这个哨兵，原样截断。
+        一起带进标题。
+
+        只贴图不说话时块里没有 `【用户问题】`（用户没打字就没有这一行），此时按哨兵剥掉
+        首行，否则标题会停在「【图片内容】」这一句哨兵上——那正是这条派生规则要消掉的污染。
+        既不含标记、也不以哨兵开头的轮次（普通文字消息）原样截断。
         """
         marker = DatabaseManager._INJECTED_QUESTION_MARKER
+        sentinel = DatabaseManager._IMAGE_BLOCK_SENTINEL
         if text and marker in text:
             text = text.split(marker, 1)[1].split("\n", 1)[0].strip()
+        elif text and text.startswith(sentinel):
+            text = text[len(sentinel):].strip()
         return (text or "新对话")[:60]
 
     def get_chat_sessions(

@@ -474,6 +474,14 @@ def extract_stock_codes_from_image(
                 f"{[(i[0], i[1]) for i in items[:5]]}{'...' if len(items) > 5 else ''}"
             )
             return items, raw
+        except VisionNotConfiguredError as e:
+            # 配置缺失**不可重试**：它不是网络抖动，重试、换图、查代理都永远不会成功。
+            # 让它走下面那条通用重试只会白等 1s+2s，最后还给出一句"检查 API Key 与网络"的
+            # 错建议——用户照做也修不好。直接抛出可区分的类型与可行动的文案。
+            logger.warning(f"[ImageExtractor] 未配置视觉模型，不重试: {e}")
+            raise VisionNotConfiguredError(
+                "未配置可用的视觉模型，请在设置页配置 VISION_MODEL 后重试"
+            ) from e
         except Exception as e:
             last_error = e
             if attempt < 2:

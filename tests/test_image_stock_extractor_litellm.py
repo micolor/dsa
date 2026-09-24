@@ -551,3 +551,25 @@ class TestExtractStockCodesFromImage:
 
         assert mock_completion.call_count == 3
         assert [item.args[0] for item in mock_sleep.call_args_list] == [1, 2]
+
+    def test_missing_vision_model_is_not_retried(self):
+        """配置缺失不可重试，且最终文案要可行动。
+
+        「没配视觉模型」与网络抖动不同：重试、换图、查代理都永远不会成功。走通用重试只会
+        白等 1s+2s，最后给出一句"检查 API Key 与网络"的错建议——用户照做也修不好。
+        """
+        cfg = _cfg(openai_vision_model=None, litellm_model="", gemini_api_keys=[], anthropic_api_keys=[], openai_api_keys=[])
+        jpeg = _make_jpeg_bytes()
+        with patch("src.services.image_stock_extractor.get_config", return_value=cfg), \
+             patch("src.services.image_stock_extractor._call_litellm_vision",
+                   side_effect=VisionNotConfiguredError(
+                       "未配置 Vision API。请设置 LITELLM_MODEL 或相关 API Key。")) as mock_call, \
+             patch("src.services.image_stock_extractor.time.sleep") as mock_sleep:
+            with pytest.raises(VisionNotConfiguredError) as exc_info:
+                extract_stock_codes_from_image(jpeg, "image/jpeg")
+
+        assert mock_call.call_count == 1, "配置缺失不得重试（上面那条测试钉住网络错误仍重试 3 次）"
+        mock_sleep.assert_not_called()
+        # 文案要指出真正的原因，而不是笼统的"检查 API Key 与网络"。
+        assert "视觉模型" in str(exc_info.value)
+        assert "API Key 与网络" not in str(exc_info.value)
