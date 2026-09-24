@@ -35,12 +35,15 @@ os.environ.setdefault("LITELLM_MODE", "PROD")
 
 # 同理：第一次 import litellm 时它会去 GitHub 拉 ``model_prices_and_context_window.json``
 # （httpx, timeout=5，litellm/litellm_core_utils/get_model_cost_map.py），这在测试里是
-# 一次不受欢迎的外网访问——``-m "not network"`` 的会话一样会发出去，而且耗时在 5~22s 之间
-# 抖动（实测：本机拉失败时走本地备份 2980 条，耗时 12~22s；不读 .env 时拉成功 7s / 4318 条）。
-# ``tests/test_provider_cache.py`` 那个起子进程的用例给子进程的预算只有 15s，子进程 import
-# litellm 时正撞上这段网络抖动，于是时红时绿。litellm 自己为此提供了开关（模块 docstring：
-# "This can be disabled by setting the LITELLM_LOCAL_MODEL_COST_MAP ... to True"），打开后
-# 直接用包内自带的本地备份，测试进程不再出网、结果也不随网络变化。
+# 一次不受欢迎的外网访问——``-m "not network"`` 的会话一样会发出去，而且抓得到抓不到、
+# 快慢多少都随本机网络与代理变化。litellm 自己为此提供了开关（模块 docstring："This can be
+# disabled by setting the LITELLM_LOCAL_MODEL_COST_MAP ... to True"），打开后直接用包内
+# 自带的本地备份：测试进程不再出网，结果也不再随网络变化。
+#
+# 注意它去掉的是**网络这个变量**，不是"慢"这个变量：光是 import litellm 本身就要 ~5s
+# （本机实测 4.9~5.6s，已用本地 cost map；远端抓取成功时更慢）。``tests/test_provider_cache.py``
+# 里那个起子进程的用例给子进程的预算只有 15s，对负载仍然敏感——全量跑偶发超时属既有 flake，
+# 这一行没有根治它，只是去掉了"网络抖动"这个放大器。
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 

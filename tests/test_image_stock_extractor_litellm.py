@@ -586,8 +586,8 @@ class TestExtractStockCodesFromImage:
         assert "secret.internal" in logged, "诊断信息应留在日志里，脱敏不等于不记录"
         # 只断言"完整长串不在日志里"是空转：`redact_for_log` 还会把文本截到 200 字，光靠截断就能
         # 让 400 字的长串不出现（实测把脱敏换成 str(exc)[:limit] 这条断言照样绿）。所以要钉
-        # "被替换成了 <redacted>"，并钉一个挤得进 200 字窗口的**前缀**也不出现。
-        assert "<redacted>" in logged, "长串必须被脱敏替换，而不是碰巧被截断切掉"
+        # "被替换成了 [REDACTED]"，并钉一个挤得进 200 字窗口的**前缀**也不出现。
+        assert "[REDACTED]" in logged, "长串必须被脱敏替换，而不是碰巧被截断切掉"
         assert leaked_b64[:60] not in logged, "前缀也不得出现（截断挡不住 60 字）"
 
     def test_missing_vision_model_is_not_retried(self):

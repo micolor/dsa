@@ -142,10 +142,12 @@ def _resolve_image_message(request: ChatRequest) -> str:
             503, "vision_not_configured", "未配置可用的视觉模型，请在设置页配置后重试"
         ) from exc
     except ImageContextError as exc:
-        # 上游异常原文只由 build_image_context 打一条**脱敏**日志（litellm 的报错可能带上
-        # api_base、模型名，某些 provider 还会在错误体里回显请求内容含 base64 图片本身；
-        # 设计 §2 的"不落盘"承诺覆盖日志）。这一层不再重复打原文，只记"这次失败被映射成
-        # 哪个固定错误码"——否则同一次失败会留下两行几乎一样的 WARNING。
+        # 上游异常原文只由 build_image_context 打一条**脱敏**日志。脱敏器抹掉的是 provider
+        # 在错误体里**回显的请求内容**——那里面常常整段带着 base64 图片本身，而设计 §2 的
+        # "不落盘"承诺覆盖日志；而异常类型、状态码、主机名、api_base、模型名是**刻意保留**
+        # 的诊断信息（排查失败要看它们，测试也钉着 api_base 仍在日志里）。这一层不再重复打
+        # 原文，只记"这次失败被映射成哪个固定错误码"——否则同一次失败会留下两行几乎一样的
+        # WARNING。
         # 另外，上游文本也绝不能进 body：超时类文本会被前端 error.ts 的关键词分类器判成
         # "连接上游服务超时"，把用户引向网络/代理设置——而他的图根本没被读到。
         logger.warning("chat image request rejected: 503 image_unreadable")

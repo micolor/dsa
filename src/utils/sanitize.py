@@ -83,7 +83,7 @@ def redact_for_log(exc: BaseException, *, limit: int = 200) -> str:
     上传，比数据库更难回收——设计 §2 承诺「图片二进制不落盘」，这个承诺覆盖日志。诊断信息
     （异常类型、状态码、主机名）必须保留，否则这条日志就失去存在意义。
     """
-    text = _BASE64_RUN_RE.sub("<redacted>", str(exc))[:limit]
+    text = _BASE64_RUN_RE.sub(_REDACTED, str(exc))[:limit]
     return f"{type(exc).__name__}: {text}"
 
 

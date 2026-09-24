@@ -558,11 +558,13 @@ class TestStorage(unittest.TestCase):
         DatabaseManager.reset_instance()
 
     @staticmethod
-    def _injected_image_message(question: str, block: str) -> str:
-        """用**真正的**端点把一张假图解析成"将要落库的那段文本"。
+    def _injected_image_message(question: str, description: str) -> str:
+        """用**真正的**端点 + **真正的** `_render_block` 造出"将要落库的那段文本"。
 
-        不手抄字面量：要钉住的是"端点写进库的形状"与"storage 派生标题"之间的契约，
-        手抄的形状会漂移（哨兵改了、块尾多加一行，手抄的版本都看不出来）。
+        只 mock 视觉调用本身（它是网络调用），块体走 `_render_block`，不手抄字面量：
+        要钉住的是"端点写进库的形状"与"storage 派生标题"之间的契约。手抄的形状会漂移
+        ——把 `_render_block` 的哨兵改掉，手抄的夹具与 `storage._IMAGE_BLOCK_SENTINEL`
+        会一起"保持不变"，两条标题测试照样全绿，而线上标题又变回「【图片内容】…」。
         """
         import base64
         import io
@@ -570,9 +572,11 @@ class TestStorage(unittest.TestCase):
         from PIL import Image
 
         from api.v1.endpoints.agent import ChatRequest, _resolve_image_message
+        from src.services.chat_image_context import _render_block
 
         buf = io.BytesIO()
         Image.new("RGB", (2, 2), "white").save(buf, format="PNG")
+        block = _render_block(description, question)
         with patch("api.v1.endpoints.agent.build_image_context", return_value=block):
             return _resolve_image_message(
                 ChatRequest(
@@ -590,10 +594,7 @@ class TestStorage(unittest.TestCase):
         侧边栏标题会显示成「【图片内容】」+ 视觉模型对图的描述，而不是用户的问题。
         """
         question = "把图里这些加入自选"
-        injected = self._injected_image_message(
-            question,
-            "【图片内容】\n图中是自选股列表：600519 贵州茅台。\n【用户问题】" + question,
-        )
+        injected = self._injected_image_message(question, "图中是自选股列表：600519 贵州茅台。")
         self.assertIn("【图片内容】", injected)  # 先确认喂给 storage 的确实是注入后的文本
 
         DatabaseManager.reset_instance()
@@ -614,7 +615,7 @@ class TestStorage(unittest.TestCase):
         不是用户说的任何话，那正是这条派生规则要消掉的污染。剥掉哨兵后标题落回描述上。
         """
         description = "图中是自选股列表：600519 贵州茅台、000858 五粮液。"
-        injected = self._injected_image_message("", "【图片内容】\n" + description)
+        injected = self._injected_image_message("", description)
         self.assertTrue(injected.startswith("【图片内容】"))
         self.assertNotIn("【用户问题】", injected)  # 确认这轮真的没有标记可回退
 

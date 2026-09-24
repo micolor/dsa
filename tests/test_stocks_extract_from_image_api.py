@@ -55,8 +55,8 @@ def test_extract_failure_log_keeps_diagnostics_but_not_the_image(caplog):
     assert "secret.internal" in logged, "上游主机名是诊断信息，要留着"
     # 只断言"完整长串不在日志里"是空转：`redact_for_log` 还会把文本截到 200 字，光靠截断就能
     # 让 280 字的长串不出现（实测把脱敏换成 str(exc)[:limit] 这条断言照样绿）。所以要钉
-    # "被替换成了 <redacted>"，并钉一个挤得进 200 字窗口的**前缀**也不出现。
-    assert "<redacted>" in logged, "长串必须被脱敏替换，而不是碰巧被 200 字的截断切掉"
+    # "被替换成了 [REDACTED]"，并钉一个挤得进 200 字窗口的**前缀**也不出现。
+    assert "[REDACTED]" in logged, "长串必须被脱敏替换，而不是碰巧被 200 字的截断切掉"
     assert b64[:60] not in logged, "前缀也不得出现（截断挡不住 60 字）"
     assert all(record.exc_info is None for record in caplog.records), (
         "exc_info 会把原始异常链原样再打一遍，把刚抹掉的长串从后门带回来"

@@ -128,7 +128,7 @@ def test_upstream_text_never_reaches_the_error_message(caplog):
     # 脱掉的是外泄，不是诊断：原文（脱敏后）仍留在日志里。
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert caplog.records, "失败必须留下一条日志，否则这条测试是空转"
-    assert "<redacted>" in logged
+    assert "[REDACTED]" in logged
     assert b64[:40] not in logged
     assert "secret.internal" in logged
     assert "api_base=https://internal.example/v1" in logged
@@ -137,12 +137,12 @@ def test_upstream_text_never_reaches_the_error_message(caplog):
 def test_log_sanitizer_redacts_base64_and_truncates():
     exc = ValueError("bad request: " + "A" * 500 + " end")
     out = redact_for_log(exc)
-    assert "<redacted>" in out
+    assert "[REDACTED]" in out
     assert "A" * 40 not in out          # 长串已被抹掉
     assert len(out) < 260               # 已裁剪
     assert out.startswith("ValueError: ")  # 保留类型，便于诊断
 
-    # 裁剪必须单独钉住：上面那个输入会被"抹掉长串"顺带缩短（500 个 A → <redacted>），
+    # 裁剪必须单独钉住：上面那个输入会被"抹掉长串"顺带缩短（500 个 A → [REDACTED]），
     # 所以删掉 [:limit] 它照样短、长度断言照样绿。没有 base64 的超长报错（比如一整页
     # HTML 错误）才是 limit 真正要挡的情况。
     plain = redact_for_log(ValueError("word " * 100))
@@ -173,4 +173,4 @@ def test_image_failure_log_never_carries_the_image_content(caplog):
     assert caplog.records, "失败必须留下一条日志，否则这条测试是空转"
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert b64[:40] not in logged
-    assert "<redacted>" in logged
+    assert "[REDACTED]" in logged

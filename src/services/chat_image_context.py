@@ -13,7 +13,7 @@ import logging
 from typing import Optional
 
 from src.services.image_stock_extractor import (
-    VisionNotConfiguredError as _VisionNotConfiguredError,
+    VisionNotConfiguredError as ExtractorVisionNotConfigured,
     _call_litellm_vision_with_prompt,
 )
 from src.utils.sanitize import redact_for_log
@@ -31,6 +31,11 @@ class VisionNotConfiguredError(ImageContextError):
     与其它 ``ImageContextError`` 分开，是因为对用户的建议完全不同：调用失败时"稍后重试
     或换一张图"是对的，而模型压根没配时重试与换图**永远**不会成功，只能去设置页配置。
     端点为这两类映射到各自固定的文案（见设计 §8 的失败矩阵）。
+
+    名字与 `image_stock_extractor.VisionNotConfiguredError` 撞了：那个是**原因**（由视觉
+    调用自己抛，基类 ``ValueError``，为了兼容既有捕获点），这个是**映射结果**（基类
+    ``ImageContextError``，端点捕获的就是它）。本模块在 isinstance 处一律用
+    ``ExtractorVisionNotConfigured`` 指代前者，免得读代码时分不清是谁抛的。
     """
 
 
@@ -67,7 +72,7 @@ def build_image_context(image_b64: str, mime_type: str, question: str = "") -> s
     except Exception as exc:  # noqa: BLE001 - 统一转成可读错误给用户
         # 这一层同样要脱敏：异常原文里可能回显着 base64 图片，而日志是要落盘的。
         logger.warning("chat image context failed: %s", redact_for_log(exc))
-        if isinstance(exc, _VisionNotConfiguredError):
+        if isinstance(exc, ExtractorVisionNotConfigured):
             # "没配视觉模型"是可行动的原因，必须原样传成子类让端点换一套文案；
             # 这里用固定措辞，不把上游文本带进异常消息。
             raise VisionNotConfiguredError("图片未能读取：未配置可用的视觉模型") from exc
@@ -79,6 +84,9 @@ def build_image_context(image_b64: str, mime_type: str, question: str = "") -> s
 
     text = (raw or "").strip()
     if not text:
+        # 与上面通用失败分支同一条策略：对外消息固定成"图片未能读取"，**为什么**空
+        # （模型返回空 / 调用失败）只进日志——这句消息会经过各层消费者，细节留在日志里
+        # 才能既让用户看到一致的文案，又不把上游/provider 信息带出去。
         logger.warning("chat image context returned empty content")
-        raise ImageContextError("图片未能读取：视觉模型没有返回可用内容")
+        raise ImageContextError("图片未能读取")
     return _render_block(text, question)
