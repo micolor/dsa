@@ -2906,4 +2906,70 @@ describe('chat composer image input', () => {
 
     expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
   });
+
+  it('localizes the composer image affordances and the image toasts', async () => {
+    window.localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, 'en');
+
+    render(
+      <UiLanguageProvider>
+        <MemoryRouter initialEntries={['/chat']}>
+          <ChatPage />
+        </MemoryRouter>
+      </UiLanguageProvider>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+
+    expect(await screen.findByAltText('Image to send')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove image' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add image' })).toBeInTheDocument();
+
+    // 上限跟着 CHAT_IMAGE_MAX_BYTES 走：改常量就会改这句话。
+    const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [big], items: [], types: ['Files'] },
+    });
+
+    expect(await screen.findByText('Image too large (max 2MB). Compress it and try again.')).toBeInTheDocument();
+  });
+
+  it('clears the pending-image chip once the send is accepted', async () => {
+    // 把流挂在 accepted 之后：chip 是在「流还没结束」时就被清掉的，还是等 await startStream
+    // 返回才清的，只有这个形状能区分。
+    const gate = createDeferred<void>();
+    let capturedMeta: { onAccepted?: () => void } | undefined;
+    mockStartStream.mockImplementation(async (_payload, meta) => {
+      capturedMeta = meta;
+      await gate.promise;
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [file], items: [], types: ['Files'] },
+    });
+    await screen.findByAltText('待发送的图片');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '这是什么' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    // 请求在飞、还没被接受：这张图确实还没发出去，chip 必须还在。
+    expect(screen.getByAltText('待发送的图片')).toBeInTheDocument();
+
+    act(() => { capturedMeta?.onAccepted?.(); });
+
+    // accepted 即消息气泡已经带着这张图提交了，composer 里再留一个缩略图会被读成「还排着队」。
+    expect(screen.queryByAltText('待发送的图片')).not.toBeInTheDocument();
+
+    gate.resolve();
+    await act(async () => {});
+  });
 });

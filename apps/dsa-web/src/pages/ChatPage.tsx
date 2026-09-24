@@ -891,6 +891,9 @@ const ChatPage: React.FC = () => {
             setActiveStockCode(nextActiveStockContext.stock_code);
           }
           setInput('');
+          // chip 只代表「还没发出去的图」。这一轮已被后端接受（消息气泡里也已经带着这张图），
+          // 再留一个缩略图在 composer 里会被读成「还排着队」，所以和清空输入框一起清掉。
+          setPendingImage(null);
           setMobileSkillPickerOpen(false);
           requestScrollToBottom('smooth');
         },
@@ -926,11 +929,11 @@ const ChatPage: React.FC = () => {
   // 图片只在这一层预览、暂存在待发送状态里；随 payload 发出去是发送路径的事。
   const handleImageFile = useCallback((file: File, ignoredCount = 0) => {
     if (!CHAT_IMAGE_MIME.includes(file.type)) {
-      showSendFeedback({ type: 'error', message: `不支持的图片类型：${file.type || '(未知)'}；支持 jpg/png/webp/gif` }, 4000);
+      showSendFeedback({ type: 'error', message: t('chat.imageTypeUnsupported', { type: file.type || '(未知)' }) }, 4000);
       return;
     }
     if (file.size > CHAT_IMAGE_MAX_BYTES) {
-      showSendFeedback({ type: 'error', message: `图片过大（上限 ${CHAT_IMAGE_MAX_BYTES / 1024 / 1024}MB），请压缩后再试` }, 4000);
+      showSendFeedback({ type: 'error', message: t('chat.imageTooLarge', { limit: CHAT_IMAGE_MAX_BYTES / 1024 / 1024 }) }, 4000);
       return;
     }
     const reader = new FileReader();
@@ -942,13 +945,13 @@ const ChatPage: React.FC = () => {
       // 每轮只带 1 张，所以「替换」和「多选丢弃」都得说一声，不能静默。同一 tick 里
       // 只有最后一条提示会留下，因此多选丢弃优先——它是更需要被解释的那个。
       if (ignoredCount > 0) {
-        showSendFeedback({ type: 'error', title: '部分图片未加入', message: `每轮只带 1 张图片，已忽略其余 ${ignoredCount} 张` }, 4000);
+        showSendFeedback({ type: 'error', title: t('chat.someImagesIgnoredTitle'), message: t('chat.someImagesIgnoredMessage', { count: ignoredCount }) }, 4000);
       } else if (replacedOld) {
-        showSendFeedback({ type: 'success', title: '图片已替换', message: '每轮只带 1 张图片，已用新图替换上一张' }, 3000);
+        showSendFeedback({ type: 'success', title: t('chat.imageReplacedTitle'), message: t('chat.imageReplacedMessage') }, 3000);
       }
     };
     reader.readAsDataURL(file);
-  }, [pendingImage, showSendFeedback]);
+  }, [pendingImage, showSendFeedback, t]);
 
   // 拖放：与附件按钮、隐藏 input 同一套 gate —— 流式期间或 agent 不可用时不能换图，
   // 否则会挂上一个本轮发不出去、却静默作用于下一轮的 chip。取 files[0] 的写法与
@@ -1936,12 +1939,12 @@ const ChatPage: React.FC = () => {
                 <div className="relative w-fit">
                   <img
                     src={pendingImage.dataUrl}
-                    alt="待发送的图片"
+                    alt={t('chat.pendingImageAlt')}
                     className="h-16 w-16 rounded object-cover border border-white/10"
                   />
                   <button
                     type="button"
-                    aria-label="移除图片"
+                    aria-label={t('chat.removeImage')}
                     onClick={() => setPendingImage(null)}
                     className="chat-composer-icon-btn absolute -right-2 -top-2 rounded-full"
                   >
@@ -1959,7 +1962,7 @@ const ChatPage: React.FC = () => {
               <div className="flex items-end gap-3">
                 <button
                   type="button"
-                  aria-label="添加图片"
+                  aria-label={t('chat.addImage')}
                   onClick={() => chatImageInputRef.current?.click()}
                   disabled={loading || !agentAvailable}
                   className="chat-composer-icon-btn flex-shrink-0"
