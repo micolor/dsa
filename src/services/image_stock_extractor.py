@@ -83,7 +83,13 @@ VISION_API_TIMEOUT = 60  # seconds; avoid long blocks on network/API issues
 
 # litellm 的 provider 专属路由不会转发 image_url 内容块（实测：deepseek/ 下模型回
 # 「未收到图片」或 "[]"，而同一个 endpoint 用 openai/ 通用路由能正确读出图中代码）。
-# 只有**实测过**会剥图的路由才加进来——不要凭猜测往这里添。
+# 证据与逐层定位过程见 docs/superpowers/specs/2026-09-23-chat-image-paste-design.md §1.2
+# （Task 7 会把这条写进 CHANGELOG）。
+# 只有**实测过**会剥图的路由才加进来——不要凭猜测往这里添，也不要泛化成「非原生前缀
+# 一律改走 openai/」：azure/ 需要 api_version 与自己的认证头，bedrock/、ollama/、
+# openrouter/、openai/responses/… 与 Hermes 路由被改写后会**静默**改变 api_base 与
+# 认证语义；而 deepseek 作为 provider 本身是仓库文档记载的正常用法，被剥掉的只是
+# **多模态载荷**，不是 provider 前缀。
 _PROVIDER_ROUTES_WITHOUT_IMAGE_FORWARDING = frozenset({"deepseek"})
 
 # Magic bytes for server-side MIME validation (client Content-Type can be forged)
@@ -99,8 +105,9 @@ def _vision_wire_model(model: str, deployment_params: Optional[Dict[str, Any]] =
     """Return the litellm model string to use for a vision call.
 
     deployment 里显式写的 model 优先（与既有 wire_model 解析一致）；若该 provider 的
-    专属路由实测会剥掉图片，则改走 litellm 的通用 ``openai/`` 兼容路由（``api_base``
-    由调用方按 deployment 传入，因此仍打同一个 endpoint）。
+    专属路由实测会剥掉图片，则改走 litellm 的通用 ``openai/`` 兼容路由。改写只动
+    provider 前缀：有匹配 deployment 时 ``api_base`` 由该 deployment 传入，否则沿用
+    既有的 ``cfg.openai_base_url`` 兜底，两种情况都不会退化成静默空答案。
     """
     wire = str((deployment_params or {}).get("model") or model).strip()
     if "/" not in wire:
