@@ -892,10 +892,14 @@ git commit -m "feat(web): accept pasted or dropped images in the chat composer"
     fireEvent.click(screen.getByRole('button', { name: '发送' }));  // 可访问名来自 t('chat.send')，zh 段为「发送」
 
     await waitFor(() => expect(mockStartStream).toHaveBeenCalled());
-    const payload = mockStartStream.mock.calls[0][0];
+    // 用 .at(-1) 取最后一次调用：该文件既有用例就是这么写的（`:892`），
+    // 用 calls[0][0] 在"已发过消息"的用例里会取到旧调用。
+    const payload = mockStartStream.mock.calls.at(-1)?.[0];
     expect(payload.message).toBe('这张图怎么看？');
     expect(payload.image_mime).toBe('image/png');
     expect(typeof payload.image_base64).toBe('string');
+    // 图片走 meta（前端渲染用元数据，不上后端）
+    expect(mockStartStream.mock.calls.at(-1)?.[1]).toMatchObject({ imageDataUrl: expect.stringContaining('data:image') });
 
     // 用户那条消息里渲染原图
     expect(await screen.findByAltText('已发送的图片')).toBeInTheDocument();
@@ -1059,9 +1063,12 @@ git commit -m "docs: document chat image paste and the vision routing fix"
 - [ ] **Step 1: 后端回归（逐用例对基线，不看失败数）**
 
 ```bash
-uv run python -m pytest -m "not network" -q 2>&1 | grep -E "^FAILED" | sort > /tmp/img_after.txt
+# 显式用 OS 临时目录：bash 的 /tmp 与 Write 工具的 /tmp 解析到不同位置（本计划里已有多名实现者踩过），别用裸 /tmp。
+TMPD="$LOCALAPPDATA/Temp/dsa_img_verify"; mkdir -p "$TMPD"
+uv run python -m pytest -m "not network" -q 2>&1 | grep -E "^FAILED" | sort > "$TMPD/after.txt"
 ```
-对 `/tmp/img_after.txt` 里**每一条**失败用例，去本计划的基线提交上单跑（`git archive <base> | tar -x -C /tmp/dsa_base`），确认"基线也失败"。只有"HEAD 失败而基线通过"才是回归。
+对 `after.txt` 里**每一条**失败用例，去本计划的基线提交上单跑（`git archive <base> | tar -x -C "$TMPD/base"`），确认"基线也失败"。只有"HEAD 失败而基线通过"才是回归。
+**特别要确认**：`tests/test_chat_image_vision_routing.py::test_vision_call_actually_sees_the_image` 在全量跑里**不再失败**（它此前被收集期 `sys.modules["litellm"]` 注入打回 MagicMock，是 Part 0 修掉的；这条验证的是那个修复真的生效）。
 
 - [ ] **Step 2: 网络类测试**
 
@@ -1081,10 +1088,15 @@ Expected: 构建干净；测试失败集与基线一致（`HomePage.test.tsx` �
 
 1. 重启服务（`.venv/Scripts/python.exe main.py --serve-only`，会重建前端产物约 1 分钟）
 2. 浏览器打开问股，**粘贴一张 K 线或持仓截图**（也可用测试渲染的图）
-3. 发一句与图相关的问题 → 回答里应体现图的内容
-4. 若图中含代码 → 回答里列出代码；说「把这几只加入自选」→ **出现确认卡片** → 确认 → 自选页出现
-5. **清理**：把加进去的代码移出自选，核对自选恢复原状（自选是用户数据）
-6. 视觉失败路径：临时把 `VISION_MODEL` 指到一个不存在的模型 → 贴图应变 **503** 并给出「图片未能读取」类提示，**不是**给出一个看不到图的回答；验完还原。（注意本机存在一条会被 401 拒绝的 ModelScope 旁路渠道，报错文案可能是鉴权而非路由——仍是 503 + 明确文案，不影响本条验收意图。）
+3. **观察"正在读取图片…"**：粘贴带图发送后、回答开始前，界面应显示这一句（而不是一直显示"思考中"，也不应毫无变化）——视觉前置最多 60 秒，没有这句体感就是卡死
+4. 发一句与图相关的问题 → 回答里应体现图的内容
+5. 若图中含代码 → 回答里列出代码；说「把这几只加入自选」→ **出现确认卡片** → 确认 → 自选页出现
+6. **刷新页面，验证两件事**（这两条只在浏览器里能看到）：
+   - 用户那条消息里的注入块应**折叠**成一行（如「[图片] 已由 AI 读取」+ 可展开），**不是**把 `【图片内容】…【用户问题】…` 整段倒出来当用户的话
+   - 左侧会话标题应是**你问的那句话**，不是 `【图片内容】…` 或模型对图的描述
+7. **只贴图不打字**再来一轮：贴一张图直接发送 → 回答仍应基于图；刷新后标题也应干净（不是 `【图片内容】…`）
+8. **清理**：把加进去的代码移出自选，核对自选恢复原状（自选是用户数据）；删除这一轮产生的临时会话（如有）
+9. 视觉失败路径：临时把 `VISION_MODEL` 指到一个不存在的模型 → 贴图应变 **503** 并给出「图片未能读取」类提示，**不是**给出一个看不到图的回答；验完还原。（注意本机存在一条会被 401 拒绝的 ModelScope 旁路渠道，报错文案可能是鉴权而非路由——仍是 503 + 明确文案，不影响本条验收意图。）
 
 - [ ] **Step 5: 交付说明**
 
