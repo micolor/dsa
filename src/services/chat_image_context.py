@@ -71,7 +71,11 @@ def build_image_context(image_b64: str, mime_type: str, question: str = "") -> s
             # "没配视觉模型"是可行动的原因，必须原样传成子类让端点换一套文案；
             # 这里用固定措辞，不把上游文本带进异常消息。
             raise VisionNotConfiguredError("图片未能读取：未配置可用的视觉模型") from exc
-        raise ImageContextError(f"图片未能读取：{exc}") from exc
+        # 消息用固定文案：上游原文（可能含 api_base、模型名、provider 回显的 base64 图片）
+        # 只走上面那条脱敏日志，绝不进异常消息。端点会替换成自己的固定文案，所以原来
+        # 拼 `{exc}` 也"看不见"——但那是靠每个调用方都记得替换，将来新消费者（bot / CLI
+        # 直接调 build_image_context）就会把原文带到用户面前。
+        raise ImageContextError("图片未能读取") from exc
 
     text = (raw or "").strip()
     if not text:

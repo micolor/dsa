@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Shared test helper to keep litellm imports lightweight in unit tests."""
+"""Shared test helper: install a litellm stub only when litellm is unavailable.
+
+litellm 装不上的环境（裸解释器 / 精简 CI）里，靠它兜住 ``import litellm`` 的模块级
+调用点。**litellm 装得上时这里什么都不做**——调用方拿到的是真模块。
+
+不要为了"提速"再把真模块屏蔽掉：``src/services/image_stock_extractor`` 在 import 期把
+``sys.modules.get("litellm")`` 绑成模块全局，任何收集期注入（``sys.modules[...] =`` /
+``setdefault`` / "不在 sys.modules 就注入"）都会让
+``tests/test_chat_image_vision_routing.py::test_vision_call_actually_sees_the_image``
+拿到 MagicMock——那是"图真的被转发了吗"的唯一守卫，它一红，图片没被读取这类静默失效
+就没人看着了。
+"""
 
 import sys
 import types

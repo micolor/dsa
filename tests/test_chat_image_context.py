@@ -99,6 +99,41 @@ def test_ordinary_failures_stay_in_the_base_class():
     assert not isinstance(exc_info.value, ctx.VisionNotConfiguredError)
 
 
+def test_upstream_text_never_reaches_the_error_message(caplog):
+    """上游原文不进异常消息，这条钉在源头，不靠调用方替换文案。
+
+    端点的固定文案只保证"用户看不到"，不保证"消息里没有"：将来多一个直接调
+    ``build_image_context`` 的消费者（bot / CLI），消息就会原样带走 api_base、模型名、
+    provider 回显的 base64 图片。所以这一层自己就得干净。
+
+    喂进去的两类材料都放在上游消息的**最前面**（`secret.internal` 在第 0 个字符，
+    base64 从第 39 个字符开始，都落在 ``redact_for_log`` 的 200 字窗口内），这样"消息里
+    没有"就不可能是被裁剪顺手遮掉的——只有这一层真的没把它们写进消息才解释得通。
+    """
+    b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"y" * 300).decode()
+    upstream = f"secret.internal data:image/png;base64,{b64} (api_base=https://internal.example/v1)"
+
+    with mock.patch.object(
+        ctx, "_call_litellm_vision_with_prompt", side_effect=ValueError(upstream)
+    ):
+        with caplog.at_level(logging.WARNING, logger=ctx.__name__):
+            with pytest.raises(ctx.ImageContextError) as exc_info:
+                ctx.build_image_context(b64, "image/png", "问题")
+
+    message = str(exc_info.value)
+    assert "secret.internal" not in message
+    assert b64[:40] not in message
+    assert message == "图片未能读取"
+
+    # 脱掉的是外泄，不是诊断：原文（脱敏后）仍留在日志里。
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert caplog.records, "失败必须留下一条日志，否则这条测试是空转"
+    assert "<redacted>" in logged
+    assert b64[:40] not in logged
+    assert "secret.internal" in logged
+    assert "api_base=https://internal.example/v1" in logged
+
+
 def test_log_sanitizer_redacts_base64_and_truncates():
     exc = ValueError("bad request: " + "A" * 500 + " end")
     out = redact_for_log(exc)
