@@ -10,11 +10,16 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from src.services.image_stock_extractor import _call_litellm_vision_with_prompt
 
 logger = logging.getLogger(__name__)
+
+# 设计 §2 承诺"图片二进制不落盘"，这个承诺**覆盖日志**：某些 provider 会在错误体里
+# 回显请求内容（含 base64 图片），而日志会被轮转、打包、上传，比数据库更难回收。
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
 
 
 class ImageContextError(RuntimeError):
@@ -41,6 +46,16 @@ def _render_block(model_text: str, question: str) -> str:
     return "\n".join(lines)
 
 
+def _sanitize_for_log(exc: BaseException, *, limit: int = 200) -> str:
+    """把上游异常文本裁剪并抹掉疑似 base64 长串，避免图片内容落盘。
+
+    provider 可能在错误体里回显请求内容（含 base64 图片），日志会被轮转/打包/上传，
+    因此这里只保留诊断需要的部分：异常类型 + 裁剪后的文本 + 抹掉的长串。
+    """
+    text = _BASE64_RUN_RE.sub("<redacted>", str(exc))[:limit]
+    return f"{type(exc).__name__}: {text}"
+
+
 def build_image_context(image_b64: str, mime_type: str, question: str = "") -> str:
     """Ask the vision model about the image and return a text block for injection.
 
@@ -52,7 +67,8 @@ def build_image_context(image_b64: str, mime_type: str, question: str = "") -> s
     try:
         raw: Optional[str] = _call_litellm_vision_with_prompt(prompt, image_b64, mime_type)
     except Exception as exc:  # noqa: BLE001 - 统一转成可读错误给用户
-        logger.warning("chat image context failed: %s", exc)
+        # 这一层同样要脱敏：异常原文里可能回显着 base64 图片，而日志是要落盘的。
+        logger.warning("chat image context failed: %s", _sanitize_for_log(exc))
         raise ImageContextError(f"图片未能读取：{exc}") from exc
 
     text = (raw or "").strip()

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import logging
 from types import SimpleNamespace
 from unittest import mock
 
@@ -106,21 +107,32 @@ def test_vision_failure_surfaces_as_503_not_a_blind_answer():
     assert "图片未能读取" in str(e.value.detail)
 
 
-def test_vision_failure_does_not_echo_the_upstream_error():
+def test_vision_failure_does_not_echo_the_upstream_error(caplog):
     """上游异常原文只进日志：它可能带 api_base / 模型名，甚至回显 base64 图片本身；
     超时类文本还会被前端 error.ts 的关键词分类器判成"连接上游服务超时"，
     把用户引向网络与代理设置——而他的图根本没被读到。"""
     b64 = base64.b64encode(_png_bytes()).decode()
-    upstream = "litellm.Timeout: api_base=https://secret.internal/v1 model=deepseek-vl timeout"
+    echoed = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 200).decode()
+    upstream = (
+        "litellm.Timeout: api_base=https://secret.internal/v1 model=deepseek-vl timeout "
+        f"body={{'image_url': 'data:image/png;base64,{echoed}'}}"
+    )
     with mock.patch("api.v1.endpoints.agent.build_image_context",
                     side_effect=ImageContextError(upstream)):
-        with pytest.raises(HTTPException) as e:
-            _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
+        with caplog.at_level(logging.WARNING, logger="api.v1.endpoints.agent"):
+            with pytest.raises(HTTPException) as e:
+                _resolve_image_message(_req(message="x", image_base64=b64, image_mime="image/png"))
     body = str(e.value.detail)
     assert e.value.status_code == 503
     for leak in ("secret.internal", "deepseek-vl", "litellm", "timeout"):
         assert leak not in body
     assert e.value.detail["message"] == "图片未能读取，请稍后重试或换一张图"
+
+    # 日志这一侧同样不许落盘图片内容（设计 §2 的"不落盘"覆盖日志）。
+    assert caplog.records, "视觉失败必须留下一条诊断日志"
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert echoed[:40] not in logged
+    assert "<redacted>" in logged
 
 
 def test_invalid_base64_is_rejected():

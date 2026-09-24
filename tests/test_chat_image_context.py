@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import logging
 from unittest import mock
 
 import pytest
@@ -62,3 +64,45 @@ def test_underlying_failure_is_wrapped_in_image_context_error():
 def test_image_context_error_is_a_runtime_error():
     """基类是接口声明的一部分：调用方按 RuntimeError 兜底捕获。"""
     assert issubclass(ctx.ImageContextError, RuntimeError)
+
+
+def test_log_sanitizer_redacts_base64_and_truncates():
+    exc = ValueError("bad request: " + "A" * 500 + " end")
+    out = ctx._sanitize_for_log(exc)
+    assert "<redacted>" in out
+    assert "A" * 40 not in out          # 长串已被抹掉
+    assert len(out) < 260               # 已裁剪
+    assert out.startswith("ValueError: ")  # 保留类型，便于诊断
+
+    # 裁剪必须单独钉住：上面那个输入会被"抹掉长串"顺带缩短（500 个 A → <redacted>），
+    # 所以删掉 [:limit] 它照样短、长度断言照样绿。没有 base64 的超长报错（比如一整页
+    # HTML 错误）才是 limit 真正要挡的情况。
+    plain = ctx._sanitize_for_log(ValueError("word " * 100))
+    assert len(plain) < 260
+    assert plain.startswith("ValueError: ")
+
+
+def test_log_sanitizer_keeps_the_diagnostic_part():
+    """脱敏不能把诊断价值一起抹掉——"未配置视觉模型 / 401 / 超时"必须还看得出来。"""
+    out = ctx._sanitize_for_log(RuntimeError("未配置 Vision API: 401 unauthorized"))
+    assert "RuntimeError" in out
+    assert "未配置 Vision API" in out
+    assert "401" in out
+
+
+def test_image_failure_log_never_carries_the_image_content(caplog):
+    """把"日志里不出现图片内容"钉在行为上，而不是只信那个小函数。"""
+    b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 200).decode()
+    with mock.patch.object(
+        ctx,
+        "_call_litellm_vision_with_prompt",
+        side_effect=ValueError(f"bad request, body was: {{'image_url': 'data:image/png;base64,{b64}'}}"),
+    ):
+        with caplog.at_level(logging.WARNING, logger=ctx.__name__):
+            with pytest.raises(ctx.ImageContextError):
+                ctx.build_image_context(b64, "image/png", "问题")
+
+    assert caplog.records, "失败必须留下一条日志，否则这条测试是空转"
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert b64[:40] not in logged
+    assert "<redacted>" in logged

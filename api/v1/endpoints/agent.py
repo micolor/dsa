@@ -22,7 +22,7 @@ from api.v1.schemas.system_config import AgentBackendStatusResponse
 from src.config import get_config
 from src.services.agent_chat_session_service import AgentChatSessionService
 from src.services.agent_model_service import list_agent_model_deployments
-from src.services.chat_image_context import ImageContextError, build_image_context
+from src.services.chat_image_context import ImageContextError, _sanitize_for_log, build_image_context
 from src.services.image_stock_extractor import ALLOWED_MIME, _verify_image_magic_bytes
 
 # Tool name -> Chinese display name mapping
@@ -123,10 +123,11 @@ def _resolve_image_message(request: ChatRequest) -> str:
     try:
         block = build_image_context(request.image_base64, mime, request.message)
     except ImageContextError as exc:
-        # 上游异常原文只进日志：litellm 的报错可能带上 api_base、模型名，某些 provider 还会
-        # 在错误体里回显请求内容（含 base64 图片本身）；而且超时类文本会被前端 error.ts 的
-        # 关键词分类器判成"连接上游服务超时"，把用户引向网络/代理——他的图根本没被读到。
-        logger.warning("chat image context failed: %s", exc)
+        # 上游异常原文只进日志，且落盘前必须脱敏：litellm 的报错可能带上 api_base、模型名，
+        # 某些 provider 还会在错误体里回显请求内容（含 base64 图片本身）；而且超时类文本会被
+        # 前端 error.ts 的关键词分类器判成"连接上游服务超时"，把用户引向网络/代理——他的图
+        # 根本没被读到。设计 §2 的"不落盘"承诺覆盖日志。
+        logger.warning("chat image context failed: %s", _sanitize_for_log(exc))
         raise api_error(503, "image_unreadable", "图片未能读取，请稍后重试或换一张图") from exc
 
     # 注入块在前、用户原话在后：模型先读图，再对着问题回答。
