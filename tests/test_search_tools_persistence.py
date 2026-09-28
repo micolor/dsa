@@ -35,6 +35,7 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         response = _response("贵州茅台 600519 latest news")
         service = SimpleNamespace(
             is_available=True,
+            is_stock_news_available=True,
             search_stock_news=MagicMock(return_value=response),
         )
         db = SimpleNamespace(save_news_intel=MagicMock(return_value=1))
@@ -58,6 +59,7 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         failed = _response("risk", success=False)
         service = SimpleNamespace(
             is_available=True,
+            is_stock_news_available=True,
             search_comprehensive_intel=MagicMock(
                 return_value={"latest_news": latest, "risk_check": failed}
             ),
@@ -84,6 +86,7 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         response = _response("贵州茅台 600519 latest news")
         service = SimpleNamespace(
             is_available=True,
+            is_stock_news_available=True,
             search_stock_news=MagicMock(return_value=response),
         )
         db = SimpleNamespace(save_news_intel=MagicMock(side_effect=RuntimeError("db locked")))
@@ -96,7 +99,7 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         self.assertEqual(result["results_count"], 1)
 
     def test_unavailable_or_failed_search_does_not_persist(self) -> None:
-        unavailable = SimpleNamespace(is_available=False)
+        unavailable = SimpleNamespace(is_available=False, is_stock_news_available=False)
         db = SimpleNamespace(save_news_intel=MagicMock())
         with patch("src.agent.tools.search_tools._get_search_service", return_value=unavailable), \
              patch("src.agent.tools.search_tools._get_db", return_value=db):
@@ -107,6 +110,7 @@ class SearchToolsPersistenceTest(unittest.TestCase):
 
         failed = SimpleNamespace(
             is_available=True,
+            is_stock_news_available=True,
             search_stock_news=MagicMock(return_value=_response("latest", success=False)),
         )
         with patch("src.agent.tools.search_tools._get_search_service", return_value=failed), \

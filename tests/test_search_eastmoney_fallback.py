@@ -193,5 +193,57 @@ class TestSearchStockNewsFallbackIntegration(unittest.TestCase):
         self.assertTrue(eastmoney_provider)
 
 
+class TestKeylessFallbackCapability(unittest.TestCase):
+    """无任何 Key 引擎时，东财免费兜底应被认作可用的个股新闻能力。
+
+    背景：公网 SearXNG 实例已集体失效，但它作为占位 provider 让
+    ``_providers`` 非空，从而间接打开了兜底入口。一旦没有 Key 引擎，
+    个股新闻链路不应随之整体失效。
+    """
+
+    def _keyless_service(self):
+        return SearchService(searxng_public_instances_enabled=False)
+
+    def test_is_available_contract_unchanged(self):
+        """``is_available`` 仍只表示「有 Key 引擎可用」，不被兜底放宽。"""
+        self.assertFalse(self._keyless_service().is_available)
+
+    def test_stock_news_capability_is_true_without_key_engines(self):
+        self.assertTrue(self._keyless_service().is_stock_news_available)
+
+    @patch("src.search_service.requests.get")
+    def test_stock_news_uses_fallback_without_any_provider(self, mock_get):
+        mock_get.return_value = _mock_requests_get(_eastmoney_jsonp())
+
+        response = self._keyless_service().search_stock_news("600519", "贵州茅台", max_results=5)
+
+        self.assertTrue(response.success)
+        self.assertTrue(response.results)
+        self.assertEqual(response.provider, "东方财富")
+
+    @patch("src.search_service.requests.get")
+    def test_comprehensive_intel_uses_fallback_without_any_provider(self, mock_get):
+        mock_get.return_value = _mock_requests_get(_eastmoney_jsonp(title="兴业银行最新消息"))
+
+        intel = self._keyless_service().search_comprehensive_intel(
+            "601166", "兴业银行", max_searches=2
+        )
+
+        self.assertTrue(intel, "无 Key 引擎时仍应产出情报维度")
+        hits = [
+            response for response in intel.values()
+            if response is not None and response.success and response.results
+        ]
+        self.assertTrue(hits, "至少一个维度应包含东财免费资讯结果")
+
+    def test_topic_news_still_reports_missing_capability(self):
+        """题材检索没有兜底，必须继续明确报错，不能被放宽成静默空结果。"""
+        response = self._keyless_service().search_topic_news("白酒行业")
+
+        self.assertFalse(response.success)
+        self.assertEqual(response.results, [])
+        self.assertTrue(response.error_message)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -85,8 +85,8 @@ def _handle_search_stock_news(stock_code: str, stock_name: str) -> dict:
     """Search latest news for a stock."""
     service = _get_search_service()
 
-    if not service.is_available:
-        return {"error": "No search engine available (no API keys configured)"}
+    if not service.is_stock_news_available:
+        return {"error": "No stock news source available (no search API keys and free fallback disabled)"}
 
     response = service.search_stock_news(stock_code, stock_name, max_results=5)
 
@@ -153,8 +153,8 @@ def _handle_search_comprehensive_intel(stock_code: str, stock_name: str) -> dict
     """Multi-dimensional intelligence search."""
     service = _get_search_service()
 
-    if not service.is_available:
-        return {"error": "No search engine available (no API keys configured)"}
+    if not service.is_stock_news_available:
+        return {"error": "No stock news source available (no search API keys and free fallback disabled)"}
 
     intel_results = service.search_comprehensive_intel(
         stock_code=stock_code,

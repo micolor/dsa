@@ -36,6 +36,7 @@ from tenacity import (
 
 from data_provider.us_index_mapping import is_us_index_code
 from src.config import (
+    EASTMONEY_FREE_FALLBACK_ENABLED,
     NEWS_STRATEGY_WINDOWS,
     normalize_news_strategy_profile,
     resolve_news_window_days,
@@ -2244,6 +2245,9 @@ class SearchService:
 
     # 东方财富免费搜索兜底（国内可达，无需 Key）
     _EASTMONEY_SEARCH_API_URL = "https://search-api-web.eastmoney.com/search/jsonp"
+    # 该兜底只服务个股新闻（需要 stock_code/stock_name），不覆盖题材/板块检索，
+    # 因此它只参与 is_stock_news_available，不参与 is_available。
+    _EASTMONEY_FREE_FALLBACK_ENABLED = EASTMONEY_FREE_FALLBACK_ENABLED
     _EASTMONEY_SEARCH_TIMEOUT_SECONDS = 8
     _EASTMONEY_UA = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -2491,7 +2495,13 @@ class SearchService:
             logger.info(f"已配置 Anspire Search 搜索，共 {len(anspire_keys)} 个 API Key")
             
         if not self._providers:
-            logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
+            if self._EASTMONEY_FREE_FALLBACK_ENABLED:
+                logger.warning(
+                    "未配置任何搜索 Key 引擎，个股新闻将使用东方财富免费兜底；"
+                    "题材/板块检索不可用"
+                )
+            else:
+                logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
 
         # In-memory search result cache: {cache_key: (timestamp, SearchResponse)}
         self._cache: Dict[str, Tuple[float, 'SearchResponse']] = {}
@@ -2679,6 +2689,15 @@ class SearchService:
     def is_available(self) -> bool:
         """检查是否有可用的搜索引擎"""
         return any(p.is_available for p in self._providers)
+
+    @property
+    def is_stock_news_available(self) -> bool:
+        """个股新闻检索是否可用：Key 引擎或无需 Key 的东财免费兜底。
+
+        与 ``is_available`` 分开维护：``is_available`` 保持「有 Key 引擎」的原契约，
+        题材/板块检索仍以它为准（东财兜底是 stock-specific，服务不了题材查询）。
+        """
+        return self.is_available or self._EASTMONEY_FREE_FALLBACK_ENABLED
 
     def _cache_key(self, query: str, max_results: int, days: int) -> str:
         """Build a cache key from query parameters."""
@@ -4632,7 +4651,7 @@ class SearchService:
             )
 
             available_providers = [p for p in self._providers if p.is_available]
-            if not available_providers:
+            if not available_providers and not self._EASTMONEY_FREE_FALLBACK_ENABLED:
                 break
 
             best_filtered: Optional[SearchResponse] = None
@@ -4787,10 +4806,12 @@ class SearchService:
             # 所有来源都无相关结果时，用东财免费兜底（整次情报搜索只兜底一次）。
             # 仅当没有任何来源返回原始结果时才兜底，与 search_stock_news 的东财兜底语义保持一致
             # （避免来源返回了原始结果但被时效过滤掉时误触网络兜底）。
+            # 无可用 provider 时（provider_attempted 始终为 False）同样允许兜底，
+            # 否则「未配置任何 Key 引擎」会让个股情报整条链路静默停产。
             if (
                 (best_filtered is None or not best_filtered.results)
                 and not fallback_used
-                and provider_attempted
+                and (provider_attempted or not available_providers)
                 and not had_raw_results
             ):
                 free_response = self._search_eastmoney_free(

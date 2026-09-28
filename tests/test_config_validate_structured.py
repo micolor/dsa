@@ -720,6 +720,23 @@ class TestValidateStructuredNotification:
         info = [i for i in issues if i.severity == "info"]
         assert not any("搜索引擎" in i.message and "未配置" in i.message for i in info)
 
+    def test_keyless_search_still_available_csv_info_mentions_fallback(self):
+        """无任何 Key 引擎且关闭公网实例时，提示应说明个股新闻仍有兜底。"""
+        cfg = _make_config(searxng_public_instances_enabled=False)
+        assert cfg.has_search_capability_enabled() is False
+        assert cfg.has_stock_news_capability_enabled() is True
+
+        info = [i for i in cfg.validate_structured() if i.severity == "info"]
+        search_issue = next(i for i in info if "搜索引擎" in i.message)
+        assert "东方财富" in search_issue.message
+        assert search_issue.field == "BOCHA_API_KEYS"
+
+    def test_stock_news_capability_follows_search_capability(self):
+        """配置了 Key 引擎时两者同为真，个股新闻能力不应更窄。"""
+        cfg = _make_config(searxng_public_instances_enabled=False, bocha_api_keys=["k"])
+        assert cfg.has_search_capability_enabled() is True
+        assert cfg.has_stock_news_capability_enabled() is True
+
 
 # ---------------------------------------------------------------------------
 # Deprecated field migration hints

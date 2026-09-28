@@ -315,6 +315,8 @@ class StockAnalysisPipeline:
             logger.warning("搜索服务未启用（初始化失败或依赖缺失）")
         elif self.search_service.is_available:
             logger.info("搜索服务已启用")
+        elif self.search_service.is_stock_news_available:
+            logger.info("未配置搜索 Key 引擎，个股新闻将使用东方财富免费兜底")
         else:
             logger.warning("搜索服务未启用（未配置搜索能力）")
 
@@ -665,7 +667,7 @@ class StockAnalysisPipeline:
             )
             news_result_count: Optional[int] = None
             self._emit_progress(46, f"{stock_name}：正在检索新闻与舆情")
-            if self.search_service is not None and self.search_service.is_available:
+            if self.search_service is not None and self.search_service.is_stock_news_available:
                 logger.info(f"{stock_name}({code}) 开始多维度情报搜索...")
 
                 # 使用多维度搜索（最多5次搜索）
@@ -1706,7 +1708,7 @@ class StockAnalysisPipeline:
 
             # 保存新闻情报到数据库（Agent 工具结果仅用于 LLM 上下文，未持久化，Fixes #396）
             # 使用 search_stock_news（与 Agent 工具调用逻辑一致），仅 1 次 API 调用，无额外延迟
-            if self.search_service is not None and self.search_service.is_available:
+            if self.search_service is not None and self.search_service.is_stock_news_available:
                 try:
                     news_response = self.search_service.search_stock_news(
                         stock_code=code,

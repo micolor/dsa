@@ -377,6 +377,7 @@ daily_stock_analysis/
 | `BIAS_THRESHOLD` | 乖离率阈值（%），超过提示不追高；强势趋势股自动放宽到 1.5 倍 | 默认 `5.0` |
 
 > 行为说明：搜索服务与社交舆情服务为可选增强链路。任一服务初始化失败时，系统会记录 warning 并降级为跳过该服务，仅影响对应环节，不会阻塞技术面主链路和主任务流。
+> 无 Key 兜底：个股新闻检索（`search_stock_news`）与个股情报搜索（`search_comprehensive_intel`）在**没有任何搜索 Key**时仍会走东方财富免费检索兜底，无需配置上表中的任何变量，大盘复盘的新闻检索同样受益。该兜底是 stock-specific 的，**题材/板块检索（`search_topic_news`）不在覆盖范围内**，需要配置任一 Key 引擎或 SearXNG。因此可用性分为两层：`has_search_capability_enabled`（是否配置了搜索引擎，题材检索与配置诊断看它）与 `has_stock_news_capability_enabled`（个股新闻是否可用，含兜底；大盘复盘据此决定是否构造搜索服务）。未配置 Key 引擎时启动日志会提示「个股新闻将使用东方财富免费兜底」，`validate_structured()` 的搜索提示也会据此说明题材检索缺失而非整条链路不可用。
 
 ### 新闻检索可解释排序（Issue #1356）
 

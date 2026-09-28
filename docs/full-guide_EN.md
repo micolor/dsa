@@ -337,6 +337,7 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `SEARXNG_PUBLIC_INSTANCES_ENABLED` | Auto-discover public SearXNG instances from `searx.space` when `SEARXNG_BASE_URLS` is empty (default `true`) | Optional |
 
 > Behavior note: Search and social sentiment are optional enhancement services. If either service fails to initialize, the system logs a warning and degrades gracefully by skipping that stage without blocking the core analysis flow.
+> Keyless fallback: stock news retrieval (`search_stock_news`) and comprehensive intel search (`search_comprehensive_intel`) fall back to Eastmoney's free search with **no search key configured at all**; no variable in the table above is required, and market review news benefits from the same path. That fallback is stock-specific, so **topic/sector retrieval (`search_topic_news`) is not covered** and still needs a keyed engine or SearXNG. Availability therefore has two tiers: `has_search_capability_enabled` (a search engine is configured; topic retrieval and the config diagnostic use it) and `has_stock_news_capability_enabled` (stock news is available, including the fallback; market review uses it to decide whether to build a search service). Without any keyed engine the startup log reports that stock news will use the Eastmoney free fallback, and the `validate_structured()` search notice says topic retrieval is missing instead of claiming the whole chain is down.
 
 ### Futu Portfolio Import Configuration
 

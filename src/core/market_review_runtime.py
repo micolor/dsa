@@ -90,7 +90,11 @@ def build_market_review_runtime(
     notifier = NotificationService(source_message=source_message)
 
     search_service = None
-    has_search_capability = getattr(config, "has_search_capability_enabled", None)
+    # 大盘复盘走 search_stock_news，东财免费兜底能服务它，因此优先按「个股新闻能力」判断，
+    # 否则未配置 Key 引擎时连 SearchService 都不会构造，兜底路径永远拿不到入口。
+    has_search_capability = getattr(config, "has_stock_news_capability_enabled", None) or getattr(
+        config, "has_search_capability_enabled", None
+    )
     if callable(has_search_capability) and has_search_capability():
         search_service = SearchService(
             bocha_keys=getattr(config, "bocha_api_keys", None),

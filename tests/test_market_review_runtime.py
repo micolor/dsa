@@ -204,6 +204,26 @@ class TestMarketReviewRuntimeCompatibility(unittest.TestCase):
         self.assertEqual(analyzer.available_calls, 1)
         search_cls.assert_not_called()
 
+    def test_build_market_review_runtime_builds_search_service_for_keyless_fallback(self) -> None:
+        """仅有个股新闻能力（东财免费兜底）时也要构造 SearchService。
+
+        大盘复盘走的是 search_stock_news，兜底能服务它；若这里继续只认
+        has_search_capability_enabled，未配置 Key 引擎的用户会连入口都没有。
+        """
+        config = self._base_config()
+        config.has_search_capability_enabled = lambda: False
+        config.has_stock_news_capability_enabled = lambda: True
+        config.bocha_api_keys = None
+        config.searxng_public_instances_enabled = False
+
+        with patch("src.analyzer.GeminiAnalyzer"), \
+             patch("src.notification.NotificationService"), \
+             patch("src.search_service.SearchService") as search_cls:
+            _, _, runtime_search = build_market_review_runtime(config)
+
+        search_cls.assert_called_once()
+        self.assertIsNotNone(runtime_search)
+
     def test_has_configured_llm_runtime_returns_false_without_any_model_source(self) -> None:
         config = self._base_config()
         self.assertFalse(has_configured_llm_runtime(config))

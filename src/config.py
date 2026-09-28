@@ -127,6 +127,11 @@ TICKFLOW_KLINE_ADJUST_VALUES = {"none", "forward", "backward", "forward_additive
 # These are compatibility examples; actual availability should be validated by Anspire console/model entitlement.
 ANSPIRE_LLM_BASE_URL_DEFAULT = "https://open-gateway.anspire.cn/v6"
 ANSPIRE_LLM_MODEL_DEFAULT = "Doubao-Seed-2.0-lite"
+# 东方财富免费搜索兜底：个股新闻检索无需任何 Key（国内可达，无配额门槛）。
+# 它是 stock-specific 的，服务不了题材/板块检索，因此只计入「个股新闻能力」，
+# 不并入 has_search_capability_enabled（后者仍表示「配置了搜索引擎」，
+# 供题材检索与配置诊断使用）。搜索侧的单一真源在 SearchService，本常量由其读取。
+EASTMONEY_FREE_FALLBACK_ENABLED = True
 
 
 def _has_ntfy_topic_endpoint(value: Optional[str]) -> bool:
@@ -3054,6 +3059,16 @@ class Config:
             or self.has_searxng_enabled()
         )
 
+    def has_stock_news_capability_enabled(self) -> bool:
+        """Whether stock news retrieval is possible, including the keyless fallback.
+
+        与 ``has_search_capability_enabled`` 分开维护，语义对齐
+        ``SearchService.is_stock_news_available``：大盘复盘走的是
+        ``search_stock_news``，东财免费兜底能服务它，所以只要该方法为真就值得构造
+        ``SearchService``；题材/板块检索仍以 ``has_search_capability_enabled`` 为准。
+        """
+        return self.has_search_capability_enabled() or EASTMONEY_FREE_FALLBACK_ENABLED
+
     def is_agent_available(self) -> bool:
         """Check whether agent capabilities are usable.
 
@@ -3478,9 +3493,18 @@ class Config:
 
         # --- Search engine (informational only) ---
         if not self.has_search_capability_enabled():
+            # 未配置 Key 引擎时个股新闻仍可由东财免费兜底，只有题材/板块检索会缺失，
+            # 因此按实际能力区分提示，避免让用户以为整条新闻链路不可用。
+            if self.has_stock_news_capability_enabled():
+                detail = "题材/板块检索不可用，个股新闻将使用东方财富免费兜底"
+            else:
+                detail = "新闻搜索功能将不可用"
             issues.append(ConfigIssue(
                 severity="info",
-                message="未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG)，新闻搜索功能将不可用",
+                message=(
+                    "未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG)，"
+                    f"{detail}"
+                ),
                 field="BOCHA_API_KEYS",
             ))
 
