@@ -100,9 +100,14 @@
 | Toolbar / StickyActionBar | 20px | 0.55 |
 | Toast | 24px | 0.70 |
 
+> 2026-09-26 更新：上表是当时的示例值。暗色最终没有按「深色底 + 高 alpha」实现，而是改成在内容上盖很淡的白色薄纱（`--glass-bg` 0.10/0.06、`--glass-bg-strong` 0.14/0.09、`--glass-bg-floating` 0.19/0.13），
+> 亮度由背后内容决定，blur 28px（浮层 40px）/ saturate 1.8。当前真源是 `apps/dsa-web/src/index.css` 的 `.dark` 令牌块，本表仅作历史记录。
+
 ### 4.2 改造清单
 
 - **改造为玻璃**：`Shell` 侧边栏、顶部栏、`Card`/`SectionCard`/`StatCard`、`Dialog`/`Drawer`/`ConfirmDialog`、`Toolbar`/`StickyActionBar`、`ToastViewport`、首页面板与历史栏
+
+> 2026-09-26 更新：顶部栏不再复用 `.glass-surface`，改为自有材质 `.app-header`——通栏横跨整屏，`.glass-surface` 的 24px 受光带会占掉 38px 通栏的 63% 高度并形成纵向渐变，`saturate(1.8)` 也会把背后光斑放大成彩带。现只留 `inset 0 1px 0` 顶边高光，`blur 44px / saturate 1.2`，投影常驻（与改前一致）。形态仍是 `sticky top-0` 全宽通栏（导航钉顶、内容滚动），滚动反馈是「下边框出现 + 投影加码 `0 8px 24px`→`0 16px 38px` + 一层 `::after` 薄纱把材质压实」，200ms 过渡，回到顶部复原。暗色的底衬比浅色压得平得多（`0.15/0.145`，浅色仍是 `0.72/0.62`）：浅色底本来就近白，落差看不出来；暗色下同一落差会让通栏自身亮度从 72 掉到 56，左侧半透明的 logo 底板下沿因此糊进通栏、读作「logo 偏上」。暗色顶边高光也从 0.14 收到 0.06（滚动态 0.12）——那 1px 在暗色下是 26 的亮度台阶，浅色下等于看不见，只有暗色会读成「顶上压了东西」。详见 `apps/dsa-web/src/index.css` 的 `.app-header` 与 `docs/CHANGELOG.md`。
 - **保持可读（不叠 blur）**：表格、图表、Markdown 正文、Input、Badge
 - **交互态**：hover 提高 alpha/blur 并升高高光；选中态沿用现有 primary 高光边框语义
 

@@ -554,7 +554,7 @@
           "Agent"
         ],
         "summary": "Cancel Agent Chat Stream",
-        "description": "Signal cancellation while the original Codex SSE remains open.",
+        "description": "Signal cancellation while the original SSE remains open.\n\nApplies to both backends: the Codex turn interrupt and the LiteLLM run\nloop's cancel event are signalled through the same registry entry.",
         "operationId": "cancel_agent_chat_stream_api_v1_agent_chat_stream__request_id__cancel_post",
         "parameters": [
           {

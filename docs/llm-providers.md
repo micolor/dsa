@@ -37,7 +37,7 @@ Phase 6a Tool Surface 是 AgentBackend 的唯一内部工具面：统一 DSA 工
 - 问股历史的 LLM 压缩仅用于「默认模型」。Codex 始终使用最近 20 条用户可见对话，不会调用 `AGENT_LITELLM_MODEL` 生成摘要；用户已保存的压缩配置会保留，切回默认模型后继续生效。
 - 当前只支持 single-agent Chat，不支持 Codex Multi Agent / Codex Deep Research；现有 LiteLLM Multi Agent 和 Deep Research 不受影响。
 - cheap status 不发模型请求，只检查生产路径依赖的 App Server schema 能力且不绑定武断最低版本。仓库中的 `scripts/codex_app_server_gate_a.py` 仅用于维护者可行性验收，不是设置页按钮或生产 API；普通用户的第一个真实问题就是首次真实执行。
-- 用户停止 Codex 问股时，Web 会先显示“正在停止”；后端中断 Codex turn，并终止、回收本轮独立运行的工具进程。只有 Codex 与工具进程都已退出，原 SSE 请求才返回最终“已停止”。超时和客户端断开遵守相同的清理边界，不会把仍在后台运行的任务当成已经结束。默认 LiteLLM Agent 行为保持不变。
+- 用户停止 Codex 问股时，Web 会先显示“正在停止”；后端中断 Codex turn，并终止、回收本轮独立运行的工具进程。只有 Codex 与工具进程都已退出，原 SSE 请求才返回最终“已停止”。超时和客户端断开遵守相同的清理边界，不会把仍在后台运行的任务当成已经结束。默认 LiteLLM Agent 用同一个停止入口与状态文案，但走协作式中断（取消事件在 step 边界与流式 chunk 之间生效，不回收独立进程）；single 与 multi 两条链路同样生效，多智能体编排器把同一事件透传给每个阶段与并行技能批。等待是这个契约的一部分：工具调用期间页面停在“正在停止…”并给出一条中性说明（仅默认 LiteLLM 显示），本地等待窗口取在服务端整轮预算之外，因此不会把正常等待显示成停止失败。
 - 基础状态只表达本机“可以尝试”，不检查登录、模型或真实工具闭环，也不缓存成功证据。正式 Chat 由服务端选择实际 backend；上下文准备和用户消息保存完成后发出唯一 `accepted` 事件，再启动模型。Web 在 `accepted` 前保留输入、股票范围、追问上下文和技能选择，并以 `accepted.backend` 决定停止方式。Codex 的累计输出、事件和工具调用均受整轮预算约束，工具调用数沿用 `AGENT_MAX_STEPS`。
 - Codex 不是离线模型；股票代码、新闻、持仓上下文及脱敏工具结果可能由 Codex 自身配置的服务处理。
 

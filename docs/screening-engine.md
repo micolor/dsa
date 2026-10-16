@@ -79,8 +79,9 @@ SCREENING_EASTMONEY_JITTER_SEC=0.3
 - 日 K 优先通过请求级 fetcher 复用 DSA 历史行情链路，无结果时再走筛选引擎的数据源降级；该桥接不会替换进程级函数，因此重叠选股请求之间不会共享 wrapper 或阻塞彼此。
 - LLM 重排前只补充有限候选上下文，最终候选再补行情、基本面、新闻和摘要，控制请求量。
 - 默认本地 `scorecard` 会覆盖完整短名单，保证所有可能进入近分轮换的候选使用同一最终评分口径；多个后置分析器串联时，每一步完成后都会按最新分数重排，因此后续 `dsa` 与 `external_http` 的 `POST_ANALYSIS_MAX_PICKS` 上限作用于当前真实前列。远程状态按实际提交候选记录，外部响应中的超限代码不会改写未提交候选；启用远程分析时轮换只会在已完成相同分析的候选之间发生。
-- `LLM_MAX_CANDIDATES` 同样封顶最终返回条数：进入 LLM 重排的候选数 `top_k = min(max(max_output, max_output * LLM_CANDIDATE_MULTIPLIER), LLM_MAX_CANDIDATES, 快照行数)`，而返回的 `picks` 直接由这批候选构建，之后只会被取子集或重排、不会再扩充。因此调用方请求的条数大于该上限时（默认上限 12、Web 默认请求 20），实际只会返回上限条数。这类「上限把候选压到低于请求条数」的情况以 `LLM candidate cap <top_k> < requested output <n>; ...` 写入 `degradation`，与下方远程后置分析使用同款措辞和同一判据（`<上限> < requested output`）；`degradation` 会并入 API 的 `warnings`，Web 把这两条渲染成「候选数量受…上限限制」提示。注意 `after_filter_count` 是上限生效前的候选池大小（语义为「硬过滤后」），不能用它区分「策略只产出这么多」和「只重排了这么多」。
+- `LLM_MAX_CANDIDATES` 同样封顶最终返回条数：进入 LLM 重排的候选数 `top_k = min(max(max_output, max_output * LLM_CANDIDATE_MULTIPLIER), LLM_MAX_CANDIDATES, 快照行数)`，而返回的 `picks` 直接由这批候选构建，之后只会被取子集或重排、不会再扩充。因此调用方请求的条数大于该上限时（默认上限 30），实际只会返回上限条数。这类「上限把候选压到低于请求条数」的情况以 `LLM candidate cap <top_k> < requested output <n>; ...` 写入 `degradation`，与下方远程后置分析使用同款措辞和同一判据（`<上限> < requested output`）；`degradation` 会并入 API 的 `warnings`，Web 把这两条渲染成「候选数量受…上限限制」提示。注意 `after_filter_count` 是上限生效前的候选池大小（语义为「硬过滤后」），不能用它区分「策略只产出这么多」和「只重排了这么多」。
 - 模型、渠道、base URL、额外 headers、fallback、timeout 和 token 上限在单次调用范围内注入，不改写用户配置；主模型即使 HTTP 调用成功，但返回空内容、非 JSON 或覆盖率不足，也会继续尝试已配置的备用模型。最终 JSON 必须在 `content` 块或 `output` 块中；`reasoning_content`（链式思考）被视为内部辅助，不作为最终结果。
+- `LLM_MAX_TOKENS` 必须与 `LLM_MAX_CANDIDATES` 同量级：输出契约要求每个候选约 13 个字段（实测 240-320 token），默认 30 个候选就需要 7k+ token，思维链模型的 reasoning token 也计入该上限，因此默认值为 8192。上限不足时 `finish_reason=length`，模型会在 JSON 写完之前被截断，表现为 `no_json_found` + 覆盖率 0；此类失败的原因记为 `truncated_response`，页面提示「模型输出被截断」。截断响应里已经写完的候选对象是闭合的，会被尽量挽回（`json_repaired:partial_array`）；紧随其后的重试会改为要求压缩输出（只写 `code`/`llm_score`/`reason`），而不是要求覆盖更多候选。
 - 热点榜单刷新与选股长流程可并行执行；列表默认不批量预取详情，用户选中具体题材时才加载该题材详情；显式刷新后若继续保留当前题材，Web 会同步绕过详情缓存重拉该题材，保证榜单与详情来自同次刷新。
 - 热点成分股并行获取东方财富与同花顺数据，并按固定数据源优先级合并，避免响应先后改变重复股票的字段：正数 `SCREENING_HOTSPOT_CALL_TIMEOUT_SEC` 作为默认 provider 整次调用的共享预算，板块列表、成分股以及引擎失败后的直接详情 fallback 都进入该预算；AkShare/东方财富的可终止子进程与同花顺 HTTP connect/read timeout 每一步只使用剩余时间，fallback 不会重新获得完整预算。直接详情 fallback 不再额外启动无法由该预算强制回收的实时行情预取，行情字段以已受控的成分股源结果为准。超时子进程会 terminate/kill 并回收；进程级并发槽限制活跃任务数量，方法返回前会等待已接纳的 worker 结束，不遗留后台线程。关闭整次调用预算时，各单源仍保留默认硬超时；单源失败不会阻止另一源和本地核心股回退。
 - “搜索最新消息”复用 DSA 原生搜索服务的 provider 优先级、SearXNG 公共实例能力、结果缓存与请求合并，同一缓存键只有 owner 可以启动供应商链；owner 未产出可缓存结果时，等待者重新竞争且未获得所有权的请求继续等待，但缓存等待、抢占和 provider 执行共用请求的绝对 deadline，不会在排队后重新获得完整超时。搜索只补充有链接的事件/催化，不从网页内容推断板块成分股；增强记录分别追加到展示路线和原始时间线，不覆盖已有 `timeline`。搜索由用户主动触发，摘要在本地确定性压缩，不调用 LLM；响应以 `available`、`no_results`、`unavailable` 区分有结果、有效空结果和超时/容量/供应商失败，Web 不会再把运行失败提示成“没有近期消息”。搜索增强仅存在于本次响应，不写入或续期共享热点详情缓存，默认详情请求不会看到搜索状态或增加搜索等待。供应商子进程在启动、执行或清理任一阶段失败时都会释放进程级容量。
@@ -145,6 +146,7 @@ DSA 中存在两类用途不同的策略文件：
 | 与参考项目逐渐分叉 | 上游修复不能直接覆盖 | 固定参考 revision，逐模块比较并选择性移植 |
 | 数据源限流或字段变化 | 快照、热点或日 K 降级 | timeout、retry、source health 与 last-good cache |
 | LLM 超时或格式异常 | 重排不可用或解释字段缺失 | 非结构化响应继续尝试备用模型；全部失败时保留因子排序，并返回尝试模型与失败原因 |
+| 输出上限低于候选数所需的 token | 响应被截断，重排整体降级为因子排序 | 默认 `LLM_MAX_TOKENS=8192` 对齐默认 30 个候选；截断时按 `truncated_response` 上报并挽回已写完的候选，重试要求压缩输出 |
 | 结果轮换扩大候选差异 | 临界候选可能因浏览器不同而变化 | 仅轮换近分尾部位，保持硬过滤、风险否决、分值和头部候选不变；无种子时关闭 |
 | 缓存目录变化 | 升级后旧缓存不会自动复用 | 新目录独立为 `data/screening`；升级前按需备份 |
 | 运行历史增长 | 完整候选结果会增加数据库体积 | 历史接口默认只读摘要，运维可按现有数据库备份/保留策略管理 |

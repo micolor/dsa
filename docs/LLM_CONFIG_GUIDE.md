@@ -79,10 +79,11 @@ Web 启用步骤：打开「设置 → Agent 设置 → 问股生成方式」，
 - 该能力不是离线模型。股票代码、问题、新闻、持仓上下文和脱敏后的工具结果可能由 Codex 自身配置的服务处理。
 - 当前只支持 single-agent Chat；不支持 Codex Multi Agent 或 Codex Deep Research。现有 LiteLLM Multi Agent 与 Deep Research 不受影响。
 - 每次 Chat 都创建新的 ephemeral App Server thread；DSA 继续保存原有可见会话历史，并在下一轮注入，但不会注入 LiteLLM provider trace。Web 客户端不会收到 chain-of-thought、原始 JSON-RPC、stderr 或完整工具参数/结果；Codex 只接收完成该轮分析所需的脱敏工具结果。
-- 用户停止问股时，页面会先显示“正在停止”。DSA 会中断 Codex turn，并结束、回收本轮独立运行的工具进程；只有确认 Codex 与工具进程均已退出后，原问股请求才返回最终“已停止”。超时和客户端断开也遵守同一清理边界，不会在后台仍有本轮任务时提前宣告结束。该契约仅作用于 Codex，不改变默认 LiteLLM Agent 的执行方式。
+- 用户停止问股时，页面会先显示“正在停止”。DSA 会中断 Codex turn，并结束、回收本轮独立运行的工具进程；只有确认 Codex 与工具进程均已退出后，原问股请求才返回最终“已停止”。超时和客户端断开也遵守同一清理边界，不会在后台仍有本轮任务时提前宣告结束。这套进程回收语义是 Codex 专属；默认 LiteLLM Agent 的停止入口与页面表现相同，但不需要回收独立进程，见下一条。
+- 默认 LiteLLM Agent 支持中途停止，走同一个前端入口和同一个 `POST /api/v1/agent/chat/stream/{request_id}/cancel`。服务端把取消事件交给 `run_agent_loop`，在每轮 step 开始前以及流式生成的 chunk 之间检查：命中即关闭当前流式请求，本轮以 `error_code=cancelled` 结束，页面显示“已停止”，会话里记录“[已停止] 本次分析已由用户停止。”而不是一条用户没看见过的半截回答。已经在执行中的工具调用不会被打断，它跑完后本轮才结束；取消事件刻意不进入 `ToolAccessContext`，否则工具面会整体转为受控执行并拒绝所有未标记 `cancellation_safe` 的工具。该契约对 `AGENT_ARCH=single` 与 `AGENT_ARCH=multi` 同时生效：多智能体编排器把同一个事件透传给每个阶段，并行技能批也带着它，因此停止同样落在阶段边界、阶段之间或流式 chunk 之间，不会等整条流水线跑完。因为等待是设计的一部分（正在执行中的工具不会被打断，服务端在这段时间也不再推送 SSE），页面会一直停留在“正在停止…”并给出一条中性说明；本地只在连接半死这类异常上收工，其等待窗口取在服务端整轮预算（`AGENT_ORCHESTRATOR_TIMEOUT_S` + 30 秒收尾余量）之外，不会在工具调用期间把正常的等待显示成停止失败。这条说明只属于默认 LiteLLM 后端，Codex 走的是进程回收、收尾很快，不显示它。
 - Codex 必须使用大于 0 的 `AGENT_ORCHESTRATOR_TIMEOUT_S`，以保证成功、失败、超时或停止都在明确时间内结束；`0` 关闭时限的旧语义只保留给默认 LiteLLM 路径，选择 Codex 时会在保存与运行前明确拒绝，不会静默替换成 600 秒。
 - 快速状态只检查配置、可执行文件、版本和生产路径实际依赖的 App Server schema 能力，不发模型请求，也不证明 Codex 已登录、模型可用或真实工具闭环。状态只表达“可以尝试”；真实命令、协议、登录、模型和工具错误在用户发送问题时按原始类别返回。Chat 每次加载检查一次，失败后由用户手动重新检查，不自动重试。
-- 正式 Chat 由服务端选择实际 backend。服务端完成上下文准备并保存用户问题后，SSE 才发出唯一 `accepted` 事件，然后开始模型执行。Web 在 `accepted` 前保留输入、股票范围、追问上下文和技能选择；因此环境或保存失败不会产生页面中的幽灵消息。`accepted` 返回的实际 backend 决定停止方式。
+- 正式 Chat 由服务端选择实际 backend。服务端完成上下文准备并保存用户问题后，SSE 才发出唯一 `accepted` 事件，然后开始模型执行。Web 在 `accepted` 前保留输入、股票范围、追问上下文和技能选择；因此环境或保存失败不会产生页面中的幽灵消息。`accepted` 返回的实际 backend 决定停止后的清理语义（Codex 回收独立进程，LiteLLM 协作式中断本轮循环）。
 - 每次问股共享一份整轮资源预算：App Server 的累计输出和事件数有界，工具调用总数服从现有 `AGENT_MAX_STEPS`，完成后立即清理本轮状态。工具进程按原始 UTF-8 结果字节计量，不会因 JSON 转义把合法结果误报为 handler 崩溃；超限统一返回明确错误并回收本轮进程，不重试或切换后端。
 - 当前依据 [Codex App Server v2 文档](https://developers.openai.com/codex/app-server/) 使用 JSONL stdio、ephemeral `thread/start`、`turn/start` / `turn/interrupt` 与 experimental dynamic tools。2026-07-15 的本地验收版本为 `codex-cli 0.144.3`；本项目不据此猜测通用最低版本。设置页兼容性检查只决定是否允许尝试，最终可用性以用户问题的真实执行结果为准。
 
@@ -299,7 +300,7 @@ Hermes 是保留渠道名，只支持本机 loopback `/v1` OpenAI-compatible gen
 - 该兼容逻辑只增强“失败时保留后端真实错误原因”和“未配置 LLM 时给出更具体诊断”，**不会**静默删除、清空、迁移或改写你现有的 `GEMINI_*` / `OPENAI_*` / `ANTHROPIC_*` / `LITELLM_*` 配置。
 - 如果当前环境没有任何有效 Agent 模型链路，问股页面会继续按失败语义返回，并直接展示后端真实配置诊断；补齐任一有效模型来源后即可恢复，无需额外执行配置迁移脚本。
 - 推荐的新配置方式仍然是显式设置 `LITELLM_MODEL` / `AGENT_LITELLM_MODEL` 或使用 `LLM_CHANNELS`；legacy provider keys 目前保留为兼容回退路径，方便旧 `.env`、本地 macOS 开发环境和历史部署平滑继续运行。
-- 问股流式接口（`POST /api/v1/agent/chat/stream`）的消费侧等待时限由同一个 `AGENT_ORCHESTRATOR_TIMEOUT_S` 预算派生（预算 + 30 秒收尾余量），不再是一个固定值，整轮预算自己的终态事件因此总是先到。`AGENT_ORCHESTRATOR_TIMEOUT_S=0` 关闭预算时不再叠加二次上限，与 Codex 分支「后端独占截止时间」的约定一致；默认 LiteLLM Agent 仍不支持中途停止，二次上限只是运行时长已超出自身预算后的兜底。
+- 问股流式接口（`POST /api/v1/agent/chat/stream`）的消费侧等待时限由同一个 `AGENT_ORCHESTRATOR_TIMEOUT_S` 预算派生（预算 + 30 秒收尾余量），不再是一个固定值，整轮预算自己的终态事件因此总是先到。`AGENT_ORCHESTRATOR_TIMEOUT_S=0` 关闭预算时不再叠加二次上限，与 Codex 分支「后端独占截止时间」的约定一致；这条二次上限不承接用户停止（停止由取消事件协作式中断本轮循环），它只是运行时长已超出自身预算后的兜底。
 
 ### 问股可见对话上下文压缩
 
