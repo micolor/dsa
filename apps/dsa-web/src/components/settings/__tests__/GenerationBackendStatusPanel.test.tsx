@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GenerationBackendStatusPanel } from '../GenerationBackendStatusPanel';
+import { ToastHostProvider } from '../../../contexts/ToastHostContext';
+import { Toast } from '../../../components/common/toastStore';
 import { UiLanguageProvider } from '../../../contexts/UiLanguageContext';
 import type { GenerationBackendStatusResponse, TestGenerationBackendResponse } from '../../../types/systemConfig';
 import { UI_LANGUAGE_STORAGE_KEY } from '../../../utils/uiLanguage';
@@ -69,6 +71,16 @@ const litellmStatus: GenerationBackendStatusResponse = {
   backends: [],
 };
 
+/**
+ * 冒烟结果与加载失败的反馈都走全站浮层（`useToastSync`），宿主不在就渲染不出来。
+ * 这里按 `App` 的挂法补上宿主，断言仍然走真实出口。
+ */
+const PanelWithToastHost: React.FC<React.ComponentProps<typeof GenerationBackendStatusPanel>> = (props) => (
+  <ToastHostProvider>
+    <GenerationBackendStatusPanel {...props} />
+  </ToastHostProvider>
+);
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -81,6 +93,7 @@ function deferred<T>() {
 
 describe('GenerationBackendStatusPanel', () => {
   beforeEach(() => {
+    Toast.clear();
     window.localStorage.clear();
     getGenerationBackendStatus.mockReset();
     previewGenerationBackendStatus.mockReset();
@@ -91,7 +104,7 @@ describe('GenerationBackendStatusPanel', () => {
   });
 
   it('loads saved generation backend status without draft items', async () => {
-    render(<GenerationBackendStatusPanel items={[]} maskToken="******" />);
+    render(<PanelWithToastHost items={[]} maskToken="******" />);
 
     await waitFor(() => {
       expect(getGenerationBackendStatus).toHaveBeenCalledTimes(1);
@@ -104,7 +117,7 @@ describe('GenerationBackendStatusPanel', () => {
 
   it('previews unsaved draft generation backend status', async () => {
     render(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'opencode_cli' }]}
         maskToken="******"
       />,
@@ -121,7 +134,7 @@ describe('GenerationBackendStatusPanel', () => {
 
   it('runs JSON smoke test with current draft items', async () => {
     render(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'codex_cli' }]}
         maskToken="******"
       />,
@@ -141,7 +154,7 @@ describe('GenerationBackendStatusPanel', () => {
 
   it('clears stale smoke result when draft items change', async () => {
     const { rerender } = render(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'codex_cli' }]}
         maskToken="******"
       />,
@@ -151,7 +164,7 @@ describe('GenerationBackendStatusPanel', () => {
     expect(await screen.findByText('冒烟测试通过')).toBeInTheDocument();
 
     rerender(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'opencode_cli' }]}
         maskToken="******"
       />,
@@ -170,7 +183,7 @@ describe('GenerationBackendStatusPanel', () => {
       .mockReturnValueOnce(secondPreview.promise);
 
     const { rerender } = render(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'codex_cli' }]}
         maskToken="******"
       />,
@@ -178,7 +191,7 @@ describe('GenerationBackendStatusPanel', () => {
     await waitFor(() => expect(previewGenerationBackendStatus).toHaveBeenCalledTimes(1));
 
     rerender(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND', value: 'litellm' }]}
         maskToken="******"
       />,
@@ -201,12 +214,12 @@ describe('GenerationBackendStatusPanel', () => {
   });
 
   it('clears stale status when preview request fails', async () => {
-    const { rerender } = render(<GenerationBackendStatusPanel items={[]} maskToken="******" />);
+    const { rerender } = render(<PanelWithToastHost items={[]} maskToken="******" />);
     expect(await screen.findByText('codex_cli')).toBeInTheDocument();
 
     previewGenerationBackendStatus.mockRejectedValueOnce(new Error('validation failed'));
     rerender(
-      <GenerationBackendStatusPanel
+      <PanelWithToastHost
         items={[{ key: 'GENERATION_BACKEND_TIMEOUT_SECONDS', value: 'bad' }]}
         maskToken="******"
       />,
@@ -220,7 +233,7 @@ describe('GenerationBackendStatusPanel', () => {
   it('shows smoke status even when initial status has not loaded', async () => {
     getGenerationBackendStatus.mockReturnValueOnce(new Promise(() => undefined));
 
-    render(<GenerationBackendStatusPanel items={[]} maskToken="******" />);
+    render(<PanelWithToastHost items={[]} maskToken="******" />);
 
     fireEvent.click(screen.getByRole('button', { name: /JSON 冒烟测试/ }));
 
@@ -233,7 +246,7 @@ describe('GenerationBackendStatusPanel', () => {
 
     render(
       <UiLanguageProvider>
-        <GenerationBackendStatusPanel items={[]} maskToken="******" />
+        <PanelWithToastHost items={[]} maskToken="******" />
       </UiLanguageProvider>,
     );
 

@@ -1,6 +1,8 @@
 import type React from 'react';
+import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -35,6 +37,32 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   children,
 }) => {
   const { t } = useUiLanguage();
+  const { modalRef, isCovered } = useEscTopLayer();
+
+  /**
+   * Esc = 点背景：这是全站唯一一个漏了键盘关闭的模态浮层 —— Drawer、Dialog、DatePicker、
+   * MarketReviewRegionSelector、SettingsHelpButton 都认 Esc，只有它挂着 `aria-modal="true"`
+   * 却只能鼠标点掉。销毁类确认（删自选、删会话、删告警规则）尤其容易踩到。
+   *
+   * 取消被禁用时不响应，与点背景一致：`cancelDisabled` 表达的是「这次确认不允许反悔」，
+   * 不能给它留一条绕过去的暗路。
+   */
+  useEffect(() => {
+    if (!isOpen || cancelDisabled) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      // 让位判断今天恒为 false（确认框总是最上面那层），写上是为了和 Drawer / Dialog 同一套规则：
+      // 哪天确认框再叠一层确认框，这里不必回头补。
+      if (event.key === 'Escape' && !isCovered()) {
+        onCancel();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, cancelDisabled, onCancel, isCovered]);
 
   if (!isOpen) return null;
 
@@ -49,6 +77,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       }}
     >
       <div
+        ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

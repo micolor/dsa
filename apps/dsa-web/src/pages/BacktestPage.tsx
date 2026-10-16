@@ -4,8 +4,7 @@ import { Check, Download, Info, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, DatePicker, EmptyState, Loading, Pagination, Tooltip } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { Card, Badge, DatePicker, EmptyState, Loading, Pagination, Tooltip, useToastSync } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
@@ -555,6 +554,11 @@ const BacktestPage: React.FC = () => {
     fetchResults(page, normalizeBacktestCode(codeFilter), appliedWindowDays ?? undefined, analysisDateFrom, analysisDateTo, phaseFilter);
   };
 
+  // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
+  // 页面不再自己渲染浮层，外形与关闭语义不必在这里重复一遍。
+  useToastSync('backtest-run-error', runError, (err) => ({ error: err }));
+  useToastSync('backtest-page-error', pageError, (err) => ({ error: err }));
+
   return (
     <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 md:px-6">
       {/* Header */}
@@ -716,12 +720,6 @@ const BacktestPage: React.FC = () => {
             <RunSummary data={runResult} language={language} />
           </div>
         )}
-        {/* 运行失败是页面级提示，送全局右上角容器。 */}
-        {runError && (
-          <ToastPortal>
-            <ApiErrorAlert elevated error={runError} className="pointer-events-auto" />
-          </ToastPortal>
-        )}
         <p className="mt-2 text-xs text-muted-text">
           {isNextDayValidation
             ? text.oneDayModeDescription
@@ -752,11 +750,6 @@ const BacktestPage: React.FC = () => {
 
         {/* Results table */}
         <section className="min-h-0 flex-1 overflow-y-auto">
-          {pageError ? (
-            <ToastPortal>
-              <ApiErrorAlert elevated error={pageError} className="pointer-events-auto" />
-            </ToastPortal>
-          ) : null}
           {isLoadingResults ? (
             <Loading label={text.loadingResults} className="h-64" />
           ) : results.length === 0 ? (

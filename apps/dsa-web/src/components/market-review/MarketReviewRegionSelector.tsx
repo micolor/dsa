@@ -125,6 +125,8 @@ export const MarketReviewRegionSelector: React.FC<MarketReviewRegionSelectorProp
           id="market-review-region-menu"
           role="dialog"
           aria-label={t('home.marketRegionSelector')}
+          // 参与 `useEscTopLayer` 的叠层排序：Esc 归最上面那层，本层自己收（见下方 onKeyDown）。
+          data-esc-layer="true"
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault();

@@ -8,8 +8,6 @@ import { stocksApi } from '../api/stocks';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import {
-  ApiErrorAlert,
-  AutoDismissToast,
   Badge,
   Button,
   ConfirmDialog,
@@ -20,8 +18,8 @@ import {
   Loading,
   Select,
   StatCard,
+  useToastSync,
 } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
@@ -1378,6 +1376,37 @@ const PortfolioPage: React.FC = () => {
   const sigAlert = sigActions?.alert ?? 0;
   const sigBreakdownSum = sigSell + sigReduce + sigAlert;
 
+  // 页面级提示统一走全站浮层；都是持续型，由各自状态控制显隐。
+  useToastSync('portfolio-error', error, (parsed) => ({
+    error: parsed,
+    onDismiss: () => setError(null),
+  }));
+  useToastSync('portfolio-risk-warning', riskWarning, (message) => ({
+    variant: 'warning',
+    title: text.riskDegraded,
+    message,
+    onDismiss: () => setRiskWarning(null),
+  }));
+  useToastSync('portfolio-write-warning', writeWarning, (message) => ({
+    variant: 'warning',
+    title: text.operationHint,
+    message,
+    onDismiss: () => setWriteWarning(null),
+  }));
+  useToastSync('portfolio-position-analysis', positionAnalysisMessage, (message) => ({
+    variant: 'success',
+    title: text.analysisTask,
+    message,
+    onDismiss: () => setPositionAnalysisMessage(null),
+  }));
+  // 刷新结果几秒后自动消失；鼠标悬停或键盘焦点停留在其上时暂停计时。
+  useToastSync('portfolio-fx-refresh', fxRefreshFeedback, (feedback) => ({
+    variant: getFxRefreshFeedbackVariant(feedback.tone),
+    title: text.fxRefreshResult,
+    message: feedback.text,
+    autoDismissMs: 5000,
+    onDismiss: dismissFxRefreshFeedback,
+  }));
   return (
     <div className="portfolio-page flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden sm:h-[calc(100vh-4.5rem)]">
       <header className="relative z-30 flex flex-shrink-0 items-center overflow-visible px-3 pb-3 md:px-4 md:pb-4">
@@ -1455,39 +1484,6 @@ const PortfolioPage: React.FC = () => {
 
       <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-3 pb-4 md:px-4">
 
-      {/* 页面级提示统一送全局右上角容器；都是持续型，由页面状态控制显隐。 */}
-      <ToastPortal>
-        {error ? (
-          <ApiErrorAlert elevated error={error} onDismiss={() => setError(null)} className="pointer-events-auto" />
-        ) : null}
-        {riskWarning ? (
-          <InlineAlert
-            elevated
-            variant="warning"
-            title={text.riskDegraded}
-            message={riskWarning}
-            className="pointer-events-auto"
-          />
-        ) : null}
-        {writeWarning ? (
-          <InlineAlert
-            elevated
-            variant="warning"
-            title={text.operationHint}
-            message={writeWarning}
-            className="pointer-events-auto"
-          />
-        ) : null}
-        {positionAnalysisMessage ? (
-          <InlineAlert
-            elevated
-            variant="success"
-            title={text.analysisTask}
-            message={positionAnalysisMessage}
-            className="pointer-events-auto"
-          />
-        ) : null}
-      </ToastPortal>
 
       {(showCreateAccount || !hasAccounts) ? (
         <div className="glass-card !border-transparent p-4 md:p-5">
@@ -2493,34 +2489,6 @@ const PortfolioPage: React.FC = () => {
           </div>
         ) : null}
       </Dialog>
-      <ToastPortal>
-        {fxRefreshFeedback ? (
-          /* 刷新结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
-          <AutoDismissToast
-            active={fxRefreshFeedback}
-            onDismiss={dismissFxRefreshFeedback}
-            delayMs={5000}
-          >
-            <InlineAlert
-              elevated
-              variant={getFxRefreshFeedbackVariant(fxRefreshFeedback.tone)}
-              title={text.fxRefreshResult}
-              message={fxRefreshFeedback.text}
-              action={(
-                <button
-                  type="button"
-                  onClick={dismissFxRefreshFeedback}
-                  className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                  aria-label={t('common.close')}
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </button>
-              )}
-              className="pointer-events-auto"
-            />
-          </AutoDismissToast>
-        ) : null}
-      </ToastPortal>
     </div>
   );
 };

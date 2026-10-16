@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useCallback } from 'react';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { cn } from '../../utils/cn';
 
 let activeDrawerCount = 0;
@@ -30,14 +31,16 @@ export const Drawer: React.FC<DrawerProps> = ({
   backdropClassName,
 }) => {
   const { t } = useUiLanguage();
-  // Close the drawer when Escape is pressed.
+  const { modalRef, isCovered } = useEscTopLayer();
+  // Close the drawer when Escape is pressed —— 除非上面还压着别的模态（例如从抽屉里发起的确认框），
+  // 那种情况下 Esc 归它，见 `useEscTopLayer`。
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isCovered()) {
         onClose();
       }
     },
-    [onClose]
+    [onClose, isCovered]
   );
 
   useEffect(() => {
@@ -77,6 +80,7 @@ export const Drawer: React.FC<DrawerProps> = ({
 
       <div className={cn('absolute inset-y-0 flex w-full', sidePositionClass, width)}>
         <div
+          ref={modalRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, FlaskConical, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, FlaskConical, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
@@ -9,8 +9,7 @@ import { dataQualityApi } from '../api/dataQuality';
 import { notificationsApi } from '../api/notifications';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, AutoDismissToast, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, Loading, Pagination, Select } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { ApiErrorAlert, Button, ConfirmDialog, Dialog, EmptyState, Loading, Pagination, Select, useToastSync } from '../components/common';
 import { UiLanguageToggle } from '../components/i18n/UiLanguageToggle';
 import { ThemeTabs } from '../components/theme/ThemeTabs';
 import {
@@ -23,7 +22,6 @@ import {
   NotificationTestPanel,
   PaperAccountCard,
   SettingsCategoryNav,
-  SettingsAlert,
   SettingsField,
   SettingsLoading,
   SettingsPanelErrorBoundary,
@@ -498,6 +496,15 @@ const FirstRunSetupCard: React.FC<FirstRunSetupCardProps> = ({
       })
       : t('settings.setupGuideReadySummary');
 
+  // 冒烟测试结果是操作结果类提示：统一走全局右上角通道，不自动消失。
+  // 出错时压掉成功提示，与原先 `!smokeError && smokeSuccess` 的显隐规则一致。
+  useToastSync('settings-first-run-smoke-error', smokeError, (err) => ({ error: err }));
+  useToastSync('settings-first-run-smoke-success', smokeError ? null : smokeSuccess, (message) => ({
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message,
+  }));
+
   if (isHidden) {
     return (
       <div className="rounded-2xl border border-border/60 bg-card/90 px-4 py-3 shadow-soft-card">
@@ -513,6 +520,7 @@ const FirstRunSetupCard: React.FC<FirstRunSetupCardProps> = ({
       </div>
     );
   }
+
 
   return (
     <SettingsSectionCard
@@ -610,23 +618,6 @@ const FirstRunSetupCard: React.FC<FirstRunSetupCardProps> = ({
           <p className="text-xs leading-6 text-muted-text">
             {firstStockCode ? t('settings.setupGuideSmokeNotReady') : t('settings.setupGuideSmokeNeedsStock')}
           </p>
-        ) : null}
-        {/* 冒烟测试结果是操作结果类提示，送右上角但不自动消失。 */}
-        {smokeError ? (
-          <ToastPortal>
-            <ApiErrorAlert elevated error={smokeError} className="pointer-events-auto" />
-          </ToastPortal>
-        ) : null}
-        {!smokeError && smokeSuccess ? (
-          <ToastPortal>
-            <SettingsAlert
-              presentation="toast"
-              title={t('settings.actionSuccess')}
-              message={smokeSuccess}
-              variant="success"
-              className="pointer-events-auto"
-            />
-          </ToastPortal>
         ) : null}
       </div>
     </SettingsSectionCard>
@@ -751,6 +742,15 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
     });
   }, [onSchedulerStateChange, status?.enabled, scheduleEnabledOverride]);
 
+  // 调度状态与「立即运行」结果都是操作结果类提示：统一走全局右上角通道，不自动消失。
+  useToastSync('settings-scheduler-status-error', statusError, (err) => ({ error: err }));
+  useToastSync('settings-scheduler-run-error', runNowError, (err) => ({ error: err }));
+  useToastSync('settings-scheduler-run-success', runNowError ? null : runNowSuccess, (message) => ({
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message,
+  }));
+
   if (!hasSchedulerSettings) {
     return null;
   }
@@ -792,6 +792,7 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
       setIsRunningNow(false);
     }
   };
+
 
   return (
     <SettingsSectionCard
@@ -963,28 +964,6 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
               <p key={`${issue.key}-${issue.code}`}>{issue.message}</p>
             ))}
           </div>
-        ) : null}
-        {/* 调度状态与「立即运行」结果都是操作结果类提示，送右上角但不自动消失。 */}
-        {statusError ? (
-          <ToastPortal>
-            <ApiErrorAlert elevated error={statusError} className="pointer-events-auto" />
-          </ToastPortal>
-        ) : null}
-        {runNowError ? (
-          <ToastPortal>
-            <ApiErrorAlert elevated error={runNowError} className="pointer-events-auto" />
-          </ToastPortal>
-        ) : null}
-        {!runNowError && runNowSuccess ? (
-          <ToastPortal>
-            <SettingsAlert
-              presentation="toast"
-              title={t('settings.actionSuccess')}
-              message={runNowSuccess}
-              variant="success"
-              className="pointer-events-auto"
-            />
-          </ToastPortal>
         ) : null}
       </div>
     </SettingsSectionCard>
@@ -1910,7 +1889,12 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const desktopUpdateNotice = getDesktopUpdateNotice(desktopUpdateState, t);
+  // memo 化不是为了省算力，而是给右上角提示一个稳定身份：每次渲染都换新对象的话，
+  // 提示会被当成「换了一条新的」反复重弹，用户关掉它下一次渲染又回来。
+  const desktopUpdateNotice = useMemo(
+    () => getDesktopUpdateNotice(desktopUpdateState, t),
+    [desktopUpdateState, t],
+  );
   const shouldGuardActiveConfigPanel = activeCategory === 'notification' || activeCategory === 'agent';
   const activeConfigPanelErrorTitle = activeCategory === 'agent' ? t('settings.agentSettings') : t('settings.notificationSettings');
   const settingsPanelDiagnosticHint = isDesktopRuntime
@@ -2040,6 +2024,61 @@ const SettingsPage: React.FC = () => {
     />
   );
 
+  // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
+  // 带重试按钮的几条不自动消失，由用户自己关。
+  useToastSync('settings-save-error', saveError, (err) => ({
+    error: err,
+    actionLabel: retryAction === 'save' ? t('settings.saveRetry') : undefined,
+    onAction: retryAction === 'save' ? () => void retry() : undefined,
+  }));
+  useToastSync('settings-load-error', loadError, (err) => ({
+    error: err,
+    actionLabel: retryAction === 'load' ? t('common.retry') : t('settings.reload'),
+    onAction: () => void retry(),
+  }));
+  useToastSync('settings-screening-error', screeningActionError, (err) => ({ error: err }));
+  useToastSync('settings-screening-success', screeningActionError ? null : screeningActionSuccess, (message) => ({
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message,
+  }));
+  useToastSync('settings-desktop-update', desktopUpdateNotice, (notice) => ({
+    title: notice.title,
+    message: notice.message,
+    // `DesktopUpdateNotice` 的词汇表是 error/success/warning，提示组件用的是 danger/success/warning。
+    variant: notice.variant === 'error' ? 'danger' : notice.variant,
+    actionLabel: notice.actionLabel,
+    onAction: notice.actionLabel ? () => {
+      if (notice.actionKind === 'install') {
+        void installDesktopUpdate();
+        return;
+      }
+      void openDesktopReleasePage();
+    } : undefined,
+  }));
+  useToastSync('settings-env-backup-error', envBackupActionError, (err) => ({
+    error: err,
+    actionLabel: err.status === 409 ? t('settings.reload') : undefined,
+    onAction: err.status === 409 ? () => void load() : undefined,
+  }));
+  useToastSync('settings-env-backup-success', envBackupActionError ? null : envBackupActionSuccess, (message) => ({
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message,
+  }));
+  // 通用操作结果几秒后自动消失；鼠标悬停或键盘焦点停留在其上时暂停计时。
+  useToastSync('settings-action-result', toast, (result) => (result.type === 'success' ? {
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message: result.message,
+    autoDismissMs: 3200,
+    onDismiss: clearToast,
+  } : {
+    error: result.error,
+    autoDismissMs: 3200,
+    onDismiss: clearToast,
+  }));
+
   return (
     <div className="settings-page flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -2075,31 +2114,6 @@ const SettingsPage: React.FC = () => {
             </Button>
         </div>
       </div>
-      {/* 配置保存/加载结果是页面级提示：送右上角，带重试按钮所以不自动消失。 */}
-      {saveError ? (
-        <ToastPortal>
-          <ApiErrorAlert
-            elevated
-            error={saveError}
-            className="pointer-events-auto"
-            actionLabel={retryAction === 'save' ? t('settings.saveRetry') : undefined}
-            onAction={retryAction === 'save' ? () => void retry() : undefined}
-          />
-        </ToastPortal>
-      ) : null}
-
-      {loadError ? (
-        <ToastPortal>
-          <ApiErrorAlert
-            elevated
-            error={loadError}
-            className="pointer-events-auto"
-            actionLabel={retryAction === 'load' ? t('common.retry') : t('settings.reload')}
-            onAction={() => void retry()}
-          />
-        </ToastPortal>
-      ) : null}
-
       {isLoading ? (
         <SettingsLoading />
       ) : (
@@ -2188,22 +2202,6 @@ const SettingsPage: React.FC = () => {
                     </Button>
                   </div>
                 </div>
-                {screeningActionError ? (
-                  <ToastPortal>
-                    <ApiErrorAlert elevated error={screeningActionError} className="pointer-events-auto" />
-                  </ToastPortal>
-                ) : null}
-                {!screeningActionError && screeningActionSuccess ? (
-                  <ToastPortal>
-                    <SettingsAlert
-                      presentation="toast"
-                      title={t('settings.actionSuccess')}
-                      message={screeningActionSuccess}
-                      variant="success"
-                      className="pointer-events-auto"
-                    />
-                  </ToastPortal>
-                ) : null}
               </SettingsSectionCard>
             ) : null}
             {activeCategory === 'system' ? <AuthSettingsCard /> : null}
@@ -2298,25 +2296,7 @@ const SettingsPage: React.FC = () => {
                         {t('settings.checkDesktopUpdate')}
                       </Button>
                     </div>
-                    {desktopUpdateNotice ? (
-                      <ToastPortal>
-                        <SettingsAlert
-                          presentation="toast"
-                          className="pointer-events-auto"
-                          title={desktopUpdateNotice.title}
-                          message={desktopUpdateNotice.message}
-                          variant={desktopUpdateNotice.variant}
-                          actionLabel={desktopUpdateNotice.actionLabel}
-                          onAction={desktopUpdateNotice.actionLabel ? () => {
-                            if (desktopUpdateNotice.actionKind === 'install') {
-                              void installDesktopUpdate();
-                              return;
-                            }
-                            void openDesktopReleasePage();
-                          } : undefined}
-                        />
-                      </ToastPortal>
-                    ) : (
+                    {desktopUpdateNotice ? null : (
                       <p className="text-xs leading-6 text-muted-text">
                         {t('settings.desktopCurrentNoStatus')}
                       </p>
@@ -2378,28 +2358,6 @@ const SettingsPage: React.FC = () => {
                   <p className="text-xs leading-6 text-muted-text">
                     {t('settings.envDockerNote')}
                   </p>
-                  {envBackupActionError ? (
-                    <ToastPortal>
-                      <ApiErrorAlert
-                        elevated
-                        error={envBackupActionError}
-                        className="pointer-events-auto"
-                        actionLabel={envBackupActionError.status === 409 ? t('settings.reload') : undefined}
-                        onAction={envBackupActionError.status === 409 ? () => void load() : undefined}
-                      />
-                    </ToastPortal>
-                  ) : null}
-                  {!envBackupActionError && envBackupActionSuccess ? (
-                    <ToastPortal>
-                      <SettingsAlert
-                        presentation="toast"
-                        title={t('settings.actionSuccess')}
-                        message={envBackupActionSuccess}
-                        variant="success"
-                        className="pointer-events-auto"
-                      />
-                    </ToastPortal>
-                  ) : null}
                 </div>
               </SettingsSectionCard>
             ) : null}
@@ -2527,32 +2485,6 @@ const SettingsPage: React.FC = () => {
       )}
       </div>
 
-      {toast ? (
-        <ToastPortal>
-          {/* 操作结果几秒后自动消失；鼠标悬停其上时暂停计时。 */}
-          <AutoDismissToast active={toast} onDismiss={clearToast} delayMs={3200}>
-            {toast.type === 'success'
-              ? <InlineAlert
-                  elevated
-                  variant="success"
-                  title={t('settings.actionSuccess')}
-                  message={toast.message}
-                  action={(
-                    <button
-                      type="button"
-                      onClick={clearToast}
-                      className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                      aria-label={t('common.close')}
-                    >
-                      <X className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                  className="pointer-events-auto"
-                />
-              : <ApiErrorAlert elevated error={toast.error} className="pointer-events-auto" />}
-          </AutoDismissToast>
-        </ToastPortal>
-      ) : null}
       <ConfirmDialog
         isOpen={showImportConfirm}
         title={t('settings.importConfirmTitle')}

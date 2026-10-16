@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { StrictMode, useState } from 'react';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -291,7 +292,7 @@ describe('ChatPage', () => {
     expect(screen.queryByRole('button', { name: '发送' })).not.toBeInTheDocument();
   });
 
-  it('keeps the existing waiting state for LiteLLM without offering a false stop', async () => {
+  it('offers the same stop control while a default-model analysis is running', async () => {
     mockStoreState.loading = true;
 
     render(
@@ -300,9 +301,10 @@ describe('ChatPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole('button', { name: '处理中...' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: '停止分析' })).not.toBeInTheDocument();
-    expect(mockStopStream).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: '停止分析' }));
+
+    expect(mockStopStream).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '发送' })).not.toBeInTheDocument();
   });
 
   it('labels the stop action in English when the UI language is English', async () => {
@@ -346,6 +348,33 @@ describe('ChatPage', () => {
 
     const button = await screen.findByRole('button', { name: '正在停止…' });
     expect(button).toBeDisabled();
+    // Codex 后端是真的把进程杀掉，收尾很快，不该显示 litellm 那条「工具调用不会被打断」的说明。
+    expect(screen.queryByText('已向服务端发出停止请求；正在执行中的工具调用不会被打断，本轮会在它结束后立即收尾。')).not.toBeInTheDocument();
+  });
+
+  // 停止在 litellm 后端上是协作式的：正在跑的工具调用不中断，本轮要等它返回才收尾。
+  // 这段时间界面必须给一句「为什么还没停」，而不是红着报「停止超时」。
+  it('explains why a litellm stop is still waiting', async () => {
+    mockGetStatus.mockResolvedValueOnce({
+      backend: 'litellm',
+      available: true,
+      experimental: false,
+      errorCode: null,
+      message: null,
+    });
+    mockStoreState.loading = true;
+    mockStoreState.stopping = true;
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('button', { name: '正在停止…' })).toBeDisabled();
+    expect(await screen.findByText('已向服务端发出停止请求；正在执行中的工具调用不会被打断，本轮会在它结束后立即收尾。')).toBeInTheDocument();
+    // 等待期间还不是终态：不能提前宣布「已停止」，也不能报错。
+    expect(screen.queryByText('本次分析已停止，后台任务也已结束。')).not.toBeInTheDocument();
   });
 
   it('shows a plain-language terminal status after cancellation', async () => {
@@ -448,7 +477,8 @@ describe('ChatPage', () => {
 
     const input = await screen.findByPlaceholderText(/分析 600519/);
     expect(input).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '前往 Agent 设置' }));
+    // 这条提示走全局右上角通道（状态 -> store -> 宿主渲染），比页内直接渲染晚一次提交。
+    fireEvent.click(await screen.findByRole('button', { name: '前往 Agent 设置' }));
     expect(await screen.findByText('Agent settings destination')).toBeInTheDocument();
     expect(router.state.location.search).toBe('?category=agent');
   });
@@ -666,7 +696,7 @@ describe('ChatPage', () => {
     expect(sessionCard).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('renders a separate delete button for each session and opens confirmation without switching', async () => {
+  it('renders a separate delete button for each session and only asks for confirmation', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ChatPage />
@@ -680,15 +710,17 @@ describe('ChatPage', () => {
     fireEvent.click(deleteButton);
 
     expect(mockSwitchSession).not.toHaveBeenCalled();
-    expect(await screen.findByText('会话已删除')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument();
-
-    // 必须撤销：删除走的是 6 秒真实 `setTimeout`，且组件卸载时不会清理它
-    // （导航离开后删除照旧生效，这是刻意的）。若在本用例里留着不管，这个计时器会
-    // 在 6 秒后于**后续用例**的执行窗口内调用 `deleteChatSession`，让「撤销窗口内
-    // 不真正删除」那条断言随文件耗时随机转红——撤销是唯一能确定性地拆掉它的动作。
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
     expect(mockDeleteChatSession).not.toHaveBeenCalled();
+
+    // 确认框要点名是哪条会话，否则列表里标题相近时无从判断自己删的是哪条。
+    const dialog = await screen.findByRole('dialog', { name: '删除这条对话？' });
+    expect(within(dialog).getByText('「请简要分析 600519」及其全部消息将被删除，删除后无法恢复。')).toBeInTheDocument();
+
+    // 取消：什么都不删，会话还在列表里。
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog', { name: '删除这条对话？' })).not.toBeInTheDocument();
+    expect(mockDeleteChatSession).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '删除对话 请简要分析 600519' })).toBeInTheDocument();
   });
 
   it('disables header actions when there are no messages', async () => {
@@ -1991,7 +2023,7 @@ describe('ChatPage', () => {
     });
   });
 
-  it('shows a delete toast with undo and defers the actual deletion', async () => {
+  it('deletes the session as soon as the confirmation is accepted', async () => {
     render(
       <MemoryRouter initialEntries={['/chat?stock=600519&name=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0']}>
         <ChatPage />
@@ -2001,49 +2033,70 @@ describe('ChatPage', () => {
     expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除对话 请简要分析 600519' }));
 
-    // 延迟删除：6 秒撤销窗口内不真正删除
-    expect(await screen.findByText('会话已删除')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: '删除这条对话？' });
     expect(mockDeleteChatSession).not.toHaveBeenCalled();
 
-    // 点击撤销：取消删除，会话保留
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
-    expect(screen.queryByText('会话已删除')).not.toBeInTheDocument();
-    expect(mockDeleteChatSession).not.toHaveBeenCalled();
-    expect(mockStartNewChat).not.toHaveBeenCalled();
+    // 确认即删：不再有延迟窗口，也不需要等计时器。
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }));
+
+    await waitFor(() => expect(mockDeleteChatSession).toHaveBeenCalledWith('session-1'));
+    expect(screen.queryByRole('dialog', { name: '删除这条对话？' })).not.toBeInTheDocument();
+    // 删掉的正是当前会话，右侧对话区要跟着回到新对话。
+    expect(mockStartNewChat).toHaveBeenCalled();
   });
 
-  it('still deletes the first session when a second deletion supersedes its undo window', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      mockStoreState.sessions = [
-        ...mockStoreState.sessions,
-        {
-          session_id: 'session-2',
-          title: '请简要分析 000001',
-          message_count: 1,
-          created_at: '2026-03-15T10:00:00Z',
-          last_active: '2026-03-15T10:05:00Z',
-        },
-      ];
-      render(
-        <MemoryRouter initialEntries={['/chat']}>
-          <ChatPage />
-        </MemoryRouter>
-      );
+  it('deletes the session whose delete button was clicked', async () => {
+    mockStoreState.sessions = [
+      ...mockStoreState.sessions,
+      {
+        session_id: 'session-2',
+        title: '请简要分析 000001',
+        message_count: 1,
+        created_at: '2026-03-15T10:00:00Z',
+        last_active: '2026-03-15T10:05:00Z',
+      },
+    ];
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
 
-      fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 600519' }));
-      // 第二条删除会顶掉第一条的撤销窗口，但界面上两条都宣告过「会话已删除」。
-      fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 000001' }));
+    fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 000001' }));
 
-      await act(async () => {
-        vi.advanceTimersByTime(6000);
-      });
+    // 确认框点名的是被点的那条，不是列表里的第一条。
+    const dialog = await screen.findByRole('dialog', { name: '删除这条对话？' });
+    expect(within(dialog).getByText('「请简要分析 000001」及其全部消息将被删除，删除后无法恢复。')).toBeInTheDocument();
 
-      await waitFor(() => expect(mockDeleteChatSession).toHaveBeenCalledWith('session-2'));
-      expect(mockDeleteChatSession).toHaveBeenCalledWith('session-1');
-    } finally {
-      vi.useRealTimers();
-    }
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }));
+
+    await waitFor(() => expect(mockDeleteChatSession).toHaveBeenCalledWith('session-2'));
+    expect(mockDeleteChatSession).not.toHaveBeenCalledWith('session-1');
+  });
+
+  it('reports a failed deletion and keeps the session in the list', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    mockDeleteChatSession.mockRejectedValueOnce(
+      createParsedApiError({
+        title: '删除失败',
+        message: '会话不存在',
+        category: 'unknown',
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除对话 请简要分析 600519' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '删除这条对话？' })).getByRole('button', { name: '删除' }));
+
+    // 删除失败不能只写 console.error：列表里那条还在，用户唯一能看到的差别就是它没消失。
+    expect(await screen.findByText('删除失败')).toBeInTheDocument();
+    expect(screen.getByText('会话不存在')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '删除对话 请简要分析 600519' })).toBeInTheDocument();
+    expect(mockStartNewChat).not.toHaveBeenCalled();
   });
 
   it('ignores malformed follow-up query params', async () => {
@@ -2768,6 +2821,87 @@ describe('chat composer image input', () => {
     expect(screen.queryByText('正在读取图片…')).not.toBeInTheDocument();
   });
 
+  it('opens the sent image in a viewer when the bubble thumbnail is clicked', async () => {
+    mockStoreState.messages = [
+      { id: 'm-1', role: 'user', content: '这是什么', imageDataUrl: 'data:image/png;base64,iVBORw==' },
+      { id: 'm-2', role: 'assistant', content: '一张 K 线图' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByAltText('已发送的图片');
+    // 关着的时候不能先有个 dialog 挂在那儿，否则下面测不出「点开」这个动作。
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看图片' }));
+
+    const dialog = screen.getByRole('dialog');
+    // 气泡和灯箱里各有一张 alt 相同的图，必须限定在 dialog 内取，否则取到的是气泡那张。
+    const viewerImage = within(dialog).getByAltText('已发送的图片');
+    expect(viewerImage).toHaveAttribute('src', 'data:image/png;base64,iVBORw==');
+    expect(within(dialog).getByRole('heading')).toHaveTextContent('图片');
+
+    // 打开时是原始视角：100%、不旋转。
+    expect(within(dialog).getByText('100%')).toBeInTheDocument();
+    expect(viewerImage.style.transform).toBe('rotate(0deg)');
+
+    // 缩放按 25% 一档走；倍率落在 CSS zoom 上（放大后容器才有得滚，等价于平移）。
+    fireEvent.click(within(dialog).getByRole('button', { name: '放大' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '放大' }));
+    expect(within(dialog).getByText('150%')).toBeInTheDocument();
+    expect(viewerImage.style.zoom).toBe('1.5');
+    fireEvent.click(within(dialog).getByRole('button', { name: '缩小' }));
+    expect(within(dialog).getByText('125%')).toBeInTheDocument();
+
+    // 旋转是 90° 一档，往左转等于 +270°。
+    fireEvent.click(within(dialog).getByRole('button', { name: '向右旋转' }));
+    expect(viewerImage.style.transform).toBe('rotate(90deg)');
+    fireEvent.click(within(dialog).getByRole('button', { name: '向左旋转' }));
+    expect(viewerImage.style.transform).toBe('rotate(0deg)');
+
+    // 重置把缩放和旋转一起收回初始态。
+    fireEvent.click(within(dialog).getByRole('button', { name: '放大' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '重置' }));
+    expect(within(dialog).getByText('100%')).toBeInTheDocument();
+    expect(viewerImage.style.transform).toBe('rotate(0deg)');
+
+    // Esc 是 Dialog 现成的行为，这里钉住它别在接这个交互时被改坏。
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('resets the image viewer zoom and rotation when it is reopened', async () => {
+    mockStoreState.messages = [
+      { id: 'm-1', role: 'user', content: '这是什么', imageDataUrl: 'data:image/png;base64,iVBORw==' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByAltText('已发送的图片');
+    fireEvent.click(screen.getByRole('button', { name: '查看图片' }));
+
+    let dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '放大' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '向右旋转' }));
+
+    // 关掉再打开：上一张图留下的缩放/旋转不能带到下一张。
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '查看图片' }));
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('100%')).toBeInTheDocument();
+    expect(within(dialog).getByAltText('已发送的图片').style.transform).toBe('rotate(0deg)');
+  });
+
   it('accepts an image dropped onto the composer', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
@@ -2775,29 +2909,14 @@ describe('chat composer image input', () => {
       </MemoryRouter>,
     );
 
-    // 拖放与附件按钮共用 gate（loading / agentAvailable），所以先等 composer 就绪再拖，
+    // 拖放与输入框共用 gate（loading / agentAvailable），所以先等 composer 就绪再拖，
     // 否则这里测到的是「agent 状态还没到」而不是拖放本身。
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加图片' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
 
     const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
     fireEvent.drop(screen.getByRole('textbox'), {
       dataTransfer: { files: [file], items: [], types: ['Files'] },
     });
-
-    expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
-  });
-
-  it('accepts an image chosen from the file picker', async () => {
-    const { container } = render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <ChatPage />
-      </MemoryRouter>,
-    );
-
-    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
-    const fileInput = container.querySelector('input[type="file"]');
-    expect(fileInput).not.toBeNull();
-    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
 
     expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
   });
@@ -2907,7 +3026,7 @@ describe('chat composer image input', () => {
     expect(await screen.findByAltText('待发送的图片')).toBeInTheDocument();
   });
 
-  it('localizes the composer image affordances and the image toasts', async () => {
+  it('localizes the composer image chip and the image toasts', async () => {
     window.localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, 'en');
 
     render(
@@ -2925,7 +3044,6 @@ describe('chat composer image input', () => {
 
     expect(await screen.findByAltText('Image to send')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove image' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add image' })).toBeInTheDocument();
 
     // 上限跟着 CHAT_IMAGE_MAX_BYTES 走：改常量就会改这句话。
     const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' });

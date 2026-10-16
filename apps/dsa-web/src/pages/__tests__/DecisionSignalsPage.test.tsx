@@ -1,5 +1,6 @@
 import type React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   decisionSignalsApi,
@@ -2067,6 +2068,31 @@ describe('DecisionSignalsPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('共 0 条信号')).toBeInTheDocument();
     expect(screen.getByText('暂无决策信号')).toBeInTheDocument();
+  });
+
+  /**
+   * 抽屉里发起「标记失效」会叠一个确认框上来，两者都各自监听 document 的 Escape：
+   * 抽屉那份注册得更早（打开抽屉时就挂上）、会先跑，不让位就会一按 Esc 把确认框和抽屉一起收走，
+   * 用户刚看到的详情、滚动位置、正在读的字段全没了 —— 而他只是想从确认框里退出来。
+   * 与首页历史抽屉那条（HomePage.test.tsx「keeps the mobile history drawer open …」）同一类问题。
+   */
+  it('keeps the details drawer open when Escape backs out of the status confirm', async () => {
+    mockListResponses(listResponse());
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看 贵州茅台 AI 建议详情' }));
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.click(within(drawer).getByRole('button', { name: '标记失效' }));
+    expect(await screen.findByRole('heading', { name: '更新信号状态' })).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(2);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1));
+    expect(screen.queryByRole('heading', { name: '更新信号状态' })).not.toBeInTheDocument();
+    // 断言收在剩下的那个 dialog 里：`趋势保持` 在列表卡片上也有，全局查会命中两处。
+    expect(within(screen.getByRole('dialog')).getByText('趋势保持')).toBeInTheDocument();
+    expect(decisionSignalsApi.updateStatus).not.toHaveBeenCalled();
   });
 
   it('submits useful feedback from the details drawer', async () => {

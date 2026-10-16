@@ -1,5 +1,6 @@
 import type React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decisionSignalsApi } from '../../api/decisionSignals';
 import { createApiError, createParsedApiError } from '../../api/error';
@@ -1364,6 +1365,106 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitFor(() => expect(createTrade).toHaveBeenCalled());
     expect(createTrade).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 交易弹窗里点开日期选择器后按 Esc：日期选择器也监听 `document` 的 keydown，而弹窗那份注册得
+   * 更早、会先跑，不让位就会一次把两层一起关掉——表单里已填的股票、数量、价格全丢，而用户只是
+   * 想收起日历。与决策信号页详情抽屉、首页窄屏历史抽屉同一类问题。
+   */
+  it('keeps the trade dialog open when Escape closes the date picker above it', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    await changeSelect(0, 'Main (#1)');
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    // 触发按钮的可访问名就是它展示的日期（`tradeDate` 默认今天）。
+    fireEvent.click(within(dialog).getByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ }));
+    expect(await screen.findByRole('dialog', { name: '选择日期' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择日期' })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: '录入交易' })).toBeInTheDocument();
+  });
+
+  /**
+   * 同一类问题的另一个实例：交易弹窗里「方向」下拉同样是 portal 到 body、同样在 `document` 上
+   * 监听 Esc，弹窗那份注册更早，一次 Esc 会把下拉和整个表单一起关掉。
+   */
+  it('keeps the trade dialog open when Escape closes the direction dropdown above it', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    await changeSelect(0, 'Main (#1)');
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '方向' }));
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: '录入交易' })).toBeInTheDocument();
+  });
+
+  /**
+   * 三层叠加（弹窗 → 日历 → 「方向」下拉）时逐层收，一次 Esc 只收最上面那层。这条盯的是前两例
+   * 都没覆盖的形态：**日历自己作为下层**。它同样在 `document` 上收 Esc，只在弹窗单开时测过它与
+   * 弹窗的关系；若它在「上面还压着一层」时不让位，第一次 Esc 就会把日历和下拉一起收掉，用户只是
+   * 想从下拉里退出来，却连刚翻到那个月的日历也没了。
+   */
+  it('peels three stacked layers one Escape at a time from the top', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    await changeSelect(0, 'Main (#1)');
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ }));
+    expect(await screen.findByRole('dialog', { name: '选择日期' })).toBeInTheDocument();
+    // 点开下拉不会经过 mousedown，日历因此仍开着——这正是三层叠加的现实入口（键盘同理）。
+    fireEvent.click(within(dialog).getByRole('button', { name: '方向' }));
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: '选择日期' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '录入交易' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择日期' })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: '录入交易' })).toBeInTheDocument();
+  });
+
+  /**
+   * 反过来把下拉放在下层：先开「方向」下拉、再在它上面开日历（指针下点日历不经过 mousedown，
+   * 键盘上 Shift+Tab 同样能回到日历触发按钮），这次该让位的是下拉，而关掉的只能是日历。
+   */
+  it('keeps the direction dropdown open when Escape closes the date picker above it', async () => {
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    await changeSelect(0, 'Main (#1)');
+    fireEvent.click(screen.getByRole('button', { name: '录入交易' }));
+    const dialog = await screen.findByRole('dialog', { name: '录入交易' });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '方向' }));
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ }));
+    expect(await screen.findByRole('dialog', { name: '选择日期' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择日期' })).not.toBeInTheDocument());
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '录入交易' })).toBeInTheDocument();
   });
 
   it('点击持仓行可在事件记录聚焦该股票的交易事件', async () => {

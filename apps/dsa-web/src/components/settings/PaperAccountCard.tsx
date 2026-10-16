@@ -6,9 +6,8 @@ import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { formatUiText } from '../../i18n/uiText';
 import { PAPER_TRADING_TEXT } from '../../locales/featureText';
 import type { PaperAccount } from '../../types/paper';
-import { Badge, Button, ConfirmDialog, Input } from '../common';
+import { Badge, Button, ConfirmDialog, Input, useToastSync } from '../common';
 import { SettingsAlert } from './SettingsAlert';
-import { ToastPortal } from '../../contexts/ToastHostContext';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
 // 与模拟盘页一致的数字口径。
@@ -76,6 +75,18 @@ export const PaperAccountCard: React.FC = () => {
     }
   };
 
+  // 卡片级结果提示统一走全局右上角通道（详见 `useToastSync`）。
+  useToastSync('paper-account-error', actionError, (message) => ({
+    variant: 'danger',
+    title: text.resetFailed,
+    message,
+  }));
+  useToastSync('paper-account-success', successMessage, (message) => ({
+    variant: 'success',
+    title: t('settings.actionSuccess'),
+    message,
+  }));
+
   return (
     <SettingsSectionCard
       title={text.title}
@@ -122,14 +133,6 @@ export const PaperAccountCard: React.FC = () => {
       <p className="text-xs leading-6 text-muted-text">{text.resetCardHint}</p>
 
       {/* 重置账户的结果送全局右上角容器；卡片自身的加载失败占位留在卡片里。 */}
-      <ToastPortal>
-        {actionError ? (
-          <SettingsAlert presentation="toast" className="pointer-events-auto" title={text.resetFailed} message={actionError} variant="error" />
-        ) : null}
-        {successMessage ? (
-          <SettingsAlert presentation="toast" className="pointer-events-auto" title={t('settings.actionSuccess')} message={successMessage} variant="success" />
-        ) : null}
-      </ToastPortal>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

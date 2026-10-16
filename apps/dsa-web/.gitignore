@@ -16,6 +16,12 @@ test-results
 # 一次性验收截图（liquid glass 视觉回归），不入库
 .liquid-glass-shots/
 
+# 本地协作产物 / 验收证据（同根目录 `.claude/*` 规则：reviews 是本地证据不入库，skills 可入库）。
+# 根目录那条 `.claude/*` 锚定在根，管不到子目录里的同名目录，所以要在这里再写一遍。
+.claude/*
+!.claude/skills/
+!.claude/skills/**
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

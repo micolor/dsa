@@ -1,5 +1,6 @@
 import type React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveWebBuildInfo } from '../../utils/constants';
 import type { SetupStatusResponse } from '../../types/systemConfig';
@@ -2587,7 +2588,9 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    expect(await screen.findByText(/发现新版本:当前 3\.12\.0，最新 3\.13\.0/)).toBeInTheDocument();
+    // 统一后的浮层提示把标题与正文分成两行，不再拼成「标题:正文」一条文本。
+    expect(await screen.findByText('发现新版本')).toBeInTheDocument();
+    expect(screen.getByText(/^当前 3\.12\.0，最新 3\.13\.0。/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '前往下载' })).toBeInTheDocument();
   });
 
@@ -2599,7 +2602,8 @@ describe('SettingsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '检查更新' }));
 
     await waitFor(() => expect(desktopCheckForUpdates).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('已是最新版本:当前桌面端已是最新版本。')).toBeInTheDocument();
+    expect(await screen.findByText('已是最新版本')).toBeInTheDocument();
+    expect(screen.getByText('当前桌面端已是最新版本。')).toBeInTheDocument();
   });
 
   it('opens GitHub release page from desktop update notice', async () => {
@@ -2637,7 +2641,8 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    expect(await screen.findByText('更新已下载:新版本 3.13.0 已下载，可重启应用完成安装。')).toBeInTheDocument();
+    expect(await screen.findByText('更新已下载')).toBeInTheDocument();
+    expect(screen.getByText('新版本 3.13.0 已下载，可重启应用完成安装。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '重启安装' }));
 

@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
@@ -2659,6 +2660,160 @@ describe('HomePage', () => {
     await waitFor(() => {
       expect(container.querySelector('.page-drawer-overlay')).toBeFalsy();
     });
+  });
+
+  it('closes the mobile history drawer with the same button that opened it', async () => {
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 0,
+      page: 1,
+      limit: 20,
+      items: [],
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    const trigger = await screen.findByRole('button', { name: '历史记录' });
+    fireEvent.click(trigger);
+
+    expect(container.querySelector('.page-drawer-overlay')).toBeTruthy();
+
+    // 抽屉整层盖住了页头，打开后唯一还能按到的关闭入口就是同一个按钮，
+    // 所以它必须变成 toggle（此时它自称「关闭历史记录」）。
+    const closeTrigger = screen.getByRole('button', { name: '关闭历史记录' });
+    expect(closeTrigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(closeTrigger);
+
+    await waitFor(() => {
+      expect(container.querySelector('.page-drawer-overlay')).toBeFalsy();
+    });
+  });
+
+  it('closes the mobile history drawer on Escape', async () => {
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 0,
+      page: 1,
+      limit: 20,
+      items: [],
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '历史记录' }));
+    expect(container.querySelector('.page-drawer-overlay')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(container.querySelector('.page-drawer-overlay')).toBeFalsy();
+    });
+  });
+
+  it('exposes the mobile history drawer as a modal dialog for screen readers', async () => {
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 0,
+      page: 1,
+      limit: 20,
+      items: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '历史记录' }));
+
+    // 抽屉整层压住页面，但这段手写的浮层此前没有任何 role / aria 语义：读屏用户打开后
+    // 只会听到内容突然多了一堆，既不知道这是个可以关掉的浮层，也不知道底下还有一页。
+    // 与 `Drawer` 组件（`role="dialog"` + `aria-modal="true"`）保持同一套语义。
+    const drawer = await screen.findByRole('dialog', { name: '历史记录' });
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('keeps the mobile history drawer open when Escape closes a modal on top of it', async () => {
+    configureWatchlistBatch(1);
+
+    const { container } = render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '历史记录' }));
+    expect(container.querySelector('.page-drawer-overlay')).toBeTruthy();
+
+    // 抽屉里点「删除 T001 历史记录」：模态确认框叠在抽屉之上。
+    const drawerRoot = container.querySelector('.page-drawer-overlay')?.parentElement as HTMLElement;
+    fireEvent.click(within(drawerRoot).getByRole('button', { name: '删除 T001 历史记录' }));
+    await screen.findByRole('dialog', { name: '删除分析记录' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    // Esc 只收最上面那层。抽屉与确认框都监听 document，抽屉那份注册更早、会先跑，
+    // 所以它得自己让位，否则一按 Esc 两层一起没。
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '删除分析记录' })).toBeFalsy();
+    });
+    // 看按钮而不看 `.page-drawer-overlay`：关抽屉有退出动画，节点还会在 DOM 里待一会儿，
+    // 用节点判断会把「其实已经关了」误判成「还开着」。按钮文案与 aria-expanded 跟状态同步。
+    expect(screen.getByRole('button', { name: '关闭历史记录' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('re-reads the Shanghai date after the day rolls over instead of freezing it at mount', async () => {
+    // 只在 Date 上装假时钟：RTL 的 waitFor / findBy 仍走真实定时器，不必手工推进。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-03-18T04:00:00Z')); // 上海 03-18 12:00
+      vi.mocked(historyApi.getStockBarList).mockResolvedValue({ total: 0, items: [] });
+      vi.mocked(historyApi.getList).mockResolvedValue({
+        total: 0,
+        page: 1,
+        limit: 100,
+        items: [],
+      });
+
+      render(
+        <MemoryRouter>
+          <HomePage />
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: '今日' }));
+
+      // 上海日 03-18：相邻日期一并查询，再按上海日精确过滤。
+      await waitFor(() => {
+        expect(historyApi.getList).toHaveBeenCalledWith(
+          { startDate: '2026-03-17', endDate: '2026-03-19', page: 1, limit: 100 },
+          { signal: expect.any(AbortSignal) },
+        );
+      });
+
+      vi.mocked(historyApi.getList).mockClear();
+
+      // 设备休眠跨过零点后回到前台：要按 03-19 重新取数，而不是继续用挂载时的 03-18。
+      vi.setSystemTime(new Date('2026-03-19T04:00:00Z'));
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      await waitFor(() => {
+        expect(historyApi.getList).toHaveBeenCalledWith(
+          { startDate: '2026-03-18', endDate: '2026-03-20', page: 1, limit: 100 },
+          { signal: expect.any(AbortSignal) },
+        );
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps same-stock history range controls in empty result state and allows switching back', async () => {

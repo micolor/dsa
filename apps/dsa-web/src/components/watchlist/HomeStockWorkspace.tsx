@@ -13,8 +13,7 @@ import {
   RefreshCw,
   Star,
 } from 'lucide-react';
-import { Badge, Button, Dialog, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip } from '../common';
-import { ToastPortal } from '../../contexts/ToastHostContext';
+import { Badge, Button, Dialog, InlineAlert, Input, ListItemRow, ScrollArea, SentimentBadge, StatusDot, Tooltip, useToastSync } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { StockBar } from '../history';
 import { useStockPoolStore } from '../../stores';
@@ -473,6 +472,19 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
     </div>
   );
 
+  // 批量提交结果与自选股提示是操作结果，统一走全局右上角通道。
+  // role="status"（polite）保持不变：它是对用户操作的回应，不该打断当前朗读。
+  useToastSync('home-batch-status', batchStatus, (status) => ({
+    role: 'status',
+    variant: status.variant,
+    message: status.message,
+  }));
+  useToastSync('home-watchlist-message', watchlistMessage, (message) => ({
+    role: 'status',
+    variant: 'info',
+    message,
+  }));
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col gap-2 ${className}`}>
       {renderTabs}
@@ -612,29 +624,6 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                 <Plus className="h-4 w-4" aria-hidden="true" />
               </Button>
             </form>
-            {/* 批量提交结果与自选股提示是操作结果，送全局右上角容器。
-                role="status"（polite）保持不变：它是对用户操作的回应，
-                不该打断当前朗读。 */}
-            <ToastPortal>
-              {batchStatus ? (
-                <InlineAlert
-                  elevated
-                  role="status"
-                  variant={batchStatus.variant}
-                  message={batchStatus.message}
-                  className="pointer-events-auto"
-                />
-              ) : null}
-              {watchlistMessage ? (
-                <InlineAlert
-                  elevated
-                  role="status"
-                  variant="info"
-                  message={watchlistMessage}
-                  className="pointer-events-auto"
-                />
-              ) : null}
-            </ToastPortal>
             {visibleWorkspaceNotice ? (
               <InlineAlert
                 variant="warning"

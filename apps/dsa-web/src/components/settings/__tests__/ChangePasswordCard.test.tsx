@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../../testUtils/renderWithToastHost';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangePasswordCard } from '../ChangePasswordCard';
 

@@ -1,7 +1,7 @@
 import type React from 'react';
 import { lazy, memo, Suspense, useCallback, useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
-import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../common';
+import { ApiErrorAlert, Button, EmptyState } from '../common';
 import { DashboardStateBlock } from '../dashboard';
 import { StockHistoryTrendDrawer } from '../history';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
@@ -31,16 +31,21 @@ const MarketReviewReportView = lazy(() =>
   import('./MarketReviewReportView').then((m) => ({ default: m.MarketReviewReportView })),
 );
 
+/**
+ * 大盘复盘的终态提示。
+ *
+ * 只有终态：发起、完成、超时、状态异常。「进行中」不在这里 —— 同一条任务已经在左下角
+ * 全局任务栏（`FloatingTaskPanel`，带进度与脉冲点）里实时显示，页内再挂一条常驻横幅
+ * 是同一份状态的两处出口（后端 `trigger_market_review` 走的就是通用任务队列，
+ * `stock_code="market_review"`，所以任务栏本来就能看到它）。
+ */
 export type MarketReviewNotice = {
-  variant: 'success' | 'warning' | 'danger';
+  variant: 'success' | 'danger';
   title: string;
   message: string;
 } | null;
 
 export interface HomeReportRegionProps {
-  marketReviewNotice: MarketReviewNotice;
-  marketReviewError: ParsedApiError | null;
-  onDismissMarketReviewError: () => void;
   marketReviewReport: string | null;
   marketReviewPayload: MarketReviewPayload | null;
   /** 实时大盘复盘卡片对应的落库记录 ID；缺失时分享/运行流入口不可用 */
@@ -77,6 +82,12 @@ export interface HomeReportRegionProps {
 }
 
 /**
+ * 大盘复盘「完成」提示的停留时长：够读完一行结果摘要，也不至于一直占着右上角。
+ * 终态提示本身由 `HomePage` 用 `Toast` 直接渲染。
+ */
+export const MARKET_REVIEW_NOTICE_AUTO_DISMISS_MS = 5000;
+
+/**
  * 首页右侧报告区（大盘复盘状态/报告 + 个股报告 + 历史趋势 + 空态）。
  *
  * 该区域不依赖 `activeTasks`：任务进度 SSE 更新只会触发 HomePage 重渲染，
@@ -84,9 +95,6 @@ export interface HomeReportRegionProps {
  * 昂贵的报告子树不会随每次 progress 事件重建。
  */
 const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
-  marketReviewNotice,
-  marketReviewError,
-  onDismissMarketReviewError,
   marketReviewReport,
   marketReviewPayload,
   marketReviewRecordId,
@@ -153,27 +161,9 @@ const HomeReportRegionInner: React.FC<HomeReportRegionProps> = ({
 
   return (
     <>
-      {marketReviewNotice ? (
-        <div className="mb-3">
-          <InlineAlert
-            variant={marketReviewNotice.variant}
-            title={marketReviewNotice.title}
-            message={marketReviewNotice.message}
-            className="rounded-xl px-3 py-2 text-xs shadow-none"
-          />
-        </div>
-      ) : null}
-
-      {marketReviewError ? (
-        <div className="mb-3">
-          <ApiErrorAlert
-            error={marketReviewError}
-            className="mb-1"
-            onDismiss={onDismissMarketReviewError}
-          />
-        </div>
-      ) : null}
-
+      {/* 大盘复盘失败只在右上角 toast 出一条（`HomePage` 的 `useToastSync`），页内不再重复：
+          同一次失败在内容和右上角各出一遍，读起来是两件事。终态与失败详情都由 toast 承担，
+          「进行中」则由左下角任务栏实时显示。 */}
       {marketReviewReport ? (
         <Suspense
           fallback={(

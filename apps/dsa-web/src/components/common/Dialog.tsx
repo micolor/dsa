@@ -2,6 +2,7 @@ import type React from 'react';
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 
 interface DialogProps {
   isOpen: boolean;
@@ -28,10 +29,13 @@ export const Dialog: React.FC<DialogProps> = ({
   maxHeightClassName = 'max-h-[88vh]',
   children,
 }) => {
+  const { modalRef, isCovered } = useEscTopLayer();
+
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // 上面还压着别的模态（例如从对话框里发起的确认框）时让位，见 `useEscTopLayer`。
+      if (e.key === 'Escape' && !isCovered()) {
         onClose();
       }
     };
@@ -42,7 +46,7 @@ export const Dialog: React.FC<DialogProps> = ({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isCovered]);
 
   if (!isOpen) return null;
 
@@ -52,6 +56,7 @@ export const Dialog: React.FC<DialogProps> = ({
       onClick={onClose}
     >
       <div
+        ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}

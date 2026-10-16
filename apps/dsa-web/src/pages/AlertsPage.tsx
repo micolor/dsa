@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BellRing, X } from 'lucide-react';
+import { BellRing } from 'lucide-react';
 import { alertsApi } from '../api/alerts';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -14,8 +14,7 @@ import {
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
 import { EventFactList } from '../components/alerts/EventFactList';
 import { filterEventTriggers } from '../components/alerts/eventFacts';
-import { ApiErrorAlert, AppPage, AutoDismissToast, Dialog, EmptyState, InlineAlert, Loading, Pagination } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { ApiErrorAlert, AppPage, Dialog, EmptyState, Loading, Pagination, useToastSync } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText } from '../i18n/uiText';
@@ -177,6 +176,39 @@ const AlertsPage: React.FC = () => {
   const [busyRule, setBusyRule] = useState<AlertRuleBusyState | null>(null);
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
   const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
+
+  // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
+  // 页面自己不再渲染浮层，于是外形和关闭/自动消失语义不必在这里重复一遍。
+  useToastSync('alerts-create-success', createSuccess, (message) => ({
+    variant: 'success',
+    title: text.createSuccess,
+    message,
+    onDismiss: () => setCreateSuccess(null),
+  }));
+  useToastSync('alerts-test-result', testResult, (result) => ({
+    variant: testVariant(result),
+    title: text.testResult,
+    message: renderTestResultMessage(result, text, dryRunLabels, recordLabels),
+    autoDismissMs: 5000,
+    onDismiss: () => setTestResult(null),
+  }));
+  useToastSync('alerts-rules-error', rulesError, (error) => ({
+    error,
+    onDismiss: () => setRulesError(null),
+  }));
+  useToastSync('alerts-triggers-error', triggersError, (error) => ({
+    error,
+    onDismiss: () => setTriggersError(null),
+  }));
+  useToastSync('alerts-events-error', eventsError, (error) => ({
+    error,
+    onDismiss: () => setEventsError(null),
+  }));
+  useToastSync('alerts-notifications-error', notificationsError, (error) => ({
+    error,
+    onDismiss: () => setNotificationsError(null),
+  }));
+
   const rulesRequestIdRef = useRef(0);
   const triggersRequestIdRef = useRef(0);
   const eventsRequestIdRef = useRef(0);
@@ -379,50 +411,6 @@ const AlertsPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-5">
-      {/* 操作结果类提示统一送全局右上角容器，都由页面状态控制显隐。 */}
-      <ToastPortal>
-        {createSuccess ? (
-          <InlineAlert
-            elevated
-            title={text.createSuccess}
-            message={createSuccess}
-            variant="success"
-            className="pointer-events-auto"
-            action={(
-              <button
-                type="button"
-                onClick={() => setCreateSuccess(null)}
-                className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label={text.close}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-          />
-        ) : null}
-        {testResult ? (
-          /* 测试结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
-          <AutoDismissToast active={testResult} onDismiss={() => setTestResult(null)} delayMs={5000}>
-            <InlineAlert
-              elevated
-              title={text.testResult}
-              variant={testVariant(testResult)}
-              message={renderTestResultMessage(testResult, text, dryRunLabels, recordLabels)}
-              className="pointer-events-auto"
-              action={(
-                <button
-                  type="button"
-                  onClick={() => setTestResult(null)}
-                  className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                  aria-label={text.close}
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </button>
-              )}
-            />
-          </AutoDismissToast>
-        ) : null}
-      </ToastPortal>
       <div className="flex min-h-full flex-col gap-4">
         <div className="grid grid-cols-4 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
           {tabs.map((tab) => {
@@ -445,11 +433,6 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'rules' ? (
           <>
-            {rulesError ? (
-              <ToastPortal>
-                <ApiErrorAlert elevated error={rulesError} onDismiss={() => setRulesError(null)} className="pointer-events-auto" />
-              </ToastPortal>
-            ) : null}
             <AlertRuleList
               className="flex min-h-0 flex-1 flex-col"
               rules={rules}
@@ -482,11 +465,6 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'history' ? (
           <>
-            {triggersError ? (
-              <ToastPortal>
-                <ApiErrorAlert elevated error={triggersError} onDismiss={() => setTriggersError(null)} className="pointer-events-auto" />
-              </ToastPortal>
-            ) : null}
             <AlertTriggerHistory
               triggers={triggers}
               isLoading={triggersLoading}
@@ -500,22 +478,12 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'events' ? (
           <>
-            {eventsError ? (
-              <ToastPortal>
-                <ApiErrorAlert elevated error={eventsError} onDismiss={() => setEventsError(null)} className="pointer-events-auto" />
-              </ToastPortal>
-            ) : null}
             <EventFactList triggers={events} isLoading={eventsLoading} />
           </>
         ) : null}
 
         {activeTab === 'notifications' ? (
           <>
-            {notificationsError ? (
-              <ToastPortal>
-                <ApiErrorAlert elevated error={notificationsError} onDismiss={() => setNotificationsError(null)} className="pointer-events-auto" />
-              </ToastPortal>
-            ) : null}
             <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
               <DashboardPanelHeader
                 className="mb-3"

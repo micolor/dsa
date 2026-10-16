@@ -1,18 +1,21 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { BarChart3, Check, SlidersHorizontal, X } from 'lucide-react';
+import { BarChart3, Check, SlidersHorizontal } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { Button, ConfirmDialog, Drawer, InlineAlert, Tooltip } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { Button, ConfirmDialog, Drawer, InlineAlert, Tooltip, useToastSync } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
-import { HomeReportRegion, type MarketReviewNotice } from '../components/report/HomeReportRegion';
+import {
+  HomeReportRegion,
+  MARKET_REVIEW_NOTICE_AUTO_DISMISS_MS,
+  type MarketReviewNotice,
+} from '../components/report/HomeReportRegion';
 import { MarketReviewRegionSelector } from '../components/market-review/MarketReviewRegionSelector';
 import { RunFlowPanel } from '../components/run-flow';
 import {
@@ -22,6 +25,8 @@ import {
   type WatchlistAnalyzeMode,
 } from '../components/watchlist/HomeStockWorkspace';
 import { useDashboardLifecycle, useHomeDashboardState } from '../hooks';
+import { useEscTopLayer } from '../hooks/useEscTopLayer';
+import { useShanghaiToday } from '../hooks/useShanghaiToday';
 import { useWatchlist } from '../hooks/useWatchlist';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import type { SetupStatusResponse } from '../types/systemConfig';
@@ -35,7 +40,6 @@ import type {
   TaskInfo,
 } from '../types/analysis';
 import type { RunFlowSnapshotSource } from '../types/runFlow';
-import { getTodayInShanghai } from '../utils/format';
 import { stockCodeKey } from '../utils/stockCode';
 import { isMarketReviewTask } from '../utils/taskKind';
 import { isStockCodeRedundantWithName } from '../utils/stockName';
@@ -277,10 +281,12 @@ const HomePage: React.FC = () => {
   const mountedRef = useRef(true);
   const stockBarLoadStartedRef = useRef(false);
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
+  const sidebarTriggerRef = useRef<HTMLButtonElement | null>(null);
   const strategyMenuRef = useRef<HTMLDivElement | null>(null);
   const strategyButtonRef = useRef<HTMLButtonElement | null>(null);
   const strategyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const strategyInitialFocusIndexRef = useRef<number | null>(null);
+  const { modalRef, isCovered } = useEscTopLayer();
 
   const stopMarketReviewPolling = useCallback(() => {
     // 先作废序号再清定时器：已发出去、还没回来的那次请求不能再改写状态。
@@ -310,6 +316,32 @@ const HomePage: React.FC = () => {
     return () => { mountedRef.current = false; };
   }, []);
   useEffect(() => stopMarketReviewPolling, [stopMarketReviewPolling]);
+
+  // 窄屏抽屉整层压在页头上，键盘只能从 document 收 Esc。与 `Shell` 的导航菜单同一套做法：
+  // Esc 关掉，并把焦点还给打开它的按钮。
+  useEffect(() => {
+    if (!sidebarOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      // 抽屉里点「删除…历史记录」会叠一个 `ConfirmDialog` 上来，两者都监听 document：
+      // 抽屉这份注册得更早、会先跑，不让位就会一按 Esc 把确认框和抽屉一起收走。
+      // 规则集中在 `useEscTopLayer` 一处，和 `Drawer` / `Dialog` / `ConfirmDialog` 共用同一套判断。
+      if (isCovered()) {
+        return;
+      }
+      event.preventDefault();
+      setSidebarOpen(false);
+      sidebarTriggerRef.current?.focus();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen, isCovered]);
   const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
 
   const {
@@ -800,6 +832,10 @@ const HomePage: React.FC = () => {
     setMarketReviewError(null);
   }, []);
 
+  const dismissMarketReviewNotice = useCallback(() => {
+    updateMarketReviewNotice(null);
+  }, [updateMarketReviewNotice]);
+
   const toggleHistoryTrend = useCallback(() => {
     if (isHistoryTrendOpen) {
       closeHistoryTrend();
@@ -973,7 +1009,7 @@ const HomePage: React.FC = () => {
       const isCurrentPoll = () =>
         mountedRef.current && marketReviewPollGeneration.current === generation;
 
-      // 轮询每 2s 重建 notice 对象；内容未变化时跳过 setState，避免无谓的整页重渲染。
+      // 内容未变化时跳过 setState：终态提示只写一次，但失败重试等路径可能再写一遍同样的内容。
       const applyMarketReviewNotice = (notice: MarketReviewNotice) => {
         const prev = marketReviewNoticeRef.current;
         const unchanged = prev != null && notice != null
@@ -1008,17 +1044,9 @@ const HomePage: React.FC = () => {
             return false;
           }
           if (status.status === 'pending' || status.status === 'processing') {
+            // 进行中不再往 notice 里写：进度由左下角全局任务栏承担（同一条任务，
+            // 带进度与脉冲点）。这里只清掉上一轮留下的正文，等终态再出提示。
             clearLiveMarketReviewReport();
-            const progress = typeof status.progress === 'number'
-              ? `${status.progress}%`
-              : t('home.progressActive');
-            applyMarketReviewNotice({
-              variant: 'warning',
-              title: t('home.marketReviewInProgress'),
-              message: status.region
-                ? t('home.taskStatusWithRegion', { status: status.status, progress, region: status.region })
-                : t('home.taskStatus', { status: status.status, progress }),
-            });
             return true;
           }
 
@@ -1155,7 +1183,9 @@ const HomePage: React.FC = () => {
     }
   }, [clearLiveMarketReviewReport, marketReviewRegionOverride, notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t, updateMarketReviewNotice]);
 
-  const todayDateKey = useMemo(() => getTodayInShanghai(), []);
+  // 上海「今日」会跨零点，必须用会自己更新的值：挂载时算一次的常量会让常驻的
+  // 桌面端 / 隔夜标签页一直按昨天过滤（今日列表空、覆盖数恒 0、已分析的重跑）。
+  const todayDateKey = useShanghaiToday();
   useEffect(() => {
     if (sidebarWorkspaceTab !== 'today') {
       return undefined;
@@ -1545,6 +1575,45 @@ const HomePage: React.FC = () => {
     section.scrollTop += e.deltaY;
   }, []);
 
+  // 删除、重复任务、大盘复盘终态这三类提示都走全站浮层：状态清了提示跟着撤下，
+  // 不用每个调用方再手写一遍显隐。
+  useToastSync('home-delete-error', deleteError, (message) => ({
+    variant: 'danger',
+    title: t('common.deleteFailed'),
+    message,
+    onDismiss: () => setDeleteError(null),
+  }));
+
+  // 重复任务提示与输入框内的校验互斥：输入框已经报错时不重复提示同一件事。
+  useToastSync(
+    'home-duplicate-task',
+    !inputError && duplicateError && duplicateBannerVisible ? duplicateError : null,
+    (message) => ({
+      variant: 'warning',
+      title: t('home.duplicateTask'),
+      message,
+      onDismiss: dismissDuplicateBanner,
+    }),
+  );
+
+  // 大盘复盘的提示只出终态（提交 / 完成 / 超时 / 状态异常 + 失败详情）：「进行中」交给
+  // 左下角全局任务栏，它本来就是同一条任务的实时出口。notice 与 error 是同一件事的两面
+  // （任务返回了终态、或请求本身失败），放在同一列里。这里是这类提示的唯一出口：
+  // `HomeReportRegion` 里曾经也内联渲染一遍 error，同一次失败页内页外各出一条，
+  // 看起来像两次失败，已移除。
+  useToastSync('home-market-review-notice', marketReviewNotice, (notice) => ({
+    variant: notice.variant,
+    title: notice.title,
+    message: notice.message,
+    onDismiss: dismissMarketReviewNotice,
+    // 完成态自动消失；超时 / 状态异常是需要处理的异常，留在屏幕上等用户关掉。
+    autoDismissMs: notice.variant === 'success' ? MARKET_REVIEW_NOTICE_AUTO_DISMISS_MS : undefined,
+  }));
+
+  useToastSync('home-market-review-error', marketReviewError, (parsed) => ({
+    error: parsed,
+    onDismiss: dismissMarketReviewError,
+  }));
   return (
     <MotionConfig reducedMotion="user">
     <h1 className="sr-only">{t('home.pageTitle')}</h1>
@@ -1558,9 +1627,13 @@ const HomePage: React.FC = () => {
           <div className="flex min-w-0 flex-1 flex-col gap-2.5 lg:flex-row lg:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <button
-                onClick={() => setSidebarOpen(true)}
+                ref={sidebarTriggerRef}
+                // 抽屉打开时整层盖住了页头，这个按钮是唯一还够得着的关闭入口，
+                // 所以它是 toggle 而不是单纯的「打开」。
+                onClick={() => setSidebarOpen((open) => !open)}
                 className="md:hidden -ml-1 flex-shrink-0 rounded-lg p-1.5 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
-                aria-label={t('home.historyButton')}
+                aria-expanded={sidebarOpen}
+                aria-label={sidebarOpen ? t('home.closeHistory') : t('home.historyButton')}
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1599,6 +1672,9 @@ const HomePage: React.FC = () => {
                         id="strategy-menu"
                         role="menu"
                         aria-labelledby="strategy-menu-button"
+                        // 参与 `useEscTopLayer` 的叠层排序：本层自己收 Esc（见 `handleStrategyMenuKeyDown`，
+                        // 焦点在层内才会触发），标记是为了让压在它下面的层让位。与地区菜单同一处理。
+                        data-esc-layer="true"
                         onKeyDown={handleStrategyMenuKeyDown}
                         initial={{ opacity: 0, scale: 0.97, transformOrigin: 'top right' }}
                         animate={{ opacity: 1, scale: 1, transformOrigin: 'top right' }}
@@ -1696,37 +1772,6 @@ const HomePage: React.FC = () => {
           </div>
         ) : null}
 
-        <ToastPortal>
-          {deleteError ? (
-            <InlineAlert
-              elevated
-              variant="danger"
-              title={t('common.deleteFailed')}
-              message={deleteError}
-              className="pointer-events-auto"
-            />
-          ) : null}
-          {!inputError && duplicateError && duplicateBannerVisible ? (
-            <InlineAlert
-              elevated
-              variant="warning"
-              title={t('home.duplicateTask')}
-              message={duplicateError}
-              action={(
-                <button
-                  type="button"
-                  onClick={dismissDuplicateBanner}
-                  aria-label={t('common.close')}
-                  className="-my-1 -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg opacity-70 transition-colors hover:bg-warning/15 hover:opacity-100"
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </button>
-              )}
-              className="pointer-events-auto"
-            />
-          ) : null}
-        </ToastPortal>
-
         {/* 配置不完整提示常驻在首页，而首页右上角正是「大盘复盘 / 分析」按钮所在：
             浮动到右上角会长期盖住主操作入口，所以这条留在原地。 */}
         {setupNeedsAction ? (
@@ -1770,6 +1815,13 @@ const HomePage: React.FC = () => {
                   transition={{ duration: 0.18, ease: 'easeOut' }}
                 />
                 <motion.div
+                  // 与 `Drawer` 组件同一套语义：整层压住页面的浮层要作为模态对话框暴露出去，
+                  // 否则读屏用户打开后只听到内容突然多了一堆，既不知道这是个能关掉的浮层，
+                  // 也不知道底下还有一页。`modalRef` 把「这一层」交给上面的 Esc 让位判断认领。
+                  ref={modalRef}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={t('home.historyButton')}
                   className="dashboard-card absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
                   onClick={(event) => event.stopPropagation()}
                   initial={{ x: '-100%' }}
@@ -1789,9 +1841,6 @@ const HomePage: React.FC = () => {
             className="flex-1 min-w-0 min-h-0 overflow-x-auto overflow-y-auto px-3 pb-4 md:px-4 touch-pan-y"
           >
             <HomeReportRegion
-              marketReviewNotice={marketReviewNotice}
-              marketReviewError={marketReviewError}
-              onDismissMarketReviewError={dismissMarketReviewError}
               marketReviewReport={marketReviewReport}
               marketReviewPayload={marketReviewPayload}
               marketReviewRecordId={marketReviewRecordId}
@@ -1873,6 +1922,7 @@ const HomePage: React.FC = () => {
         onConfirm={confirmDeleteStock}
         onCancel={() => setPendingDeleteStock(null)}
       />
+
     </div>
     </MotionConfig>
   );

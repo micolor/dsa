@@ -34,6 +34,7 @@ export function SuggestionsList({
   return (
     <ul
       id="suggestions-list"
+      data-esc-layer="true"
       className="z-[160] border-x border-b rounded-b-lg rounded-t-none max-h-60 overflow-auto"
       style={{
         ...style,

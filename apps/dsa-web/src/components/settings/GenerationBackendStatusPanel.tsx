@@ -5,9 +5,7 @@ import { systemConfigApi } from '../../api/systemConfig';
 import { getParsedApiError, type ParsedApiError } from '../../api/error';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { GenerationBackendStatus, GenerationBackendStatusResponse, SystemConfigUpdateItem, TestGenerationBackendResponse } from '../../types/systemConfig';
-import { ApiErrorAlert, Badge, Button } from '../common';
-import { SettingsAlert } from './SettingsAlert';
-import { ToastPortal } from '../../contexts/ToastHostContext';
+import { Badge, Button, useToastSync } from '../common';
 
 type Translate = ReturnType<typeof useUiLanguage>['t'];
 
@@ -180,6 +178,15 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
     }
   }, [maskToken, requestItems]);
 
+  // 面板级结果提示统一走全局右上角通道：状态在就弹出，状态清了（或面板卸载）自动撤下。
+  // 「换了一批草稿就撤掉过期的冒烟结果」这条契约由 `smokeResult` 归零自然带出，不必额外写。
+  useToastSync('generation-backend-error', error, (err) => ({ error: err }));
+  useToastSync('generation-backend-smoke', smokeResult, (result) => ({
+    variant: result.success ? 'success' : 'warning',
+    title: result.success ? t('settings.generationBackendSmokePassed') : t('settings.generationBackendSmokeFailed'),
+    message: result.success ? t('settings.generationBackendSmokePassedMessage') : result.message,
+  }));
+
   return (
     <div data-testid="generation-backend-status-panel" className="space-y-3 glass-card !border-transparent p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -201,18 +208,6 @@ export const GenerationBackendStatusPanel: React.FC<GenerationBackendStatusPanel
         </div>
       </div>
       {/* 冒烟测试的结果送全局右上角容器。 */}
-      <ToastPortal>
-        {error ? <ApiErrorAlert elevated error={error} className="pointer-events-auto" /> : null}
-        {smokeResult ? (
-          <SettingsAlert
-            presentation="toast"
-            className="pointer-events-auto"
-            title={smokeResult.success ? t('settings.generationBackendSmokePassed') : t('settings.generationBackendSmokeFailed')}
-            message={smokeResult.success ? t('settings.generationBackendSmokePassedMessage') : smokeResult.message}
-            variant={smokeResult.success ? 'success' : 'warning'}
-          />
-        ) : null}
-      </ToastPortal>
       <BackendStatusRow title={t('settings.generationBackendPrimary')} status={status?.primary} t={t} />
       <BackendStatusRow title={t('settings.generationBackendFallback')} status={status?.fallback} t={t} />
     </div>

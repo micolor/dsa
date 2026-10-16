@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScreeningHotspotDetail } from '../../api/screening';
 import StockScreeningPage from '../StockScreeningPage';
@@ -1276,7 +1277,9 @@ describe('StockScreeningPage', () => {
       strategy: 'dual_low',
       maxResults: 3,
     }));
-    getScreenTask.mockRejectedValueOnce(Object.assign(new Error('timeout of 30000ms exceeded'), {
+    // 轮询一直超时：一次性 reject 之后 mock 会回落到默认的「已完成」结果，把这条
+    // 「超时可恢复」的用例变成「任务已完成」，与用例名描述的场景不符。
+    getScreenTask.mockRejectedValue(Object.assign(new Error('timeout of 30000ms exceeded'), {
       code: 'ECONNABORTED',
     }));
 
@@ -1284,7 +1287,9 @@ describe('StockScreeningPage', () => {
 
     await waitFor(() => expect(getScreenTask).toHaveBeenCalledTimes(1));
     expect(useScreeningTaskStore.getState().activeScreenTask).not.toBeNull();
-    expect(screen.getByText('选股任务仍在后台运行，状态轮询暂时超时，将自动重试。')).toBeInTheDocument();
+    // 页面级提示走全局右上角通道：状态 -> store -> 宿主渲染，比页内直接渲染晚一次提交，
+    // 所以这里等它出现，而不是同步断言。
+    expect(await screen.findByText('选股任务仍在后台运行，状态轮询暂时超时，将自动重试。')).toBeInTheDocument();
     expect(screen.queryByText(/连接上游服务超时/)).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem('dsa.screening.activeScreenTask.v1')).toContain('screen-task-1');
   });
@@ -1353,7 +1358,9 @@ describe('StockScreeningPage', () => {
       ],
       candidateCount: 1,
     });
-    getScreenTask.mockResolvedValueOnce({
+    // 一直「进行中」：轮询可能因为标题文案刚定下来而重启（见该 effect 的依赖），
+    // 一次性 mock 会让重启后的那次轮询落到默认的「已完成」上，与用例名描述的场景不符。
+    getScreenTask.mockResolvedValue({
       taskId: 'screen-task-1',
       traceId: 'screen-task-1',
       status: 'processing',
@@ -1418,6 +1425,82 @@ describe('StockScreeningPage', () => {
     expect(screen.getByText('因子排序')).toBeInTheDocument();
     expect(screen.getByText(/主要优势：流动性 93、估值 87/)).toBeInTheDocument();
     expect(screen.queryByText(/LLM 已降级/)).not.toBeInTheDocument();
+  });
+
+  it('reports a truncated ranking output once, without leaking the backend wording', async () => {
+    getScreeningStatus.mockResolvedValueOnce({
+      enabled: true,
+      available: true,
+    });
+    screenStocks.mockResolvedValueOnce({
+      enabled: true,
+      candidates: [
+        {
+          rank: 1,
+          code: '000001',
+          name: '平安银行',
+          score: 88.5,
+          reason: '本地后置评分: value_quality',
+          raw: {},
+        },
+      ],
+      candidateCount: 1,
+      llmRanked: false,
+      rankingMode: 'factor',
+      llmFailureReason: 'truncated_response',
+      llmParseErrors: ['deepseek/deepseek-flash:truncated_response'],
+      warnings: ['LLM ranking failed: truncated_response; fell back to screen_score'],
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+
+    expect(await screen.findByText('当前使用因子排序')).toBeInTheDocument();
+    expect(screen.getByText(/模型输出被截断/)).toBeInTheDocument();
+    expect(screen.queryByText(/fell back to screen_score/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/truncated_response/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no_json_found/)).not.toBeInTheDocument();
+    // 同一失败的三个来源（degradation + llm_parse_errors）折叠成一条提示
+    expect(screen.getAllByText(/未完成智能重排/)).toHaveLength(1);
+  });
+
+  it('localizes the ranking failure reason carried by the degradation message', async () => {
+    getScreeningStatus.mockResolvedValueOnce({
+      enabled: true,
+      available: true,
+    });
+    screenStocks.mockResolvedValueOnce({
+      enabled: true,
+      candidates: [
+        {
+          rank: 1,
+          code: '000001',
+          name: '平安银行',
+          score: 88.5,
+          reason: '本地后置评分: value_quality',
+          raw: {},
+        },
+      ],
+      candidateCount: 1,
+      llmRanked: false,
+      rankingMode: 'factor',
+      llmFailureReason: 'invalid_response',
+      llmParseErrors: ['deepseek/deepseek-flash:no_json_found'],
+      warnings: ['LLM ranking failed: invalid_response; fell back to screen_score'],
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByRole('button', { name: /运行选股/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+
+    expect(await screen.findByText('当前使用因子排序')).toBeInTheDocument();
+    expect(screen.getByText(/模型未返回可用的结构化排序结果/)).toBeInTheDocument();
+    expect(screen.queryByText(/fell back to screen_score/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/invalid_response/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/未完成智能重排/)).toHaveLength(1);
   });
 
   it('deduplicates Screening snapshot fallback warnings and source errors', async () => {

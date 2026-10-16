@@ -1,10 +1,9 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, X } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
-import { ApiErrorAlert, AutoDismissToast, Badge, DatePicker, EmptyState, InlineAlert } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { Badge, DatePicker, EmptyState, useToastSync } from '../components/common';
 import { EquityCurveChart } from '../components/paper/EquityCurveChart';
 import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
@@ -169,6 +168,20 @@ export const PaperTradingPage: React.FC = () => {
     return { items, wins, totalRealized, count: items.length };
   })();
 
+  // 成功提示（回填 / 刷新）几秒后自动消失；鼠标悬停或键盘焦点停留在其上时暂停计时。
+  useToastSync('paper-trading-toast', toast, (message) => ({
+    variant: 'success',
+    message,
+    autoDismissMs: 3200,
+    onDismiss: () => setToast(null),
+  }));
+
+  // 页面级错误是持续型提示：送右上角但不自动消失。
+  useToastSync('paper-trading-error', error, (parsed) => ({
+    error: parsed,
+    onDismiss: () => setError(null),
+  }));
+
   return (
     <div className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
       <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
@@ -202,40 +215,6 @@ export const PaperTradingPage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {toast ? (
-        <ToastPortal>
-          {/* 成功提示（回填/刷新）几秒后自动消失；鼠标悬停其上时暂停计时。 */}
-          <AutoDismissToast
-            active={toast}
-            onDismiss={() => setToast(null)}
-            delayMs={3200}
-          >
-            <InlineAlert
-              elevated
-              variant="success"
-              message={toast}
-              className="pointer-events-auto"
-              action={(
-                <button
-                  type="button"
-                  onClick={() => setToast(null)}
-                  className="self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                  aria-label={text.close}
-                >
-                  <X className="h-4 w-4" aria-hidden="true" />
-                </button>
-              )}
-            />
-          </AutoDismissToast>
-        </ToastPortal>
-      ) : null}
-      {/* 页面级错误是持续型提示：送右上角但不自动消失。 */}
-      {error ? (
-        <ToastPortal>
-          <ApiErrorAlert elevated error={error} className="pointer-events-auto" />
-        </ToastPortal>
-      ) : null}
 
       {isLoading ? (
         <div className="flex h-64 items-center justify-center">

@@ -133,7 +133,7 @@ describe('App routing behavior', () => {
   });
 
   // 提示容器挂在 Router 之外，所以路由页面、登录页、加载早返回分支都必须有它 —— 缺了
-  // 的话页面级提示会静默退回就地渲染（ToastPortal 的兜底路径），测试却不会报错。
+  // 的话提示会被静默丢弃（store 是全局的，宿主不在就没人渲染），测试却不会报错。
   it('mounts the global toast host on routed pages, the login page and the loading fallback', async () => {
     window.history.pushState({}, '', '/chat');
     const routed = render(<App />);

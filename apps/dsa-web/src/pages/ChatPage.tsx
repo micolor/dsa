@@ -2,12 +2,11 @@ import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, Check, ChevronDown, Copy, Download, ImagePlus, SlidersHorizontal, User, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Download, RotateCcw, RotateCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, AutoDismissToast, Badge, Button, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { Badge, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip, useToastSync } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import { applyActionProposal } from '../utils/actionProposal';
 import type { ActionProposal } from '../types/actionProposal';
@@ -34,6 +33,7 @@ import { findMatchingStockCode, includesStockCode, normalizeStockCode } from '..
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { StockIndexItem } from '../types/stockIndex';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
+import { formatUiText } from '../i18n/uiText';
 
 // Quick question examples shown on empty state
 type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>;
@@ -47,6 +47,14 @@ type ActionProposalStatus = 'pending' | 'applying' | 'applied' | 'error' | 'canc
 // tests/chat_image_contract.test.ts 会直接读这两个 Python 源文件比对，漂移会让前端测试变红。
 const CHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const CHAT_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+// 已发送图片查看器的缩放档位；放大用 CSS zoom（真正的布局缩放），所以放大后
+// 外层容器能滚起来，滚动就等于平移，不需要额外的拖拽实现。
+const IMAGE_VIEWER_ZOOM_MIN = 0.5;
+const IMAGE_VIEWER_ZOOM_MAX = 4;
+const IMAGE_VIEWER_ZOOM_STEP = 0.25;
+const IMAGE_VIEWER_BUTTON_CLASS =
+  'inline-flex h-9 items-center justify-center rounded-xl border border-border/70 bg-card/80 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
 
 const QUICK_QUESTIONS: Array<{
   label: string;
@@ -248,13 +256,21 @@ const ChatPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string; mime: string } | null>(null);
   const [readingImage, setReadingImage] = useState(false);
+  // 被点开查看的已发送图片（dataUrl）；null 表示查看器关着。
+  const [viewImage, setViewImage] = useState<string | null>(null);
+  // 查看器里的缩放倍率与旋转角（度）。每次打开都从 1 / 0 重新开始。
+  const [viewZoom, setViewZoom] = useState(1);
+  const [viewRotation, setViewRotation] = useState(0);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [defaultSkillIds, setDefaultSkillIds] = useState<string[]>([]);
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [mobileSkillPickerOpen, setMobileSkillPickerOpen] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [expandedImageBlocks, setExpandedImageBlocks] = useState<Set<string>>(new Set());
-  const [deleteToastId, setDeleteToastId] = useState<string | null>(null);
+  // 待确认删除的历史对话（会话 id + 标题，标题用于确认框里点名）。null 表示确认框关着。
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<{ id: string; title: string } | null>(null);
+  // 删除失败的具体原因（服务端拒绝、网络错误等）；成功即清空。
+  const [deleteSessionError, setDeleteSessionError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
@@ -295,12 +311,10 @@ const ChatPage: React.FC = () => {
     agentStatus?.backend === 'codex_app_server',
   );
   const watchlistMessageTimerRef = useRef<number | null>(null);
-  const chatImageInputRef = useRef<HTMLInputElement>(null);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const pendingDeleteRef = useRef<{ id: string; timer: number } | null>(null);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -738,55 +752,37 @@ const ChatPage: React.FC = () => {
     setSidebarOpen(false);
   }, [requestScrollToBottom, sessionId, switchSession, clearAllCopyTimers]);
 
-  /** 真正提交一次会话删除（撤销窗口正常到期，或被下一次删除顶替时补交）。 */
-  const commitDeleteSession = useCallback(
-    (sessionIdToDelete: string) => {
-      agentApi
-        .deleteChatSession(sessionIdToDelete)
-        .then(() => {
-          loadSessions();
-          if (sessionIdToDelete === sessionId) {
-            handleStartNewChat();
-          }
-        })
-        .catch((error) => {
-          console.error('Failed to delete chat session:', error);
-        });
-    },
-    [sessionId, loadSessions, handleStartNewChat],
-  );
-
-  const requestDeleteSession = useCallback(
-    (sessionIdToDelete: string) => {
-      // 上一条删除的撤销窗口还没走完就被顶替：它的 toast 已经按「会话已删除」
-      // 渲染过，用户也已撤不回来（撤销按钮已被新的 id 覆盖）。这里必须把那次
-      // 删除补交，不能只清掉计时器——那会让一个已宣告完成的删除静默消失。
-      const superseded = pendingDeleteRef.current;
-      if (superseded) {
-        window.clearTimeout(superseded.timer);
-        pendingDeleteRef.current = null;
-        commitDeleteSession(superseded.id);
-      }
-      const timer = window.setTimeout(() => {
-        pendingDeleteRef.current = null;
-        if (isMountedRef.current) {
-          setDeleteToastId(null);
-        }
-        commitDeleteSession(sessionIdToDelete);
-      }, 6000);
-      pendingDeleteRef.current = { id: sessionIdToDelete, timer };
-      setDeleteToastId(sessionIdToDelete);
-    },
-    [commitDeleteSession],
-  );
-
-  const undoDelete = useCallback(() => {
-    if (pendingDeleteRef.current) {
-      window.clearTimeout(pendingDeleteRef.current.timer);
-      pendingDeleteRef.current = null;
+  /**
+   * 提交一条历史对话的删除。删除是不可逆的，所以入口只有确认框的「删除」按钮：
+   * 确认后直接提交，不再有撤销窗口（此前的 6 秒延迟删除会让「已宣告删除」与
+   * 「实际还没删」两件事在界面上不一致，且被下一次删除顶替时会静默丢失）。
+   */
+  const confirmDeleteSession = useCallback(() => {
+    const target = pendingDeleteSession;
+    setPendingDeleteSession(null);
+    if (!target) {
+      return;
     }
-    setDeleteToastId(null);
-  }, []);
+    agentApi
+      .deleteChatSession(target.id)
+      .then(() => {
+        if (!isMountedRef.current) {
+          return;
+        }
+        setDeleteSessionError(null);
+        loadSessions();
+        // 删掉的正是当前打开的会话时，右侧对话区不能留着一条已经不存在的会话。
+        if (target.id === sessionId) {
+          handleStartNewChat();
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to delete chat session:', error);
+        if (isMountedRef.current) {
+          setDeleteSessionError(getParsedApiError(error).message);
+        }
+      });
+  }, [pendingDeleteSession, sessionId, loadSessions, handleStartNewChat]);
 
   // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
   useEffect(() => {
@@ -974,6 +970,13 @@ const ChatPage: React.FC = () => {
     reader.readAsDataURL(file);
   }, [pendingImage, showSendFeedback, t]);
 
+  // 打开查看器时先把缩放/旋转复位，免得上一张的视角带到下一张。
+  const openImageViewer = useCallback((dataUrl: string) => {
+    setViewZoom(1);
+    setViewRotation(0);
+    setViewImage(dataUrl);
+  }, []);
+
   // 拖放：与附件按钮、隐藏 input 同一套 gate —— 流式期间或 agent 不可用时不能换图，
   // 否则会挂上一个本轮发不出去、却静默作用于下一轮的 chip。取 files[0] 的写法与
   // IntelligentImport.tsx 的 onDrop 相同（那边同样先判 disabled/isLoading 再取文件），
@@ -986,13 +989,6 @@ const ChatPage: React.FC = () => {
     const f = files?.[0];
     if (f) handleImageFile(f, (files?.length ?? 1) - 1);
   }, [agentAvailable, handleImageFile, loading]);
-
-  const handleImageInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) handleImageFile(f);
-    // 允许重新选同一个文件时再次触发 change。
-    e.target.value = '';
-  }, [handleImageFile]);
 
   // 拖到 composer 之外（消息列表、侧栏）松手会命中浏览器默认行为：直接打开那个文件，
   // SPA 被卸载、已经输入的内容随之丢失。全应用没有 window 级兜底，这里补上。
@@ -1357,7 +1353,7 @@ const ChatPage: React.FC = () => {
                       )}
                     </>
                   )}
-                  onDelete={() => requestDeleteSession(s.session_id)}
+                  onDelete={() => setPendingDeleteSession({ id: s.session_id, title: s.title })}
                   deleteAriaLabel={`删除对话 ${s.title}`}
                 />
               );
@@ -1368,9 +1364,109 @@ const ChatPage: React.FC = () => {
     </>
   );
 
+  // 图片查看器转到 90° / 270° 时，视觉上的宽高和布局盒是对调的，布局要跟着换一套。
+  const rotated = viewRotation % 180 !== 0;
+
   const selectedSkillSummary = selectedSkillIds.length > 0
     ? getSkillNames(selectedSkillIds).join('、')
     : t('chat.generalAnalysis');
+
+  // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
+  // 这些都是持续型状态，不自动消失——带按钮的提示若几秒后自己没了，用户就再也点不到
+  // 「去设置」，所以下面只有引导提示和发送结果带 `autoDismissMs`。
+  useToastSync('chat-codex-limited', agentStatus?.backend === 'codex_app_server', () => ({
+    variant: 'warning',
+    title: t('chat.codexLimitedTitle'),
+    message: t('chat.codexLimitedMessage'),
+    action: (
+      <Button variant="action-primary" size="sm" onClick={() => navigate('/settings?category=agent')}>
+        {t('chat.codexChangeBackend')}
+      </Button>
+    ),
+  }));
+  // 引导提示几秒后自动消失，鼠标悬停或键盘焦点停留在其上时暂停计时。
+  useToastSync('chat-intro', introToastVisible, () => ({
+    variant: 'info',
+    title: t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault'),
+    message: t('chat.introMessage'),
+    autoDismissMs: INTRO_TOAST_DURATION_MS,
+    onDismiss: dismissIntroToast,
+  }));
+  useToastSync('chat-error', chatError, (err) => ({ error: err }));
+  // 停止要说清楚「为什么还没停」。litellm 后端是协作式取消：正在跑的工具调用不会被中断，
+  // 本轮只在它返回后才收尾（实测一次数据源扇出要 90 秒），这段时间里界面既不该报错，
+  // 也不该让用户以为卡死了。Codex 后端是真的把进程杀掉，收尾很快，不需要这条说明。
+  // 所以这里要求「已经读到后端，且不是 Codex」：后端还没读到时按 Codex 处理——这条说明
+  // 只是解释为什么慢，晚几百毫秒再出现没有损失，而先弹一条随即被撤回反而会闪一下。
+  useToastSync('chat-stop-waiting', stopping && !!agentStatus && agentStatus.backend !== 'codex_app_server', () => ({
+    role: 'status',
+    variant: 'info',
+    message: t('chat.stopWaitingNotice'),
+  }));
+  useToastSync('chat-terminal-cancelled', terminalStatus === 'cancelled', () => ({
+    role: 'status',
+    variant: 'info',
+    message: t('chat.analysisStopped'),
+  }));
+  useToastSync('chat-terminal-timeout', terminalStatus === 'timeout', () => ({
+    role: 'status',
+    variant: 'warning',
+    message: t('chat.analysisTimedOut'),
+  }));
+  useToastSync('chat-stop-error', stopError, () => ({
+    variant: 'warning',
+    message: t('chat.stopRequestFailed'),
+  }));
+  // `agentUnavailableError` 是每次渲染新拼的对象，不能当状态信号——否则提示会被当成
+  // 「换了一条新的」反复重弹、用户关不掉。用稳定的 `agentStatus` 表达「确认不可用」。
+  useToastSync('chat-agent-unavailable', agentConfirmedUnavailable ? agentStatus : null, () => ({
+    error: agentUnavailableError ?? undefined,
+    action: (
+      <>
+        <Button variant="secondary" size="sm" onClick={() => navigate('/settings?category=agent')}>
+          {t('chat.openAgentSettings')}
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
+          {t('chat.recheckAgentStatus')}
+        </Button>
+      </>
+    ),
+  }));
+  useToastSync('chat-agent-status-error', agentStatusError, () => ({
+    variant: 'warning',
+    title: t('chat.statusUnavailableTitle'),
+    message: t('chat.statusUnavailableMessage'),
+    action: (
+      <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
+        {t('chat.recheckAgentStatus')}
+      </Button>
+    ),
+  }));
+  useToastSync('chat-follow-up-context-loading', isFollowUpContextLoading, () => ({
+    variant: 'info',
+    title: t('chat.followUpContextLoadingTitle'),
+    message: t('chat.followUpContextLoadingMessage'),
+  }));
+  useToastSync('chat-compression-save-error', contextCompressionError, (message) => ({
+    variant: 'danger',
+    title: t('chat.compressionSaveFailedTitle'),
+    message,
+  }));
+  // 发送结果几秒后自动消失；鼠标悬停或键盘焦点停留在其上时暂停计时。
+  useToastSync('chat-send-toast', sendToast, (result) => ({
+    variant: result.type === 'success' ? 'success' : 'danger',
+    title: result.title ?? (result.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed')),
+    message: result.message,
+    autoDismissMs: result.durationMs,
+    onDismiss: dismissSendToast,
+  }));
+  // 删除失败必须说出来：确认框已经关掉、列表里的那条也还在，用户唯一能看到的差别
+  // 就是它没消失。只写 console.error 等于把这次失败藏起来。
+  useToastSync('chat-delete-error', deleteSessionError, (message) => ({
+    variant: 'danger',
+    title: t('common.deleteFailed'),
+    message,
+  }));
 
   return (
     <>
@@ -1521,51 +1617,6 @@ const ChatPage: React.FC = () => {
 
           {/* Main chat area */}
           <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          {/* 页面级提示统一送到右上角容器，不再占用聊天区顶部和输入框上方的版面 */}
-          <ToastPortal>
-            {agentStatus?.backend === 'codex_app_server' ? (
-              <InlineAlert
-                variant="warning"
-                title={t('chat.codexLimitedTitle')}
-                message={t('chat.codexLimitedMessage')}
-                action={(
-                  <Button
-                    variant="action-primary"
-                    size="sm"
-                    onClick={() => navigate('/settings?category=agent')}
-                  >
-                    {t('chat.codexChangeBackend')}
-                  </Button>
-                )}
-                className="rounded-xl px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-            {/* 引导提示几秒后自动消失，鼠标悬停其上时暂停计时 */}
-            {introToastVisible ? (
-              <AutoDismissToast
-                active={introToastVisible}
-                onDismiss={dismissIntroToast}
-                delayMs={INTRO_TOAST_DURATION_MS}
-              >
-                <InlineAlert
-                  variant="info"
-                  title={t(agentStatus?.backend === 'codex_app_server' ? 'chat.introCodex' : 'chat.introDefault')}
-                  message={t('chat.introMessage')}
-                  action={(
-                    <button
-                      type="button"
-                      onClick={dismissIntroToast}
-                      className="ml-3 self-start text-xs opacity-70 transition-opacity hover:opacity-100"
-                      aria-label={t('common.close')}
-                    >
-                      ✕
-                    </button>
-                  )}
-                  className="pointer-events-auto"
-                />
-              </AutoDismissToast>
-            ) : null}
-          </ToastPortal>
 
           <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
           {/* Messages */}
@@ -1629,20 +1680,18 @@ const ChatPage: React.FC = () => {
                 return (
                 <div
                   key={msg.id}
-                  className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  className={`flex ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
+                  {/* 不再渲染头像：一行的两边直接由内容自己交代 —— 用户气泡贴右、
+                      AI 回复占满整行。左右各让出的 48px（32px 头像 + 16px gap）回到正文宽度。
+                      AI 回复不是气泡（flex-1，不收窄到内容宽度、也不压 48rem 上限），没有内边距，
+                      文字与面板内边距对齐；用户气泡保持 w-fit + 48rem 上限 + 自己的 chip 内边距。 */}
                   <div
                     className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm transition-colors',
-                      msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
-                    )}
-                  >
-                    {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                  </div>
-                  <div
-                    className={cn(
-                      'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
-                      msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
+                      'group/message min-w-0 overflow-hidden py-3.5 transition-colors',
+                      msg.role === 'user'
+                        ? 'w-fit max-w-[min(100%,48rem)] px-5 chat-bubble-user'
+                        : 'flex-1 chat-message-ai'
                     )}
                   >
                     {msg.role === 'assistant' && (skillLabel || msg.backend) && (
@@ -1706,11 +1755,20 @@ const ChatPage: React.FC = () => {
                     ) : (
                       <>
                         {msg.imageDataUrl && (
-                          <img
-                            src={msg.imageDataUrl}
-                            alt="已发送的图片"
-                            className="mb-2 max-h-40 rounded-lg border border-subtle"
-                          />
+                          // 图片只在会话内存在（dataUrl 挂在消息上），所以「查看」就是把它放大渲染一遍，
+                          // 不涉及任何后端取图。
+                          <button
+                            type="button"
+                            aria-label={t('chat.viewImage')}
+                            onClick={() => openImageViewer(msg.imageDataUrl ?? '')}
+                            className="mb-2 block cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <img
+                              src={msg.imageDataUrl}
+                              alt="已发送的图片"
+                              className="max-h-40 rounded-lg border border-subtle"
+                            />
+                          </button>
                         )}
                         {renderUserMessageContent(msg)}
                       </>
@@ -1722,20 +1780,16 @@ const ChatPage: React.FC = () => {
             )}
 
             {loading && (
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0">
-                  <Bot className="h-4 w-4" />
-                </div>
-                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm bg-card/72 px-5 py-4 shadow-soft-card">
-                  <div className="flex items-center gap-2.5 text-sm text-secondary-text">
-                    <div className="relative w-4 h-4 flex-shrink-0">
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan border-t-transparent animate-spin" />
-                    </div>
-                    <span className="text-secondary-text">
-                      {getCurrentStage(progressSteps)}
-                    </span>
+              /* 等待中的占位与 AI 回复同形：没有头像、没有气泡外壳，文字与 AI 回复同一条左边线。 */
+              <div className="py-4">
+                <div className="flex items-center gap-2.5 text-sm text-secondary-text">
+                  <div className="relative w-4 h-4 flex-shrink-0">
+                    <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
+                    <div className="absolute inset-0 rounded-full border-2 border-cyan border-t-transparent animate-spin" />
                   </div>
+                  <span className="text-secondary-text">
+                    {getCurrentStage(progressSteps)}
+                  </span>
                 </div>
               </div>
             )}
@@ -1779,73 +1833,6 @@ const ChatPage: React.FC = () => {
               onDrop={handleImageDrop}
               onDragOver={(e) => e.preventDefault()}
             >
-              {/* 发送/分析状态提示统一走右上角容器。这些都是持续型状态，不自动消失 ——
-                  带按钮的提示若几秒后自己没了，用户就再也点不到「去设置」。 */}
-              <ToastPortal>
-                {chatError ? <ApiErrorAlert elevated error={chatError} className="pointer-events-auto" /> : null}
-                {terminalStatus === 'cancelled' ? (
-                  <InlineAlert
-                    elevated
-                    role="status"
-                    variant="info"
-                    message={t('chat.analysisStopped')}
-                    className="pointer-events-auto text-sm"
-                  />
-                ) : null}
-                {terminalStatus === 'timeout' ? (
-                  <InlineAlert
-                    elevated
-                    role="status"
-                    variant="warning"
-                    message={t('chat.analysisTimedOut')}
-                    className="pointer-events-auto text-sm"
-                  />
-                ) : null}
-                {stopError ? (
-                  <InlineAlert
-                    elevated
-                    variant="warning"
-                    message={t('chat.stopRequestFailed')}
-                    className="pointer-events-auto text-sm"
-                  />
-                ) : null}
-                {agentUnavailableError ? (
-                  <div className="pointer-events-auto space-y-2">
-                    <ApiErrorAlert
-                      elevated
-                      error={agentUnavailableError}
-                      actionLabel={t('chat.openAgentSettings')}
-                      onAction={() => navigate('/settings?category=agent')}
-                    />
-                    <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
-                      {t('chat.recheckAgentStatus')}
-                    </Button>
-                  </div>
-                ) : null}
-                {agentStatusError ? (
-                  <InlineAlert
-                    elevated
-                    variant="warning"
-                    title={t('chat.statusUnavailableTitle')}
-                    message={t('chat.statusUnavailableMessage')}
-                    action={(
-                      <Button variant="secondary" size="sm" onClick={() => void loadAgentStatus()}>
-                        {t('chat.recheckAgentStatus')}
-                      </Button>
-                    )}
-                    className="pointer-events-auto px-3 py-2 text-xs"
-                  />
-                ) : null}
-                {isFollowUpContextLoading ? (
-                  <InlineAlert
-                    elevated
-                    variant="info"
-                    title={t('chat.followUpContextLoadingTitle')}
-                    message={t('chat.followUpContextLoadingMessage')}
-                    className="pointer-events-auto px-3 py-2 text-xs"
-                  />
-                ) : null}
-              </ToastPortal>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2">
                 <label
                   className={cn(
@@ -1873,17 +1860,6 @@ const ChatPage: React.FC = () => {
                       : t('chat.compressionDisabled')}
                 </span>
               </div>
-              {contextCompressionError ? (
-                <ToastPortal>
-                  <InlineAlert
-                    elevated
-                    variant="danger"
-                    title={t('chat.compressionSaveFailedTitle')}
-                    message={contextCompressionError}
-                    className="pointer-events-auto px-3 py-2 text-xs"
-                  />
-                </ToastPortal>
-              ) : null}
               {skills.length > 0 && (
                 <div className="space-y-2">
                   <button
@@ -2034,23 +2010,6 @@ const ChatPage: React.FC = () => {
               )}
 
               <div className="flex items-end gap-3">
-                <button
-                  type="button"
-                  aria-label={t('chat.addImage')}
-                  onClick={() => chatImageInputRef.current?.click()}
-                  disabled={loading || !agentAvailable}
-                  className="chat-composer-icon-btn flex-shrink-0"
-                >
-                  <ImagePlus className="h-4 w-4" aria-hidden="true" />
-                </button>
-                <input
-                  ref={chatImageInputRef}
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.webp,.gif"
-                  className="hidden"
-                  onChange={handleImageInput}
-                  disabled={loading || !agentAvailable}
-                />
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -2075,7 +2034,7 @@ const ChatPage: React.FC = () => {
                     t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
                   }}
                 />
-                {loading && agentStatus?.backend === 'codex_app_server' ? (
+                {loading ? (
                   <Button
                     variant="danger-subtle"
                     onClick={stopStream}
@@ -2102,55 +2061,111 @@ const ChatPage: React.FC = () => {
         </div>
       </div>
     </div>
-    {/* 提示统一送到全局右上角容器；这里不再有页面自己的定位层。 */}
-    <ToastPortal>
-      {sendToast ? (
-        /* 发送结果几秒后自动消失；鼠标悬停其上时暂停计时。 */
-        <AutoDismissToast
-          active={sendToast}
-          onDismiss={dismissSendToast}
-          delayMs={sendToast.durationMs}
-        >
-          <InlineAlert
-            elevated
-            variant={sendToast.type === 'success' ? 'success' : 'danger'}
-            title={sendToast.title ?? (sendToast.type === 'success' ? t('chat.sendSuccess') : t('chat.sendFailed'))}
-            message={sendToast.message}
-            action={(
-              <button
-                type="button"
-                onClick={dismissSendToast}
-                className="ml-3 self-start p-1 text-muted-text transition-colors hover:text-foreground"
-                aria-label={t('common.close')}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
+    {/* 点开已发送的图：Esc / 点背景 / 关闭按钮三种关法都复用 Dialog 现成的实现。 */}
+    <Dialog
+      isOpen={viewImage !== null}
+      onClose={() => setViewImage(null)}
+      title={t('chat.imagePreviewTitle')}
+      ariaLabel={t('chat.imagePreviewTitle')}
+      widthClassName="sm:max-w-3xl"
+    >
+      {viewImage && (
+        <div className="flex flex-col items-center gap-4">
+          {/* zoom 是布局缩放而不是 transform: scale，所以放大后这个 overflow-auto 容器
+              真的能滚，滚动条就充当平移；旋转只做视觉变换。 */}
+          <div
+            className={cn(
+              'w-full overflow-auto',
+              // 转过 90° 后图片是绕着自身中心转的，视觉上会超出未旋转的布局盒（transform 又
+              // 不算进滚动区，超出去的部分滚不到），所以转起来时改用定高容器 + safe center：
+              // 装得下就居中，装不下退回顶部对齐，保证被裁的永远是能被滚到的那一侧。
+              rotated
+                ? 'flex h-[65vh] items-center-safe justify-center-safe'
+                : 'max-h-[65vh]',
             )}
-            className="pointer-events-auto"
-          />
-        </AutoDismissToast>
-      ) : null}
-      {deleteToastId ? (
-        /* 撤销窗口由页面自己的计时器负责关闭 —— 倒计时到期会真的执行删除，
-           交给 AutoDismissToast 的自动消失语义会提前触发副作用。 */
-        <InlineAlert
-          elevated
-          variant="success"
-          title={t('chat.sessionDeletedTitle')}
-          message={t('chat.sessionDeletedUndoHint')}
-          action={(
+          >
+            <img
+              src={viewImage}
+              alt="已发送的图片"
+              style={{ zoom: viewZoom, transform: `rotate(${viewRotation}deg)` }}
+              className={cn(
+                'w-auto rounded-lg',
+                rotated ? 'max-h-[65vh] max-w-[65vh]' : 'mx-auto block max-h-[65vh]',
+              )}
+            />
+          </div>
+          <div className="flex items-center justify-center gap-2">
             <button
               type="button"
-              onClick={undoDelete}
-              className="ml-3 shrink-0 self-center rounded-lg bg-primary/15 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
+              aria-label={t('chat.zoomOut')}
+              disabled={viewZoom <= IMAGE_VIEWER_ZOOM_MIN}
+              onClick={() =>
+                setViewZoom((prev) => Math.max(IMAGE_VIEWER_ZOOM_MIN, Number((prev - IMAGE_VIEWER_ZOOM_STEP).toFixed(2))))
+              }
+              className={IMAGE_VIEWER_BUTTON_CLASS}
             >
-              {t('chat.sessionDeletedUndo')}
+              <ZoomOut aria-hidden="true" className="h-4 w-4" />
             </button>
-          )}
-          className="pointer-events-auto"
-        />
-      ) : null}
-    </ToastPortal>
+            <span className="w-12 text-center text-xs tabular-nums text-secondary-text">
+              {Math.round(viewZoom * 100)}%
+            </span>
+            <button
+              type="button"
+              aria-label={t('chat.zoomIn')}
+              disabled={viewZoom >= IMAGE_VIEWER_ZOOM_MAX}
+              onClick={() =>
+                setViewZoom((prev) => Math.min(IMAGE_VIEWER_ZOOM_MAX, Number((prev + IMAGE_VIEWER_ZOOM_STEP).toFixed(2))))
+              }
+              className={IMAGE_VIEWER_BUTTON_CLASS}
+            >
+              <ZoomIn aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('chat.rotateLeft')}
+              onClick={() => setViewRotation((prev) => (prev + 270) % 360)}
+              className={IMAGE_VIEWER_BUTTON_CLASS}
+            >
+              <RotateCcw aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('chat.rotateRight')}
+              onClick={() => setViewRotation((prev) => (prev + 90) % 360)}
+              className={IMAGE_VIEWER_BUTTON_CLASS}
+            >
+              <RotateCw aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewZoom(1);
+                setViewRotation(0);
+              }}
+              className={IMAGE_VIEWER_BUTTON_CLASS}
+            >
+              {t('chat.resetViewer')}
+            </button>
+          </div>
+        </div>
+      )}
+    </Dialog>
+    {/* 删除历史对话不可逆，所以点删除按钮只发起确认；确认框里点名是哪条会话，
+        避免列表里两条标题相近时删错。 */}
+    <ConfirmDialog
+      isOpen={pendingDeleteSession !== null}
+      title={t('chat.deleteSessionTitle')}
+      message={
+        pendingDeleteSession
+          ? formatUiText(t('chat.deleteSessionMessage'), { title: pendingDeleteSession.title })
+          : ''
+      }
+      confirmText={t('common.delete')}
+      cancelText={t('common.cancel')}
+      isDanger
+      onConfirm={confirmDeleteSession}
+      onCancel={() => setPendingDeleteSession(null)}
+    />
     </>
   );
 };

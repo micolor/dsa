@@ -1,6 +1,7 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { cn } from '../../utils/cn';
 import { SELECT_INPUT_CLASS } from '../../utils/formClasses';
 
@@ -40,6 +41,7 @@ export const Select: React.FC<SelectProps> = ({
   className = '',
 }) => {
   const { t } = useUiLanguage();
+  const { modalRef, isCovered } = useEscTopLayer();
   const selectId = useId();
   const resolvedId = id ?? selectId;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,7 +64,8 @@ export const Select: React.FC<SelectProps> = ({
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      // 上面还压着别的层时让位，见 `useEscTopLayer`（弹窗里的下拉按 Esc 不该顺手把弹窗一起收掉）。
+      if (event.key === 'Escape' && !isCovered()) setOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
@@ -70,7 +73,16 @@ export const Select: React.FC<SelectProps> = ({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, isCovered]);
+
+  // 同一个下拉节点要喂给两处：点外判定用的 `dropdownRef`，和 Esc 让位判断用的 `modalRef`。
+  const attachDropdown = useCallback(
+    (node: HTMLDivElement | null) => {
+      dropdownRef.current = node;
+      modalRef(node);
+    },
+    [modalRef],
+  );
 
   // 计算下拉位置（基于按钮的视口坐标），滚动/缩放时保持；portal 渲染避免被 overflow 容器裁剪。
   const updateDropdownPosition = () => {
@@ -135,8 +147,9 @@ export const Select: React.FC<SelectProps> = ({
 
         {open && dropdownStyle ? createPortal(
           <div
-            ref={dropdownRef}
+            ref={attachDropdown}
             role="listbox"
+            data-esc-layer="true"
             className="fixed left-0 top-0 z-[200] overflow-auto rounded-none border border-border/60 bg-card/95 p-1 shadow-soft-card backdrop-blur-xl"
             style={{ ...dropdownStyle, maxHeight: '15rem' }}
           >

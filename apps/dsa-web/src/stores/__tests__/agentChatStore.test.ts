@@ -166,6 +166,49 @@ describe('agentChatStore.startStream', () => {
     expect(useAgentChatStore.getState().terminalStatus).toBe('cancelled');
   });
 
+  it('derives server-side stopping from a LiteLLM accepted event too', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const acceptedReceived = createDeferred<void>();
+    vi.mocked(agentApi.chatStream).mockResolvedValue(new Response(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    vi.mocked(agentApi.cancelChatStream).mockResolvedValue({
+      accepted: true,
+      request_id: 'request-live-litellm',
+    });
+
+    const streamPromise = useAgentChatStore.getState().startStream(
+      {
+        message: '分析 AAPL',
+        session_id: 'session-test',
+        request_id: 'request-live-litellm',
+      },
+      { onAccepted: () => acceptedReceived.resolve() },
+    );
+    streamController.enqueue(encoder.encode(
+      `${accepted('request-live-litellm', 'session-test', 'litellm')}\n`,
+    ));
+    await acceptedReceived.promise;
+
+    // 默认模型不再只做本地 abort：本地 abort 会留下刷新后才出现的「幽灵回复」。
+    expect(useAgentChatStore.getState().serverCancellation).toBe(true);
+    await useAgentChatStore.getState().stopStream();
+    expect(agentApi.cancelChatStream).toHaveBeenCalledWith('request-live-litellm');
+    expect(useAgentChatStore.getState().abortController?.signal.aborted).toBe(false);
+
+    streamController.enqueue(encoder.encode(
+      'data: {"type":"done","success":false,"content":"","backend":"litellm","error_code":"cancelled"}\n',
+    ));
+    streamController.close();
+    await streamPromise;
+    expect(useAgentChatStore.getState().terminalStatus).toBe('cancelled');
+  });
+
   it('does not create a session or user message when stopped before accepted', async () => {
     vi.mocked(agentApi.chatStream).mockImplementation((_payload, options) => (
       new Promise((_resolve, reject) => {
@@ -700,6 +743,60 @@ describe('agentChatStore.startStream', () => {
 });
 
 describe('agentChatStore.stopStream', () => {
+  // 停止在「正在跑工具调用」时是**设计上要等**的：工具不会被打断，取消只在它返回后落地，
+  // 服务端在等待期间也不再推 SSE。等待窗口必须盖住这个非可中断区间，否则停止本身工作正常，
+  // 前端却会先弹一个红色的「停止超时」——这正是实测中发现的那个误报。
+  it('keeps waiting instead of failing while a tool call is still in flight', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const acceptedReceived = createDeferred<void>();
+    vi.mocked(agentApi.chatStream).mockResolvedValue(new Response(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    vi.mocked(agentApi.cancelChatStream).mockResolvedValue({
+      accepted: true,
+      request_id: 'request-slow-tool',
+    });
+
+    const streamPromise = useAgentChatStore.getState().startStream(
+      {
+        message: '分析 AAPL',
+        session_id: 'session-test',
+        request_id: 'request-slow-tool',
+      },
+      { onAccepted: () => acceptedReceived.resolve() },
+    );
+    streamController.enqueue(encoder.encode(
+      `${accepted('request-slow-tool', 'session-test', 'litellm')}\n`,
+    ));
+    await acceptedReceived.promise;
+    // 让读循环真正挂到未决的 read 上。
+    await Promise.resolve();
+
+    vi.useFakeTimers();
+    try {
+      await useAgentChatStore.getState().stopStream();
+      expect(useAgentChatStore.getState().stopping).toBe(true);
+
+      // 数据源扇出实测要 90 秒才收尾，这段时间里既不该断开连接，也不该报错。
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      const waiting = useAgentChatStore.getState();
+      expect(waiting.stopping).toBe(true);
+      expect(waiting.loading).toBe(true);
+      expect(waiting.chatError).toBeNull();
+      expect(waiting.abortController).not.toBeNull();
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+    void streamPromise.catch(() => {});
+  });
+
   // 服务端确认取消后，如果这条 SSE 一直不结束（后端卡在收尾、连接半死），
   // stopping 会永远停在 true：停止按钮 disabled、「正在停止…」永不消失，
   // 而分析其实还在跑。这里守住「本地必须能自己了断」。
@@ -740,7 +837,8 @@ describe('agentChatStore.stopStream', () => {
       expect(useAgentChatStore.getState().stopping).toBe(true);
 
       // 服务端一直不发结束事件：本地必须在有限时间内解除停止态。
-      await vi.advanceTimersByTimeAsync(60_000);
+      // 这个时限在看门狗窗口之外，跨过它才算「不再等了」。
+      await vi.advanceTimersByTimeAsync(720_000);
 
       const state = useAgentChatStore.getState();
       expect(state.stopping).toBe(false);

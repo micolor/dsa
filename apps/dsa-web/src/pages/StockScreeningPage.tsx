@@ -36,8 +36,7 @@ import {
   type ScreeningStrategy,
 } from '../api/screening';
 import { formatParsedApiError, getParsedApiError, isUnrecoverableScreenTaskError, toApiErrorMessage, type ParsedApiError } from '../api/error';
-import { AppPage, Badge, Button, EmptyState, InlineAlert, Select } from '../components/common';
-import { ToastPortal } from '../contexts/ToastHostContext';
+import { AppPage, Badge, Button, EmptyState, InlineAlert, Select, useToastSync } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard/DashboardPanelHeader';
 import { CandidateListItem } from '../components/screening/CandidateListItem';
 import { formatNumber } from '../components/screening/candidateFormat';
@@ -308,7 +307,20 @@ const truncateMessageDetail = (value: string, maxLength = MAX_MESSAGE_DETAIL_LEN
   return `${text.slice(0, maxLength - 1)}…`;
 };
 
-const summarizeScreeningDiagnostic = (detail: string) => {
+// 未知诊断的兜底文案：保留原始细节（去掉 URL 噪声后截断）。
+const fallbackDiagnosticText = (detail: string) =>
+  truncateMessageDetail(
+    detail
+      .replace(/https?:\/\/\S+/gi, 'URL')
+      .replace(/\bwith url:\s*\S+/gi, 'with url: URL')
+      .replace(/\burl:\s*\S+/gi, 'url: URL'),
+  );
+
+// 返回 null 表示「未识别」：调用方必须自己给出中文兜底，不能让英文原文漏到界面上。
+const summarizeScreeningDiagnostic = (detail: string): string | null => {
+  if (/truncated_response|finish_reason[=:\s]*['"]?(?:length|max_tokens)/i.test(detail)) {
+    return '模型输出被截断，未返回完整排序结果';
+  }
   if (/no_json_found|invalid_response|coverage below threshold/i.test(detail)) {
     return '模型未返回可用的结构化排序结果';
   }
@@ -337,11 +349,7 @@ const summarizeScreeningDiagnostic = (detail: string) => {
     return '未返回可用数据';
   }
 
-  const withoutUrl = detail
-    .replace(/https?:\/\/\S+/gi, 'URL')
-    .replace(/\bwith url:\s*\S+/gi, 'with url: URL')
-    .replace(/\burl:\s*\S+/gi, 'url: URL');
-  return truncateMessageDetail(withoutUrl);
+  return null;
 };
 
 const parseSourceDiagnostic = (value: string) => {
@@ -368,10 +376,10 @@ const formatScreenMessage = (value: string) => {
     return '未配置智能重排模型，当前使用确定性因子排序。';
   }
   if (/^LLM ranking failed/i.test(value)) {
-    return `未完成智能重排：${summarizeScreeningDiagnostic(value)}；当前结果继续使用确定性因子评分。`;
+    return `未完成智能重排：${summarizeScreeningDiagnostic(value) ?? '排序模型未返回可用结果'}；当前结果继续使用确定性因子评分。`;
   }
-  if (/no_json_found|invalid_response|coverage below threshold|call_failed/i.test(value)) {
-    return `未完成智能重排：${summarizeScreeningDiagnostic(value)}；当前结果继续使用确定性因子评分。`;
+  if (/truncated_response|no_json_found|invalid_response|coverage below threshold|call_failed/i.test(value)) {
+    return `未完成智能重排：${summarizeScreeningDiagnostic(value) ?? '排序模型未返回可用结果'}；当前结果继续使用确定性因子评分。`;
   }
   if (/^(?:LLM ranking prompt|LLM context) truncated:/i.test(value)) {
     return '';
@@ -411,14 +419,14 @@ const formatScreenMessage = (value: string) => {
   if (snapshotFallback) {
     const parsed = parseSourceDiagnostic(snapshotFallback[1]);
     if (parsed) {
-      return `数据源降级：${parsed.source}（${summarizeScreeningDiagnostic(parsed.detail)}）`;
+      return `数据源降级：${parsed.source}（${summarizeScreeningDiagnostic(parsed.detail) ?? fallbackDiagnosticText(parsed.detail)}）`;
     }
-    return `数据源降级：${summarizeScreeningDiagnostic(snapshotFallback[1])}`;
+    return `数据源降级：${summarizeScreeningDiagnostic(snapshotFallback[1]) ?? fallbackDiagnosticText(snapshotFallback[1])}`;
   }
 
   const parsed = parseSourceDiagnostic(value);
   if (parsed && KNOWN_SNAPSHOT_SOURCES.has(parsed.source.toLowerCase())) {
-    return `数据源降级：${parsed.source}（${summarizeScreeningDiagnostic(parsed.detail)}）`;
+    return `数据源降级：${parsed.source}（${summarizeScreeningDiagnostic(parsed.detail) ?? fallbackDiagnosticText(parsed.detail)}）`;
   }
   return truncateMessageDetail(value);
 };
@@ -453,7 +461,7 @@ const formatScreenTaskFailure = (value: string | null | undefined) => {
   if (!text) {
     return '选股任务失败，请稍后重试。';
   }
-  return `选股任务失败：${summarizeScreeningDiagnostic(text)}`;
+  return `选股任务失败：${summarizeScreeningDiagnostic(text) ?? fallbackDiagnosticText(text)}`;
 };
 
 const SCREENING_HOTSPOT_NO_CACHE_HINT = 'No cached Screening hotspot snapshot. Click refresh to fetch live hotspots.';
@@ -470,7 +478,7 @@ const formatHotspotEmptyMessage = (result: ScreeningHotspotsResponse) => {
   }
   const sourceError = sourceErrors[0];
   if (sourceError) {
-    return `热点题材暂未返回数据：${summarizeScreeningDiagnostic(sourceError)}`;
+    return `热点题材暂未返回数据：${summarizeScreeningDiagnostic(sourceError) ?? fallbackDiagnosticText(sourceError)}`;
   }
   return '热点题材暂未返回数据';
 };
@@ -1391,43 +1399,30 @@ const StockScreeningPage: React.FC = () => {
     }
   };
 
+  // 页面级提示统一走全局右上角通道；卡片内的热点题材错误仍留在卡片里。
+  useToastSync('stock-screening-not-enabled', statusChecked && !enabled, () => ({
+    variant: 'info',
+    title: '选股未开启',
+    message: '开启后即可运行选股策略。',
+    action: (
+      <Button size="sm" isLoading={enabling} loadingText="开启中..." onClick={() => void handleEnable()}>
+        开启选股
+      </Button>
+    ),
+  }));
+  useToastSync('stock-screening-unavailable', statusChecked && enabled && !available, () => ({
+    variant: 'warning',
+    title: '选股功能不可用',
+    message: '请检查后端日志、策略文件和基础数据依赖后重启服务。',
+  }));
+  useToastSync('stock-screening-error', error, (message) => ({
+    variant: 'danger',
+    title: '调用失败',
+    message,
+  }));
+
   return (
     <AppPage className="space-y-6 pb-12 pt-6">
-      {/* 页面级提示统一送全局右上角容器；卡片内的热点题材错误仍留在卡片里。 */}
-      <ToastPortal>
-        {statusChecked && !enabled ? (
-          <InlineAlert
-            elevated
-            variant="info"
-            title="选股未开启"
-            message="开启后即可运行选股策略。"
-            className="pointer-events-auto"
-            action={
-              <Button size="sm" isLoading={enabling} loadingText="开启中..." onClick={() => void handleEnable()}>
-                开启选股
-              </Button>
-            }
-          />
-        ) : null}
-        {statusChecked && enabled && !available ? (
-          <InlineAlert
-            elevated
-            variant="warning"
-            title="选股功能不可用"
-            message="请检查后端日志、策略文件和基础数据依赖后重启服务。"
-            className="pointer-events-auto"
-          />
-        ) : null}
-        {error ? (
-          <InlineAlert
-            elevated
-            variant="danger"
-            title="调用失败"
-            message={error}
-            className="pointer-events-auto"
-          />
-        ) : null}
-      </ToastPortal>
 
       <section className="glass-card !border-transparent p-4 md:p-5">
         <DashboardPanelHeader

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { cn } from '../../utils/cn';
 import { SELECT_INPUT_CLASS } from '../../utils/formClasses';
 
@@ -46,6 +47,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   max,
 }) => {
   const { language, t } = useUiLanguage();
+  const { modalRef, isCovered } = useEscTopLayer();
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -81,7 +83,10 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      // 上面还压着别的层时让位，见 `useEscTopLayer`。这里最要紧的场景是「弹窗里的日期选择器」：
+      // 两个 Escape 监听都挂在 document 上、按注册顺序跑，弹窗那份注册得更早就会先跑，
+      // 不让位就会一按 Esc 把弹窗和日历一起收掉，刚填的表单全没了。
+      if (event.key === 'Escape' && !isCovered()) setOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
@@ -89,7 +94,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, isCovered]);
 
   // 基于触发按钮视口坐标定位，滚动/缩放时保持
   const updatePopupPosition = useCallback(() => {
@@ -104,6 +109,15 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       width: '19rem',
     });
   }, []);
+
+  // 同一个弹层节点要喂给两处：点外判定用的 `popupRef`，和 Esc 让位判断用的 `modalRef`。
+  const attachPopup = useCallback(
+    (node: HTMLDivElement | null) => {
+      popupRef.current = node;
+      modalRef(node);
+    },
+    [modalRef],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -182,9 +196,10 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
       {open && popupStyle ? createPortal(
         <div
-          ref={popupRef}
+          ref={attachPopup}
           role="dialog"
           aria-label={t('common.selectDate')}
+          data-esc-layer="true"
           className="fixed z-[200] rounded-xl border border-border/60 bg-card/95 p-3 shadow-soft-card backdrop-blur-xl"
           style={{ ...popupStyle, maxHeight: '24rem', overflowY: 'auto' }}
         >

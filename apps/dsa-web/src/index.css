@@ -49,10 +49,8 @@
   --muted-text: 224 12% 35%;
 
   --color-cyan: hsl(var(--primary));
-  --color-cyan-dim: hsl(var(--primary) / 0.8);
   --color-cyan-glow: hsl(var(--primary) / 0.18);
   --color-purple: 247 84% 66%;
-  --color-purple-dim: 247 84% 56%;
   --color-purple-glow: hsl(247 84% 66% / 0.18);
   --color-success: 152 69% 40%;
   --color-warning: 37 92% 50%;
@@ -100,7 +98,6 @@
   --border-card: hsl(var(--border-subtle-raw) / 0.02);
   --border-default: var(--border-dim);
   --border-hover: hsl(var(--primary) / 0.24);
-  --border-selected: hsl(var(--primary) / 0.32);
 
   /* Surface variants */
   --surface-1: hsl(var(--card));
@@ -121,20 +118,13 @@
 
   /* Navigation related (using HSL format) */
   --nav-active-bg: hsl(var(--primary) / 0.09);
-  --nav-active-border: hsl(var(--primary) / 0.24);
-  --nav-active-shadow: hsl(var(--primary) / 0.04);
   --nav-hover-bg: hsl(var(--primary) / 0.05);
   --nav-icon-active: hsl(var(--primary));
   --nav-item-height: 2.75rem;
   --nav-item-padding-x: 1rem;
-  --nav-indicator-width: 0.25rem;
-  --nav-indicator-bg: hsl(var(--primary));
   --nav-indicator-shadow: hsl(var(--primary) / 0.52);
-  --nav-badge-bg: hsl(var(--primary));
-  --nav-brand-shadow: hsl(var(--primary) / 0.2);
 
   /* Shell Sidebar Custom */
-  --shell-sidebar-border: hsl(247 84% 58% / 0.35);
 
   /* Home page related (using HSL format) */
   --home-loading-ring-track: hsl(var(--primary) / 0.2);
@@ -150,11 +140,8 @@
   --home-action-report-text: hsl(var(--foreground) / 0.82);
   --home-action-report-hover-bg: hsl(0 0% 100% / 0.9);
   --home-accent-bg: hsl(var(--primary) / 0.1);
-  --home-accent-bg-hover: hsl(var(--primary) / 0.16);
   --home-accent-border: hsl(var(--primary) / 0.2);
-  --home-accent-border-hover: hsl(var(--primary) / 0.28);
   --home-accent-text: hsl(var(--primary));
-  --home-secondary-accent-text: hsl(247 84% 66%);
   --home-title-accent: hsl(247 84% 66%);
   --home-price-up: hsl(0 88% 62%);
   --home-price-down: hsl(149 100% 42%);
@@ -165,15 +152,8 @@
   --home-panel-border: hsl(218 24% 88% / 0.3);
   --home-panel-border-hover: hsl(247 84% 58% / 0.2);
   --home-panel-border-selected: hsl(247 84% 58% / 0.34);
-  --home-panel-gradient-start: hsl(247 84% 58% / 0.1);
-  --home-panel-gradient-mid: hsl(247 84% 66% / 0.08);
-  --home-panel-gradient-end: hsl(218 22% 78% / 0.08);
-  --home-panel-selected-shadow:
-    0 0 0 1px hsl(247 84% 58% / 0.08),
-    0 10px 24px hsl(220 24% 36% / 0.1);
   --home-panel-subtle-bg: hsl(214 32% 98% / 0.98);
   --home-panel-subtle-bg-hover: hsl(214 36% 96% / 0.99);
-  --home-history-item-bg: hsl(0 0% 100% / 0.82);
   --home-history-item-hover-bg: hsl(214 34% 96% / 0.99);
   --home-history-item-selected-bg:
     linear-gradient(180deg, hsl(247 84% 58% / 0.08), hsl(214 42% 96% / 0.98));
@@ -187,17 +167,12 @@
   --home-prose-border-strong: hsl(var(--foreground) / 0.09);
   --home-prose-blockquote-border: hsl(247 84% 66% / 0.28);
   --home-prose-blockquote-bg: hsl(247 84% 66% / 0.08);
-  --home-panel-shadow: 0 1px 2px hsl(220 22% 34% / 0.04);
-  --home-panel-shadow-hover: 0 1px 3px hsl(220 24% 32% / 0.05);
-  --home-hero-border: hsl(247 84% 58% / 0.32);
   --home-hero-gradient-start: hsl(247 84% 58% / 0.24);
   --home-hero-gradient-mid: hsl(247 84% 66% / 0.14);
   --home-hero-gradient-end: hsl(218 22% 82% / 0.14);
   --home-hero-shadow: 0 18px 44px hsl(220 24% 34% / 0.12), 0 8px 18px hsl(220 20% 30% / 0.06);
   --home-rail-border: hsl(218 24% 88% / 0.3);
-  --home-rail-bg: linear-gradient(180deg, hsl(0 0% 100% / 0.98), hsl(214 36% 97% / 0.98));
   --home-rail-shadow: 0 14px 30px hsl(220 22% 34% / 0.09), 0 4px 10px hsl(220 18% 28% / 0.05);
-  --home-history-glow: hsl(247 84% 58% / 0.14);
   --autocomplete-hover-bg: #04d1f6;
 
   /* Shadows (using HSL format) */
@@ -228,7 +203,6 @@
   --settings-glow-hover: hsl(247 84% 62% / 0.38);
   --settings-skeleton-strong: hsl(218 20% 84% / 0.92);
   --settings-skeleton-soft: hsl(218 22% 92% / 0.96);
-  --input-surface-bg: var(--bg-card);
   --input-surface-border: hsl(218 24% 88% / 0.65);
   --input-surface-border-hover: hsl(218 20% 70% / 0.92);
   --input-surface-border-focus: hsl(var(--primary) / 0.38);
@@ -238,36 +212,13 @@
     linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.74));
 
   /* Chat UI Tokens (Light) */
-  --chat-avatar-user-bg: hsl(var(--primary) / 0.5 );
-  --chat-avatar-user-fg: #041118;
-  --chat-avatar-user-border: hsl(var(--primary) / 0.3);
-  --chat-avatar-ai-bg: hsl(var(--primary) / 0.1);
-  --chat-avatar-ai-fg: hsl(var(--foreground)/ 0.8 );
-  --chat-avatar-ai-border: hsl(var(--primary) / 0.2);
-  
   --chat-bubble-user-bg: hsl(var(--primary) / 0.1);
-  --chat-bubble-user-border: hsl(var(--primary) / 0.2);
-  --chat-bubble-ai-bg: hsl(var(--card) / 0.85);
-  --chat-bubble-ai-border: hsl(var(--foreground) / 0.2);
-
-  /* Backtest专用 */
-  --backtest-border-dim: hsl(var(--foreground) / 0.05);
-  --backtest-border-subtle: hsl(var(--foreground) / 0.06);
-  --backtest-border-light: hsl(var(--foreground) / 0.10);
-  --backtest-border-cyan-soft: hsl(var(--primary) / 0.40);
-  --backtest-bg-cyan-subtle: hsl(var(--primary) / 0.10);
-  --backtest-shadow-cyan-glow: 0 0 8px hsl(var(--primary) / 0.15);
-  --backtest-shadow-cyan-glow-strong: 0 0 4px hsl(var(--primary) / 0.60);
-  --backtest-spinner-track: hsl(var(--primary) / 0.20);
-  --backtest-spinner-head: hsl(var(--primary));
-  --backtest-table-bg: hsl(var(--card) / 0.72);
+  /* AI 回复不是气泡：它是一整行的正文（见 .chat-message-ai），所以没有填充/边框 token。 */
 
   /* Login Page Tokens (Light) */
   --login-bg-main: hsl(214 34% 96%);
   --login-bg-card: hsl(210 43% 92% / 0.78);
   --login-border-card: hsl(221 28% 28% / 0.58);
-  --login-border-input: hsl(201 56% 46% / 0.7);
-  --login-border-focus: hsl(var(--primary) / 0.48);
   --login-error-text: hsl(var(--destructive));
   --login-error-bg: hsl(var(--destructive) / 0.1);
   --login-error-border: hsl(var(--destructive) / 0.2);
@@ -317,7 +268,26 @@
   --glass-border: hsl(218 24% 86% / 0.55);
   --glass-sheen-1: hsl(0 0% 100% / 0.5);
   --glass-sheen-2: hsl(0 0% 100% / 0.15);
+  --glass-sheen-floating: linear-gradient(
+    180deg,
+    hsl(0 0% 100% / 0.5) 0%,
+    hsl(0 0% 100% / 0.15) 45%,
+    transparent 100%
+  );
   --glass-shadow: hsl(230 25% 40% / 0.09);
+  /* 浮层提示（右上角 Toast）专用：压在正文之上，靠近乎不透明白底保证小字可读
+     （亮色下背景本来就是浅色，提亮没有意义，这里不跟随暗色的白色薄纱做法）。 */
+  --glass-bg-floating: linear-gradient(
+    180deg,
+    hsl(214 40% 100% / 0.99) 0%,
+    hsl(214 40% 97% / 0.98) 100%
+  );
+  --glass-blur-floating: 40px;
+  --glass-border-floating: hsl(218 24% 86% / 0.55);
+  --shadow-glass-floating:
+    0 1px 3px hsl(220 20% 32% / 0.06),
+    0 20px 40px hsl(220 20% 32% / 0.14),
+    inset 0 1px 0 hsl(0 0% 100% / 0.08);
 
   /* 背景光斑（Light theme，玻璃的底衬） */
   --bg-orb-1: hsl(247 84% 58% / 0.2);
@@ -327,35 +297,39 @@
 }
 
 .dark {
-  --background: 228 35% 7%;
+  /* 深色阶梯整体上移一档：旧值（底 L7 / 卡片 L10）接近纯黑，
+     层级差只有 3 个亮度点，整屏看上去就是「一片黑底 + 看不清的卡片」。
+     现在按 macOS 深色材质的分层来排：底 11 / 卡片 15 / 抬升 17 / 悬停 21，
+     文字色也一起上移，保证抬亮后每一层仍然过 WCAG AA（见 2026-09-26 的设计记录）。 */
+  --background: 228 30% 11%;
   --foreground: 210 33% 98%;
-  --card: 230 24% 10%;
+  --card: 229 20% 15%;
   --card-foreground: 210 33% 98%;
-  --popover: 230 24% 10%;
+  --popover: 229 20% 15%;
   --popover-foreground: 210 33% 98%;
   --primary: 247 84% 62%;
   --primary-foreground: 228 35% 8%;
-  --secondary: 231 19% 15%;
+  --secondary: 230 17% 19%;
   --secondary-foreground: 210 33% 94%;
-  --muted: 230 18% 14%;
-  --muted-foreground: 228 13% 66%;
-  --accent: 231 18% 16%;
+  --muted: 229 16% 18%;
+  --muted-foreground: 228 13% 72%;
+  --accent: 230 16% 20%;
   --accent-foreground: 210 33% 98%;
   --destructive: 349 100% 63%;
   --destructive-foreground: 210 33% 98%;
-  --border: 226 19% 20%;
-  --input: 226 19% 20%;
+  --border: 226 16% 26%;
+  --input: 226 16% 26%;
   --ring: 247 84% 62%;
-  --elevated: 230 22% 12%;
-  --hover: 231 20% 16%;
-  --secondary-text: 228 16% 72%;
-  --muted-text: 228 10% 61%;
+  --elevated: 229 18% 17%;
+  --hover: 230 16% 21%;
+  --secondary-text: 228 14% 76%;
+  --muted-text: 228 10% 70%;
 
-  --color-cyan: hsl(247 84% 72%);
-  --color-cyan-dim: hsl(247 84% 62% / 0.8);
+  /* 底色抬亮后，原来的强调色（72%）在卡片上只剩 4.7:1、在悬停/选中面上只有 3.9:1，
+     所以跟着提亮一档（→ 5.6:1 / 4.6:1），和 macOS 深色下把 accent 提亮是同一件事。 */
+  --color-cyan: hsl(247 84% 78%);
   --color-cyan-glow: hsl(var(--primary) / 0.4);
-  --color-purple: 247 84% 72%;
-  --color-purple-dim: 247 84% 62%;
+  --color-purple: 247 84% 78%;
   --color-purple-glow: hsl(247 84% 72% / 0.3);
   --color-success: 152 69% 58%;
   --color-warning: 37 92% 64%;
@@ -404,7 +378,6 @@
   --border-card: hsl(var(--border-subtle-raw) / 0.05);
   --border-default: var(--border-dim);
   --border-hover: hsl(var(--primary) / 0.34);
-  --border-selected: hsl(var(--primary) / 0.46);
 
   /* Dark theme surface variants */
   --surface-1: hsl(var(--card));
@@ -424,17 +397,11 @@
 
   /* Navigation related (Dark theme) */
   --nav-active-bg: hsl(var(--primary) / 0.11);
-  --nav-active-border: hsl(var(--primary) / 0.3);
-  --nav-active-shadow: hsl(var(--primary) / 0.05);
   --nav-hover-bg: hsl(var(--primary) / 0.06);
   --nav-icon-active: hsl(var(--primary));
   --nav-item-height: 2.75rem;
   --nav-item-padding-x: 1rem;
-  --nav-indicator-width: 0.25rem;
-  --nav-indicator-bg: hsl(var(--primary));
   --nav-indicator-shadow: hsl(var(--primary) / 0.8);
-  --nav-badge-bg: hsl(var(--primary));
-  --nav-brand-shadow: hsl(var(--primary) / 0.24);
 
   /* Home page related (Dark theme) */
   --home-loading-ring-track: hsl(var(--primary) / 0.2);
@@ -450,11 +417,8 @@
   --home-action-report-text: hsl(var(--foreground) / 0.92);
   --home-action-report-hover-bg: hsl(0 0% 100% / 0.12);
   --home-accent-bg: hsl(var(--primary) / 0.1);
-  --home-accent-bg-hover: hsl(var(--primary) / 0.18);
   --home-accent-border: hsl(var(--primary) / 0.22);
-  --home-accent-border-hover: hsl(var(--primary) / 0.34);
   --home-accent-text: hsl(247 84% 72%);
-  --home-secondary-accent-text: hsl(247 84% 72%);
   --home-title-accent: hsl(247 84% 72%);
   --home-price-up: hsl(0 88% 64%);
   --home-price-down: hsl(149 100% 44%);
@@ -465,17 +429,8 @@
   --home-panel-border: hsl(var(--foreground) / 0.1);
   --home-panel-border-hover: hsl(var(--primary) / 0.34);
   --home-panel-border-selected: hsl(var(--primary) / 0.46);
-  --home-panel-gradient-start: hsl(var(--primary) / 0.3);
-  --home-panel-gradient-mid: hsl(247 84% 72% / 0.24);
-  --home-panel-gradient-end: hsl(var(--foreground) / 0.08);
-  --home-panel-shadow: 0 1px 2px hsl(215 25% 10% / 0.35), 0 8px 20px hsl(215 25% 10% / 0.32);
-  --home-panel-shadow-hover: 0 2px 4px hsl(215 25% 10% / 0.4), 0 12px 28px hsl(215 25% 10% / 0.4);
-  --home-panel-selected-shadow:
-    0 0 0 1px hsl(var(--primary) / 0.14),
-    0 4px 16px hsl(var(--primary) / 0.16);
   --home-panel-subtle-bg: hsl(var(--foreground) / 0.03);
   --home-panel-subtle-bg-hover: hsl(var(--foreground) / 0.05);
-  --home-history-item-bg: hsl(var(--foreground) / 0.03);
   --home-history-item-hover-bg: hsl(var(--foreground) / 0.06);
   --home-history-item-selected-bg:
     linear-gradient(180deg, hsl(247 84% 72% / 0.14), hsl(var(--primary) / 0.1));
@@ -518,7 +473,6 @@
   --settings-glow-hover: hsl(247 84% 62% / 0.38);
   --settings-skeleton-strong: hsl(0 0% 100% / 0.1);
   --settings-skeleton-soft: hsl(0 0% 100% / 0.06);
-  --input-surface-bg: var(--bg-card);
   --input-surface-border: hsl(var(--border) / 0.82);
   --input-surface-border-hover: rgba(255, 255, 255, 0.18);
   --input-surface-border-focus: hsl(var(--primary) / 0.45);
@@ -528,36 +482,12 @@
     linear-gradient(135deg, rgba(0, 212, 255, 0.96), rgba(0, 168, 204, 0.96));
 
   /* Chat UI Tokens (Dark) */
-  --chat-avatar-user-bg: hsl(var(--primary) / 0.8);
-  --chat-avatar-user-fg: hsl(var(--foreground) / 0.9);
-  --chat-avatar-user-border: hsl(var(--primary) / 0.15); /* Lower brightness/opacity for dark mode */
-  --chat-avatar-ai-bg: hsl(var(--primary) / 0.8);
-  --chat-avatar-ai-fg: hsl(var(--foreground) / 0.9);
-  --chat-avatar-ai-border: hsl(0 0% 100% / 0.1); /* Low opacity white for dark mode */
-  
   --chat-bubble-user-bg: hsl(var(--primary) / 0.1);
-  --chat-bubble-user-border: hsl(var(--primary) / 0.2);
-  --chat-bubble-ai-bg: hsl(var(--card) / 0.72);
-  --chat-bubble-ai-border: hsl(0 0% 100% / 0.12); /* Semi-transparent border for dark mode */
-
-  /* Backtest专用 */
-  --backtest-border-dim: hsl(var(--foreground) / 0.06);
-  --backtest-border-subtle: hsl(var(--foreground) / 0.08);
-  --backtest-border-light: hsl(var(--foreground) / 0.12);
-  --backtest-border-cyan-soft: hsl(var(--primary) / 0.40);
-  --backtest-bg-cyan-subtle: hsl(var(--primary) / 0.10);
-  --backtest-shadow-cyan-glow: 0 0 8px hsl(var(--primary) / 0.25);
-  --backtest-shadow-cyan-glow-strong: 0 0 4px hsl(var(--primary) / 0.75);
-  --backtest-spinner-track: hsl(var(--primary) / 0.25);
-  --backtest-spinner-head: hsl(var(--primary));
-  --backtest-table-bg: hsl(var(--card) / 0.82);
 
   /* Login Page Tokens (Dark - Preserved Cyber Style) */
   --login-bg-main: hsl(222 84% 5%);
   --login-bg-card: hsl(222 34% 8%);
   --login-border-card: hsl(0 0% 100% / 0.05);
-  --login-border-input: hsl(0 0% 100% / 0.1);
-  --login-border-focus: hsl(var(--primary) / 0.5);
   --login-error-text: hsl(var(--destructive));
   --login-error-bg: hsl(var(--destructive) / 0.1);
   --login-error-border: hsl(var(--destructive) / 0.2);
@@ -591,28 +521,57 @@
   --login-grid-line: hsl(0 0% 50% / 0.04);
   --login-grid-mask: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
 
-  /* Liquid Glass tokens (Dark theme) */
-  --glass-blur: 24px;
-  --glass-saturate: 1.7;
+  /* Liquid Glass tokens (Dark theme)
+     暗色玻璃的做法是「在内容上盖一层很淡的白色薄纱」，不是把底色压成近黑：
+     近黑实底（旧的 L12%/0.98）会比背景亮不了多少，退化成一块硬边黑盒，
+     而 macOS 深色材质是提亮的半透明面，靠大模糊 + 高饱和吸收背后的颜色
+     （紫色光斑会透成淡紫，见 Dock）。所以这里用白色低 alpha，而不是深色高 alpha。 */
+  --glass-blur: 28px;
+  --glass-saturate: 1.8;
   --glass-bg: linear-gradient(
     180deg,
-    hsl(230 26% 15% / 0.55) 0%,
-    hsl(230 24% 11% / 0.5) 100%
+    hsl(228 40% 96% / 0.1) 0%,
+    hsl(228 30% 92% / 0.06) 100%
   );
   --glass-bg-strong: linear-gradient(
     180deg,
-    hsl(230 26% 18% / 0.72) 0%,
-    hsl(230 24% 12% / 0.68) 100%
+    hsl(228 40% 96% / 0.14) 0%,
+    hsl(228 30% 92% / 0.09) 100%
   );
-  --glass-border: hsl(0 0% 100% / 0.08);
-  --glass-sheen-1: hsl(0 0% 100% / 0.1);
-  --glass-sheen-2: hsl(0 0% 100% / 0.03);
-  --glass-shadow: hsl(228 30% 4% / 0.5);
+  --glass-border: hsl(0 0% 100% / 0.16);
+  --glass-sheen-1: hsl(0 0% 100% / 0.16);
+  --glass-sheen-2: hsl(0 0% 100% / 0.04);
+  --glass-sheen-floating: linear-gradient(
+    180deg,
+    hsl(0 0% 100% / 0.14) 0%,
+    hsl(0 0% 100% / 0.04) 45%,
+    transparent 100%
+  );
+  --glass-shadow: hsl(228 40% 3% / 0.55);
+  /* 浮层提示（右上角 Toast）专用：压在最上层，薄纱更重、模糊更大、边缘高光更亮。
+     小字可读性靠 40px 模糊把背景文字糊成色块，而不是靠不透明。 */
+  --glass-blur-floating: 40px;
+  --glass-bg-floating: linear-gradient(
+    180deg,
+    hsl(228 40% 97% / 0.19) 0%,
+    hsl(228 32% 93% / 0.13) 100%
+  );
+  --glass-border-floating: hsl(0 0% 100% / 0.28);
+  --shadow-glass-floating:
+    0 24px 60px hsl(228 45% 3% / 0.6),
+    inset 0 1px 0 hsl(0 0% 100% / 0.18);
 
-  /* 背景光斑（Dark theme，玻璃的底衬，暗色更强） */
-  --bg-orb-1: hsl(247 84% 60% / 0.34);
-  --bg-orb-2: hsl(247 84% 74% / 0.3);
-  --bg-orb-3: hsl(190 95% 48% / 0.2);
+  /* 背景光斑（Dark theme，玻璃的底衬，暗色更强）。
+     色相改成 macOS「Monterey Graphic」桌面壁纸那一族紫：壁纸主色采样为
+     violet #5e17c5（H264 S79 L43）、紫 #9b2ebe（H285 S61 L46）、深靛 #221576（H248 S70 L27）。
+     光斑 3 原来是青 hsl(190 95% 48% / 0.2)，落在 80% 8%（顶栏正下方的右上角），
+     于是顶栏右边是一块青色、左边是紫色 —— 实测两端色相差 37°（左 H243° / 右 H206°），
+     现在换成与光斑 1 同一个紫，两端收到 5° 以内，整屏是一族紫。
+     注：亮色主题的 --bg-orb-3 仍是青色，未一并改动（亮色底色接近纯白，
+     13% 的青只是一层冷调，没有暗色那种「一块蓝」的观感）。 */
+  --bg-orb-1: hsl(264 79% 52% / 0.34);
+  --bg-orb-2: hsl(285 61% 58% / 0.3);
+  --bg-orb-3: hsl(264 79% 52% / 0.2);
   --bg-orb-4: hsl(152 69% 48% / 0.16);
 }
 
@@ -659,8 +618,11 @@
   }
 }
 /* ============ Circular Gauge ============ */
+/* 发光由 `ScoreGauge` 自己按情绪色挂在程序弧那一个 <circle> 上（`feGaussianBlur` +
+   一层加宽的描边），不要在这里再给整个 <svg> 挂一层 drop-shadow：那层阴影用的是固定色
+   （`--color-cyan-glow` → `hsl(var(--primary)/…)`），与分数换色的弧线不同族，
+   而且会把灰色轨道、数字一起描边、把所有边缘糊掉。 */
 .gauge-ring {
-  filter: drop-shadow(0 0 8px var(--color-cyan-glow));
   transform: translateZ(0);
 }
 
@@ -678,27 +640,6 @@
 .gauge-glow {
   filter: blur(6px);
   opacity: 0.6;
-}
-
-/* ============ Sentiment-based Gauge Colors ============ */
-/* Data attribute selectors for theme-aware sentiment colors */
-
-/* Greed sentiment (score >= 60) */
-[data-sentiment="greed"] {
-  --current-sentiment: var(--sentiment-greed);
-  --current-sentiment-glow: var(--sentiment-greed-glow);
-}
-
-/* Neutral sentiment (40 <= score < 60) */
-[data-sentiment="neutral"] {
-  --current-sentiment: var(--sentiment-neutral);
-  --current-sentiment-glow: var(--sentiment-neutral-glow);
-}
-
-/* Fear sentiment (score < 40) */
-[data-sentiment="fear"] {
-  --current-sentiment: var(--sentiment-fear);
-  --current-sentiment-glow: var(--sentiment-fear-glow);
 }
 
 /* Apply sentiment colors to gauge elements */
@@ -837,7 +778,6 @@
    故配合 HomePage header 的 pt-5 留出上方空间，即可让默认淡 ring 完整对称显示。 */
 
 .input-appearance-login {
-  --input-surface-bg: var(--login-input-surface);
   --input-surface-border: var(--login-input-border);
   --input-surface-border-hover: var(--login-input-border-hover);
   --input-surface-border-focus: var(--login-input-border-focus);
@@ -1072,7 +1012,8 @@
 
   /* 隐藏静态镜面高光，减少视觉噪声（超出纯动效范围的有意取舍） */
   .glass-surface::before,
-  .glass-surface-strong::before {
+  .glass-surface-strong::before,
+  .glass-surface-floating::before {
     display: none;
   }
 }
@@ -1119,9 +1060,21 @@
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
     backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
   }
+  /* 浮层提示：右上角 Toast 这类压在正文之上的小字提示。
+     比 .glass-surface-strong 更亮、模糊更大、边缘高光更亮：它是全站最上层的一块玻璃，
+     要像 macOS Dock 那样从内容里「浮」起来；可读性靠大模糊 + 亮边，而不是靠不透明。 */
+  .glass-surface-floating {
+    position: relative;
+    border: 1px solid var(--glass-border-floating);
+    box-shadow: var(--shadow-glass-floating);
+    background: var(--glass-bg-floating);
+    -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur-floating)) saturate(var(--glass-saturate));
+  }
   /* 顶部柔和受光带（模拟玻璃被上方光源照亮） */
   .glass-surface::before,
-  .glass-surface-strong::before {
+  .glass-surface-strong::before,
+  .glass-surface-floating::before {
     content: "";
     position: absolute;
     top: 0;
@@ -1136,6 +1089,95 @@
     );
     border-radius: inherit;
     pointer-events: none;
+  }
+  /* 浮层是最上层玻璃，受光带更亮，也只占顶边一条（对应 Dock 那条顶边高光）。
+     高度必须小于左右的 12px 内边距：受光带盖住标题时，青紫标题会掉到 2:1。 */
+  .glass-surface-floating::before {
+    height: 12px;
+    background: var(--glass-sheen-floating);
+  }
+  /* 浮层的「vibrancy」：玻璃被提亮后，为深底调的强调色对比度会掉下来
+     （暗色下青紫 hsl(247 84% 72%) 在浮层上只有 3.0:1，低于 AA 4.5:1），
+     所以像 macOS 材质那样在浮层内部把这两个色提亮一档（提到 ~5.3:1 / ~5.8:1）。
+     只在浮层内部生效，不改全局色板，也不影响卡片/弹窗里的同一颜色。 */
+  .dark .glass-surface-floating {
+    --color-cyan: hsl(247 84% 84%);
+    --color-danger-alert-text: hsl(349 100% 84%);
+  }
+  /* 顶栏：整屏宽的一行玻璃条 —— 保持「一整行的导航」形态，贴着左右边缘、内容从它下方滚过。
+     位置仍是 sticky top-0，所以钉在顶部 + 内容滚动这个行为不变。
+     材质不复用 .glass-surface：那一套的受光带高 24px，盖在 37px 高的通栏上占掉 65% 高度，
+     形成一条纵向渐变（实测顶底亮度差 15.1），是之前看着不干净的主要来源；
+     这里只保留 inset 1px 顶边高光，纵向只剩这一条线（实测跨度降到 5.6）。
+     另外 saturate 1.8 → 1.2：通栏横跨整屏时 1.8 会把背后光斑放大成一条彩带
+     （实测色相 244°→201°、跨度 43°，横向亮度跨度 15.5），收窄后整条读作一块颜色。
+
+     滚动反馈（.is-scrolled）：投影常驻，滚动只是在常驻投影上加码（0 8px/0.1 → 0 14px/0.2），
+     同时叠一层薄纱把底色压得更实、下边框亮起。早先做过一版「静止无投影、滚动才加投影」，
+     那会让人在滚动起止时看到通栏忽亮忽暗；现在投影始终在，滚动只是沿同一个方向加深，
+     所以读起来是「顶栏被抬起来锁在窗口顶部」而不是「顶栏突然换了张皮」。
+     薄纱走独立 ::after 而不是直接改 background：background 是 linear-gradient，
+     渐变之间无法补间，只有 opacity 能平滑过渡（200ms，与投影/下边框同步）。 */
+  .app-header {
+    -webkit-backdrop-filter: blur(44px) saturate(1.2);
+    backdrop-filter: blur(44px) saturate(1.2);
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.72) 0%, hsl(214 40% 98% / 0.62) 100%);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.7),
+      0 8px 24px hsl(220 30% 40% / 0.1);
+  }
+  /* z-index: -1 = 画在通栏自己的背景之上、正文之下。通栏带 z-40 且 position: sticky，
+     自成层叠上下文，所以这层薄纱既不会掉到页面背景后面，也不会给标题再叠一层灰。 */
+  .app-header::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.3) 0%, hsl(214 40% 98% / 0.26) 100%);
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  /* 注意声明顺序：.app-header.is-scrolled 与 .dark .app-header 同为 (0,2,0)，
+     靠顺序决定胜负，所以浅色滚动态必须写在 .dark .app-header 之前，
+     再由 (0,3,0) 的 .dark .app-header.is-scrolled 接管暗色滚动态。 */
+  /* 浅色下底色本来就接近纯白（实测 96–98），薄纱几乎推不动亮度，滚动反馈实际由
+     投影 + 下边框承担，所以这一档的投影比暗色给得更重（0.1 → 0.26），
+     实测通栏下沿亮度 -5.2、随距离衰减到 -1.2，边缘清晰但不成黑带。 */
+  .app-header.is-scrolled {
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.82),
+      0 16px 38px hsl(220 30% 40% / 0.26);
+  }
+  .app-header.is-scrolled::after {
+    opacity: 1;
+  }
+  /* 暗色底衬压得比浅色平得多：浅色下背后本来就是近白，0.72→0.62 的落差几乎看不出来；
+     暗色下同样的落差叠在深紫背景上，通栏自身亮度会从 72 一路掉到 56（跨度 15.1），
+     而左侧 28px 的 logo 底板是 `bg-card/60`（半透明，随背后一起变），通栏越往下越暗，
+     底板的对比就越弱 —— 实测底板下沿最后 4 行与通栏只差 1.3，边界糊掉，
+     视觉上底板像「下半截没了」，读起来就是 logo 偏上。压平后通栏跨度降到 1.7，
+     底板上下的对比重新对称（上 3.1/10.8/18.1，下 16.7/10.3/3.0），边界四条边一样清楚。
+     平均值保持 0.18/0.11 → 0.15/0.145（都是 0.145 上下），整条通栏的深浅不变，只是内部不再渐变。
+     顶边高光同时从 0.14 收到 0.06：暗色下这 1px 是 26 的亮度台阶（97.7 vs 71.4），
+     浅色下 `inset ... / 0.82` 叠在近白底上等于看不见 —— 只有暗色会出现这条亮线，
+     看上去像通栏顶上压了东西（用户反馈的原话就是「导航有点被上方挡住」）。
+     收到 0.06 后台阶降到 11.5，仍然是一条受光边，但不再读作盖子。 */
+  .dark .app-header {
+    background: linear-gradient(180deg, hsl(228 40% 97% / 0.15) 0%, hsl(228 32% 93% / 0.145) 100%);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.06),
+      0 8px 24px hsl(228 45% 3% / 0.42);
+  }
+  .dark .app-header::after {
+    background: linear-gradient(180deg, hsl(228 40% 97% / 0.1) 0%, hsl(228 32% 93% / 0.07) 100%);
+  }
+  /* 滚动态的高光跟着静息值等比下移（0.06 → 0.12），保持「滚动时高光再亮一档」
+     这个 +0.06 的反馈量不变；只改静息值会让滚动前后差出近 4 倍，读起来像换了张皮。 */
+  .dark .app-header.is-scrolled {
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.12),
+      0 14px 34px hsl(228 45% 3% / 0.62);
   }
 }
 
@@ -1247,9 +1289,6 @@ a {
 .terminal-card {
   --terminal-card-border: var(--border-default);
   --terminal-card-border-hover: var(--border-hover);
-  --terminal-card-gradient-start: var(--border-accent);
-  --terminal-card-gradient-mid: var(--border-purple);
-  --terminal-card-gradient-end: var(--border-dim);
   position: relative;
   overflow: hidden;
   border-radius: 1rem;
@@ -1263,7 +1302,6 @@ a {
 }
 
 .terminal-card-hover:hover {
-  --terminal-card-gradient-start: var(--terminal-card-border-hover);
   border-color: var(--terminal-card-border-hover);
 }
 
@@ -1768,10 +1806,6 @@ select option:checked {
 }
 
 .home-report-hero {
-  --terminal-card-gradient-start: var(--home-hero-gradient-start);
-  --terminal-card-gradient-mid: var(--home-hero-gradient-mid);
-  --terminal-card-gradient-end: var(--home-hero-gradient-end);
-  --terminal-card-shadow: var(--home-hero-shadow);
   background: hsl(var(--card));
   border-color: var(--home-panel-border);
   transition: border-color 0.24s ease;
@@ -1783,17 +1817,12 @@ select option:checked {
 
 .home-rail-card {
   --terminal-card-border: var(--home-rail-border);
-  --terminal-card-gradient-start: hsl(247 84% 58% / 0.08);
-  --terminal-card-gradient-mid: hsl(247 84% 66% / 0.12);
-  --terminal-card-gradient-end: hsl(218 22% 80% / 0.08);
-  --terminal-card-shadow: var(--home-rail-shadow);
   background: hsl(var(--card));
   border-color: var(--home-rail-border);
 }
 
 .home-insight-card {
   --home-insight-tone: hsl(var(--primary));
-  --home-insight-surface: hsl(0 0% 100% / 0.94);
   background: hsl(var(--card));
 }
 
@@ -1873,10 +1902,6 @@ select option:checked {
 }
 
 .dark .home-report-hero {
-  --terminal-card-gradient-start: hsl(var(--primary) / 0.22);
-  --terminal-card-gradient-mid: hsl(247 84% 72% / 0.18);
-  --terminal-card-gradient-end: hsl(var(--foreground) / 0.08);
-  --terminal-card-shadow: var(--shadow-soft-card);
   background: hsl(var(--card));
   border-color: var(--home-panel-border);
 }
@@ -1887,16 +1912,11 @@ select option:checked {
 
 .dark .home-rail-card {
   --terminal-card-border: var(--home-panel-border);
-  --terminal-card-gradient-start: hsl(var(--primary) / 0.16);
-  --terminal-card-gradient-mid: hsl(247 84% 72% / 0.14);
-  --terminal-card-gradient-end: hsl(var(--foreground) / 0.08);
-  --terminal-card-shadow: var(--shadow-soft-card);
   background: hsl(var(--card));
   border-color: var(--home-panel-border);
 }
 
 .dark .home-insight-card {
-  --home-insight-surface: hsl(var(--card) / 0.9);
   background: hsl(var(--card));
 }
 
@@ -2353,17 +2373,8 @@ select option:checked {
    Chat Page UI Styles
    ========================================= */
 
-.chat-avatar-user {
-  background-color: var(--chat-avatar-user-bg);
-  color: var(--chat-avatar-user-fg);
-  border: 1px solid var(--chat-avatar-user-border);
-}
-
-.chat-avatar-ai {
-  background-color: var(--chat-avatar-ai-bg);
-  color: var(--chat-avatar-ai-fg);
-  border: 1px solid var(--chat-avatar-ai-border);
-}
+/* 消息头像已按产品决定移除（ChatPage.tsx 不再渲染 .chat-avatar-*），
+   连同只服务于它的 token 一起删掉；需要时可从 git 历史（HEAD 版本）取回。 */
 
 .chat-bubble-user {
   background-color: var(--chat-bubble-user-bg);
@@ -2373,12 +2384,15 @@ select option:checked {
   border-top-right-radius: 0.125rem;
 }
 
-.chat-bubble-ai {
-  background-color: var(--chat-bubble-ai-bg);
+/* AI 回复是正文，不是气泡：占满整行（宽度由 ChatPage.tsx 的 flex-1 决定），
+   没有填充 / 边框 / 圆角 / 投影，只有一个文字颜色。
+   历史：这里曾经是 .chat-bubble-ai，填充为 hsl(var(--card) / 0.72)，
+   而它压着的聊天面板是 bg-card/78 —— 同一个 --card 两个 alpha 合成后与面板逐像素相同
+   （实测暗色两侧都是 rgb(31,33,46)、亮色都是 rgb(255,255,255)，差 0），
+   所以那个「气泡」从来就没有可见的填充，只有 --shadow-soft-card 撑出的一圈淡影；
+   3f9db1fb 把边框换成阴影之后更是如此。现在按产品决定直接去掉整个气泡形态。 */
+.chat-message-ai {
   color: hsl(var(--secondary-text) / 0.94);
-  box-shadow: var(--shadow-soft-card);
-  border-radius: 1rem;
-  border-top-left-radius: 0.125rem;
 }
 
 /* =========================================
@@ -2628,7 +2642,7 @@ select option:checked {
   color: hsl(var(--foreground));
 }
 
-.dark .chat-bubble-ai {
+.dark .chat-message-ai {
   color: var(--text-secondary-text);
 }
 

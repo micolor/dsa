@@ -85,6 +85,18 @@ export interface StreamAcceptedEvent {
 
 type StreamTerminalStatus = 'cancelled' | 'timeout' | null;
 
+/**
+ * 后端是否支持服务端取消（`POST /chat/stream/{request_id}/cancel`）。
+ *
+ * 两个后端都支持：codex 走 turn interrupt，litellm 由 run_agent_loop 在 step
+ * 边界与流式 chunk 之间检查同一个 event。不支持的取值只有未来的新后端，所以
+ * 这里显式列举，而不是默认 true —— 否则新后端会静默走进「发取消请求再等 20s
+ * watchdog」的路径。
+ */
+function supportsServerCancellation(backend: StreamAcceptedEvent['backend']): boolean {
+  return backend === 'litellm' || backend === 'codex_app_server';
+}
+
 type StreamFailureEvent = {
   type: string;
   success?: boolean;
@@ -176,8 +188,13 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
    * 取消被接受后本地会继续读这条 SSE（等后端的收尾事件），但如果后端卡住、
    * 连接半死，事件永远不来，`stopping` 就会停在 true：停止按钮一直 disabled、
    * 文案一直显示「正在停止…」，而分析实际还在跑。超过这个时限就由本地了断。
+   *
+   * 这个时限因此只兜「连接半死」这种异常，不能按秒级来卡：正在执行中的工具调用
+   * （含数据源逐家超时重试的扇出）**不会**被打断，停止只会在它结束后落地，实测一次
+   * 工具扇出里的停止要 90 秒才收尾。服务端自己的回合预算（默认 600 秒）加上 30 秒
+   * 收尾余量就是它必然给出结束事件的上界，本地看门狗取在这个上界之外。
    */
-  const SERVER_CANCEL_WATCHDOG_MS = 20_000;
+  const SERVER_CANCEL_WATCHDOG_MS = 660_000;
 
   let cancelWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -207,7 +224,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         stopping: false,
         chatError: createParsedApiError({
           title: '停止超时',
-          message: '已向服务端发出停止请求，但这次回复没有在限定时间内结束，已断开本地连接。',
+          message: `已向服务端发出停止请求，但本地一直没有收到结束事件，已断开连接。服务端会在当前工具调用结束后收尾，刷新会话可以看到最终状态。`,
           rawMessage: `cancel accepted for ${requestId}, but the stream did not finish within ${SERVER_CANCEL_WATCHDOG_MS}ms`,
           category: 'upstream_timeout',
         }),
@@ -501,7 +518,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           finalBackend = acceptedEvent.backend;
           set((s) => ({
             messages: [...s.messages, { ...userMessage, backend: acceptedEvent!.backend }],
-            serverCancellation: acceptedEvent!.backend === 'codex_app_server',
+            serverCancellation: supportsServerCancellation(acceptedEvent!.backend),
             sessions: s.sessions.some((x) => x.session_id === streamSessionId)
               ? s.sessions
               : [

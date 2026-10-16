@@ -86,6 +86,58 @@ describe('AutoDismissToast', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('does not dismiss while keyboard focus rests inside it', () => {
+    const onDismiss = vi.fn();
+    render(
+      <AutoDismissToast active="已刷新" onDismiss={onDismiss} delayMs={DELAY_MS}>
+        <button type="button">关闭</button>
+      </AutoDismissToast>,
+    );
+
+    fireEvent.focusIn(screen.getByRole('button'));
+    advance(DELAY_MS * 4);
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('restarts the full countdown after focus leaves the toast', () => {
+    const onDismiss = vi.fn();
+    render(
+      <AutoDismissToast active="已刷新" onDismiss={onDismiss} delayMs={DELAY_MS}>
+        <button type="button">关闭</button>
+      </AutoDismissToast>,
+    );
+
+    // 聚焦前先耗掉大部分倒计时，确认焦点离开后拿到的是完整窗口而不是剩余时间。
+    advance(DELAY_MS - 100);
+    fireEvent.focusIn(screen.getByRole('button'));
+    advance(DELAY_MS * 2);
+    fireEvent.focusOut(screen.getByRole('button'), { relatedTarget: null });
+
+    advance(DELAY_MS - 1);
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    advance(1);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pausing while focus moves between its own controls', () => {
+    const onDismiss = vi.fn();
+    render(
+      <AutoDismissToast active="已刷新" onDismiss={onDismiss} delayMs={DELAY_MS}>
+        <button type="button">关闭</button>
+        <button type="button">重试</button>
+      </AutoDismissToast>,
+    );
+
+    fireEvent.focusIn(screen.getByText('关闭'));
+    // React 的 onBlur 走 focusout，焦点在提示内部换控件时也会触发；这不是「离开」。
+    fireEvent.focusOut(screen.getByText('关闭'), { relatedTarget: screen.getByText('重试') });
+    advance(DELAY_MS * 4);
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
   it('never dismisses while inactive', () => {
     const { onDismiss } = renderToast({ active: null });
 

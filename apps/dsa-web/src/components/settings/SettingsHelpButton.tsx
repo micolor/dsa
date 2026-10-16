@@ -1,10 +1,11 @@
 import { CircleHelp, ExternalLink, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type React from 'react';
 import { createPortal } from 'react-dom';
 import type { SystemConfigFieldSchema } from '../../types/systemConfig';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { getSettingsHelpContent } from '../../locales/settingsHelp';
+import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { cn } from '../../utils/cn';
 import { Tooltip } from '../common';
 
@@ -102,6 +103,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
   const { language, t } = useUiLanguage();
   const help = getSettingsHelpContent(helpKey ?? schema?.helpKey, description, language);
   const [open, setOpen] = useState(false);
+  const { modalRef, isCovered } = useEscTopLayer();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -123,7 +125,9 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      // 上面还压着别的层时让位，见 `useEscTopLayer`：Esc 只归最上面那层，规则全站共用在
+      // 那一个 hook 里，这里不另判。单层（当前唯一可达的形态）时判断恒为 false，行为不变。
+      if (event.key === 'Escape' && !isCovered()) {
         setOpen(false);
         return;
       }
@@ -173,7 +177,16 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
       document.body.style.overflow = previousOverflow;
       triggerButton?.focus();
     };
-  }, [open]);
+  }, [open, isCovered]);
+
+  // 同一个面板节点要喂给两处：焦点陷阱用的 `dialogRef`，和 Esc 让位判断用的 `modalRef`。
+  const attachDialog = useCallback(
+    (node: HTMLDivElement | null) => {
+      dialogRef.current = node;
+      modalRef(node);
+    },
+    [modalRef],
+  );
 
   if (!help) {
     return null;
@@ -208,7 +221,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 onClick={() => setOpen(false)}
               />
               <div
-                ref={dialogRef}
+                ref={attachDialog}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
