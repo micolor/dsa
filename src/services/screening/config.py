@@ -182,7 +182,11 @@ class Config:
     llm_min_coverage: float = 0.60
     llm_context_max_chars: int = 4000
     llm_timeout_sec: float = 60.0
-    llm_max_tokens: int = 2048
+    # 重排输出上限。必须与 llm_max_candidates 同量级：输出契约要求每个候选约 13 个
+    # 字段（实测 240-320 token），默认 30 个候选就需要 7k+ token，思维链模型的
+    # reasoning token 还会先吃掉一部分预算。低于这个量级会返回被截断的 JSON。
+    # 与 ranker._DEFAULT_RANKING_MAX_TOKENS 保持一致。
+    llm_max_tokens: int = 8192
 
     # Snapshot data source priority
     snapshot_source_priority: list[str] = field(
@@ -317,7 +321,7 @@ class Config:
             llm_min_coverage=_parse_float_env("LLM_MIN_COVERAGE", 0.60),
             llm_context_max_chars=max(500, int(os.getenv("LLM_CONTEXT_MAX_CHARS", "4000"))),
             llm_timeout_sec=max(1.0, _parse_float_env("LLM_TIMEOUT_SEC", 60.0)),
-            llm_max_tokens=max(1, int(os.getenv("LLM_MAX_TOKENS", "2048"))),
+            llm_max_tokens=max(1, int(os.getenv("LLM_MAX_TOKENS", "8192"))),
             snapshot_source_priority=_resolve_snapshot_source_priority(),
             fallback_snapshot_path=fallback_snapshot_path,
             snapshot_cache_ttl_seconds=max(

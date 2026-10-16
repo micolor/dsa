@@ -9,12 +9,28 @@ from unittest.mock import patch
 
 from src.llm.generation_params import clear_litellm_generation_param_recovery_cache
 from src.services.screening.models import Pick
-from src.services.screening.ranker import _call_llm, rank_candidates_with_metadata
+from src.services.screening.ranker import (
+    _DEFAULT_RANKING_MAX_TOKENS,
+    _balanced_json_values,
+    _completion_response_meta,
+    _extract_partial_ranking_array,
+    _call_llm,
+    rank_candidates_with_metadata,
+)
 
 
 def _response(content: str = "ok") -> SimpleNamespace:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
+
+
+def _truncated_ranking_response() -> str:
+    """A response cut off mid-JSON, the way a token-limited model returns it."""
+    return (
+        '{"market_view": "震荡", "selection_logic": "赛道匹配", "ranked": ['
+        '{"code": "600519", "llm_score": 90, "reason": "ok"},'
+        '{"code": "000001", "llm_score": 80, "reason": "partial'
     )
 
 
@@ -414,3 +430,138 @@ def test_rank_candidates_with_metadata_reports_all_invalid_models() -> None:
     assert result.failure_reason == "invalid_response"
     assert result.attempted_models == ["deepseek/deepseek-chat", "openai/gpt-4o"]
     assert len(result.errors) == 2
+
+
+def test_completion_response_meta_reads_finish_reason_and_reasoning_tokens() -> None:
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="{}"), finish_reason="length")],
+        usage=SimpleNamespace(
+            prompt_tokens=500,
+            completion_tokens=2048,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=1918),
+        ),
+    )
+
+    assert _completion_response_meta(response) == {
+        "finish_reason": "length",
+        "prompt_tokens": 500,
+        "completion_tokens": 2048,
+        "reasoning_tokens": 1918,
+    }
+
+
+def test_completion_response_meta_omits_unknown_fields() -> None:
+    """缺失的元数据必须省略，不能伪造 provider 的实际状态。"""
+    assert _completion_response_meta(_response("ok")) == {}
+    assert _completion_response_meta(object()) == {}
+
+
+def test_extract_partial_ranking_array_recovers_closed_candidates_from_truncated_json() -> None:
+    """截断的顶层对象不闭合，但已写完的候选对象是闭合的，必须能挽回。"""
+    errors: list[str] = []
+
+    parsed = _extract_partial_ranking_array(_truncated_ranking_response(), errors)
+
+    assert parsed == {
+        "ranked": [{"code": "600519", "llm_score": 90, "reason": "ok"}],
+    }
+    assert errors == ["json_repaired:partial_array"]
+
+
+def test_balanced_json_values_excludes_nested_by_default_and_includes_on_request() -> None:
+    """顶层检测不能把嵌套对象当成整个 payload；挽回路径才需要嵌套值。"""
+    text = '{"ranked": [{"code": "600519"}, {"code": "000001"'
+
+    assert _balanced_json_values(text) == []
+    assert _balanced_json_values(text, include_nested=True) == ['{"code": "600519"}']
+
+
+def test_rank_candidates_with_metadata_reports_truncated_response() -> None:
+    """输出被长度上限截断时，失败原因必须是 truncated_response 而不是 invalid_response。"""
+    candidates = [
+        Pick(rank=1, code="600519", name="贵州茅台", final_score=90.0, screen_score=90.0),
+        Pick(rank=2, code="000001", name="平安银行", final_score=80.0, screen_score=80.0),
+    ]
+
+    def call_llm(_prompt, _api_key, _model, _base_url, **kwargs):
+        meta_out = kwargs.get("meta_out")
+        if meta_out is not None:
+            meta_out.update({"finish_reason": "length", "completion_tokens": 2048, "reasoning_tokens": 1918})
+        return '{"market_view": "震荡", "selection_logic": "赛道'
+
+    with patch("src.services.screening.ranker._call_llm", side_effect=call_llm):
+        result = rank_candidates_with_metadata(
+            candidates,
+            "test hints",
+            "test-key",
+            "deepseek/deepseek-flash",
+            min_coverage=1.0,
+            max_retries=0,
+        )
+
+    assert result.ranked is False
+    assert result.failure_reason == "truncated_response"
+    # no_json_found 被替换成更具体的原因，同一次失败只留一条诊断
+    assert result.errors == ["deepseek/deepseek-flash:truncated_response"]
+
+
+def test_rank_candidates_with_metadata_asks_for_shorter_output_after_truncation() -> None:
+    """截断后的重试必须要求压缩输出；继续要求「覆盖更多候选」只会再次截断。"""
+    candidates = [Pick(rank=1, code="600519", name="贵州茅台", final_score=90.0, screen_score=90.0)]
+    prompts: list[str] = []
+
+    def call_llm(prompt, _api_key, _model, _base_url, **kwargs):
+        prompts.append(prompt)
+        meta_out = kwargs.get("meta_out")
+        if meta_out is not None:
+            meta_out.update({"finish_reason": "length"})
+        return '{"market_view": "震荡'
+
+    with patch("src.services.screening.ranker._call_llm", side_effect=call_llm):
+        result = rank_candidates_with_metadata(
+            candidates,
+            "test hints",
+            "test-key",
+            "deepseek/deepseek-flash",
+            min_coverage=1.0,
+            max_retries=1,
+        )
+
+    assert result.ranked is False
+    assert len(prompts) == 2
+    assert "覆盖尽可能多的候选代码" not in prompts[1]
+    assert "被长度上限截断" in prompts[1]
+
+
+def test_rank_candidates_with_metadata_keeps_coverage_retry_wording_without_truncation() -> None:
+    """未截断的低覆盖重试保持原有措辞。"""
+    candidates = [Pick(rank=1, code="600519", name="贵州茅台", final_score=90.0, screen_score=90.0)]
+    prompts: list[str] = []
+
+    def call_llm(prompt, _api_key, _model, _base_url, **kwargs):
+        prompts.append(prompt)
+        meta_out = kwargs.get("meta_out")
+        if meta_out is not None:
+            meta_out.update({"finish_reason": "stop"})
+        return "not-json"
+
+    with patch("src.services.screening.ranker._call_llm", side_effect=call_llm):
+        result = rank_candidates_with_metadata(
+            candidates,
+            "test hints",
+            "test-key",
+            "deepseek/deepseek-flash",
+            min_coverage=1.0,
+            max_retries=1,
+        )
+
+    assert result.ranked is False
+    assert result.failure_reason == "invalid_response"
+    assert "覆盖尽可能多的候选代码" in prompts[1]
+
+
+def test_default_ranking_max_tokens_matches_screening_config_default() -> None:
+    """ranker 与 ScreeningConfig 的输出上限默认值必须一致，避免两处漂移。"""
+    from src.services.screening.config import Config
+
+    assert _DEFAULT_RANKING_MAX_TOKENS == Config().llm_max_tokens

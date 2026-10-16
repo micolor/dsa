@@ -26,9 +26,19 @@ def _normalize_code(value: object) -> str:
     # US tickers may pass through (see normalize_code docstring).
     return normalize_code(value, allow_ticker=True)
 
+
 logger = logging.getLogger(__name__)
 _DEFAULT_RANKING_PROMPT_MAX_CHARS = 24_000
 _PROMPT_TRIM_MARKER = "[prompt_trimmed]"
+
+# 重排输出上限的默认值。输出契约要求每个候选约 13 个字段（实测约 240-320 token），
+# 默认候选上限（LLM_MAX_CANDIDATES=30）就需要 7k+ token；思维链模型的 reasoning token
+# 同样计入 max_tokens 且不可控，2048 的预算经常在 JSON 写完之前耗尽，返回被截断的
+# 顶层对象（finish_reason=length），最终只能报 no_json_found。默认预算必须与候选数
+# 同量级，因此与 ScreeningConfig.llm_max_tokens 的默认值保持一致。
+_DEFAULT_RANKING_MAX_TOKENS = 8192
+# 命中输出上限时 OpenAI 兼容网关返回的 finish_reason。
+_TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
 
 
 @dataclass
@@ -80,7 +90,7 @@ def rank_candidates(
     config_path: str = "",
     timeout_sec: float = 60.0,
     max_prompt_chars: int | None = _DEFAULT_RANKING_PROMPT_MAX_CHARS,
-    max_tokens: int | None = 2048,
+    max_tokens: int | None = _DEFAULT_RANKING_MAX_TOKENS,
 ) -> list[Pick]:
     """Use LLM to re-rank candidates and add ranking_reason / risk_summary.
 
@@ -128,7 +138,7 @@ def rank_candidates_with_metadata(
     timeout_sec: float = 60.0,
     max_prompt_chars: int | None = _DEFAULT_RANKING_PROMPT_MAX_CHARS,
     degradation: list[str] | None = None,
-    max_tokens: int | None = 2048,
+    max_tokens: int | None = _DEFAULT_RANKING_MAX_TOKENS,
 ) -> LLMRankingResult:
     """Use LLM to re-rank candidates and return global research metadata."""
     if not candidates:
@@ -151,13 +161,25 @@ def rank_candidates_with_metadata(
     for candidate_model in model_chain:
         attempted_models.append(candidate_model)
         model_errors: list[str] = []
+        truncated_previous_attempt = False
         for attempt in range(max_retries + 1):
             attempt_prompt = prompt
             if attempt:
-                attempt_prompt += (
-                    "\n\n上一次输出没有满足结构化覆盖率要求。"
-                    "请重新返回严格 JSON，并覆盖尽可能多的候选代码。"
-                )
+                # 重试方向取决于上一次失败的性质：输出被长度上限截断时要求「覆盖更多
+                # 候选」只会让响应更长、再次截断，必须反过来要求压缩输出。
+                if truncated_previous_attempt:
+                    attempt_prompt += (
+                        "\n\n上一次输出在 JSON 写完之前就被长度上限截断了。"
+                        "请优先保证 JSON 完整闭合：ranked 数组只写 code、llm_score、"
+                        "reason 三个字段，其余字段省略，market_view/selection_logic/"
+                        "portfolio_risk 各写一句话。"
+                    )
+                else:
+                    attempt_prompt += (
+                        "\n\n上一次输出没有满足结构化覆盖率要求。"
+                        "请重新返回严格 JSON，并覆盖尽可能多的候选代码。"
+                    )
+            attempt_meta: dict[str, object] = {}
             try:
                 # Keep transport/provider retries scoped to one model here. A
                 # syntactically successful but unusable response must also
@@ -175,6 +197,7 @@ def rank_candidates_with_metadata(
                     config_path=config_path,
                     timeout_sec=timeout_sec,
                     max_tokens=max_tokens,
+                    meta_out=attempt_meta,
                 )
             except Exception as exc:
                 failure_reason = "timeout" if _is_timeout_error(exc) else "call_failed"
@@ -183,10 +206,35 @@ def rank_candidates_with_metadata(
 
             parsed = _parse_ranking_response_detail(response, candidates)
             last_coverage = parsed.coverage
-            model_errors.extend(parsed.errors)
             if parsed.coverage < min_coverage:
-                failure_reason = "invalid_response"
+                truncated_previous_attempt = _is_truncated_finish_reason(
+                    attempt_meta.get("finish_reason")
+                )
+                attempt_errors = list(parsed.errors)
+                if truncated_previous_attempt:
+                    # 覆盖率为 0 且 finish_reason=length 时，no_json_found 只是表象：真正的
+                    # 原因是预算耗尽。把它换成更具体的原因——否则同一次失败会以两条语义
+                    # 重复的诊断同时进入 llm_parse_errors，在页面上重复渲染一次。
+                    attempt_errors = [error for error in attempt_errors if error != "no_json_found"]
+                    attempt_errors.append("truncated_response")
+                    failure_reason = "truncated_response"
+                    logger.warning(
+                        "LLM ranking output truncated by the token budget: "
+                        "model=%s finish_reason=%s completion_tokens=%s reasoning_tokens=%s "
+                        "max_tokens=%s response_chars=%d; raise LLM_MAX_TOKENS or lower "
+                        "LLM_MAX_CANDIDATES",
+                        candidate_model,
+                        attempt_meta.get("finish_reason"),
+                        attempt_meta.get("completion_tokens"),
+                        attempt_meta.get("reasoning_tokens"),
+                        max_tokens,
+                        len(response),
+                    )
+                else:
+                    failure_reason = "invalid_response"
+                model_errors.extend(attempt_errors)
                 continue
+            model_errors.extend(parsed.errors)
 
             ranked = parsed.picks
             for i, pick in enumerate(ranked):
@@ -527,9 +575,15 @@ def _call_llm(
     channels: list[dict[str, object]] | None = None,
     config_path: str = "",
     timeout_sec: float = 60.0,
-    max_tokens: int | None = 2048,
+    max_tokens: int | None = _DEFAULT_RANKING_MAX_TOKENS,
+    meta_out: dict[str, object] | None = None,
 ) -> str:
-    """Call LLM via litellm with fallback models and channel configs."""
+    """Call LLM via litellm with fallback models and channel configs.
+
+    ``meta_out`` 是可选的诊断出口：调用方传入字典时会被填入本次完成的
+    ``finish_reason`` / token 用量。它只用于诊断（判断输出是否被长度上限截断），
+    不参与解析，缺失时按「未知」处理。
+    """
     import litellm
 
     if silent:
@@ -549,6 +603,7 @@ def _call_llm(
             json_mode=json_mode,
             timeout_sec=timeout_sec,
             max_tokens=max_tokens,
+            meta_out=meta_out,
         )
         if router_result is not None:
             return router_result
@@ -578,6 +633,8 @@ def _call_llm(
                     model=candidate_model,
                     call_kwargs=kwargs,
                 )
+                if meta_out is not None:
+                    meta_out.update(_completion_response_meta(response))
                 return _extract_completion_text(response)
             except Exception as exc:
                 last_error = exc
@@ -588,6 +645,52 @@ def _call_llm(
     if last_error is not None:
         raise last_error
     raise RuntimeError("No LLM model configured")
+
+
+def _completion_response_meta(response: object) -> dict[str, object]:
+    """Collect diagnostic-only completion metadata (finish_reason / token usage).
+
+    Only fields that explain *why* a response was unusable are kept. 缺失的字段
+    直接省略，调用方按「未知」处理，不要用默认值伪造 provider 的实际状态。
+    """
+    meta: dict[str, object] = {}
+
+    def field(owner: object, name: str) -> object:
+        if isinstance(owner, dict):
+            return owner.get(name)
+        value = getattr(owner, name, None)
+        if value is not None:
+            return value
+        extra = getattr(owner, "model_extra", None)
+        return extra.get(name) if isinstance(extra, dict) else None
+
+    try:
+        choices = field(response, "choices")
+        choice = choices[0]
+    except (IndexError, KeyError, TypeError):
+        return meta
+
+    finish_reason = field(choice, "finish_reason")
+    if isinstance(finish_reason, str) and finish_reason.strip():
+        meta["finish_reason"] = finish_reason.strip()
+
+    usage = field(response, "usage")
+    if usage is None:
+        return meta
+    for name in ("prompt_tokens", "completion_tokens"):
+        value = field(usage, name)
+        if isinstance(value, int):
+            meta[name] = value
+    details = field(usage, "completion_tokens_details")
+    reasoning_tokens = field(details, "reasoning_tokens") if details is not None else None
+    if isinstance(reasoning_tokens, int):
+        meta["reasoning_tokens"] = reasoning_tokens
+    return meta
+
+
+def _is_truncated_finish_reason(finish_reason: object) -> bool:
+    """Whether the provider stopped because the output limit was reached."""
+    return isinstance(finish_reason, str) and finish_reason.strip().lower() in _TRUNCATED_FINISH_REASONS
 
 
 def _extract_completion_text(response: object) -> str:
@@ -704,7 +807,13 @@ def _parse_ranking_response_detail(response: str, candidates: list[Pick]) -> Ran
     parsed = _extract_ranking_json(response, errors)
     if parsed is None:
         errors.append("no_json_found")
-        logger.warning("No JSON object or array found in LLM response")
+        # 带出响应体开头与长度：没有它，no_json_found 在日志里无法自证到底是模型没吐
+        # JSON，还是输出被长度上限截断（后者由调用方的 finish_reason 记录补齐）。
+        logger.warning(
+            "No JSON object or array found in LLM response (chars=%d): %s",
+            len(response),
+            _truncate_text(response, 240),
+        )
         return RankingParseResult(candidates, 0.0, errors)
     if isinstance(parsed, dict):
         items = parsed.get("ranked", [])
@@ -867,11 +976,17 @@ def _iter_json_payloads(response: str):
             yield payload
 
 
-def _balanced_json_values(text: str) -> list[str]:
-    """Return balanced top-level JSON object/array substrings."""
+def _balanced_json_values(text: str, *, include_nested: bool = False) -> list[str]:
+    """Return balanced JSON object/array substrings.
+
+    ``include_nested=False``（默认）只返回最外层已闭合的值：截断的顶层对象不会被
+    返回，这是 ``_iter_json_payloads`` 想要的语义。``include_nested=True`` 额外返回
+    嵌套的、自身已闭合的值——输出被长度上限截断时，外层对象永远不会闭合，但
+    ranked 数组里已经写完的候选对象是闭合的，只有这一模式能看见它们。
+    """
     values: list[str] = []
     stack: list[str] = []
-    start: int | None = None
+    starts: list[int] = []
     in_string = False
     escaped = False
     pairs = {"{": "}", "[": "]"}
@@ -889,19 +1004,18 @@ def _balanced_json_values(text: str) -> list[str]:
             in_string = True
             continue
         if char in pairs:
-            if not stack:
-                start = index
             stack.append(pairs[char])
+            starts.append(index)
             continue
         if char in ("}", "]") and stack:
             expected = stack.pop()
+            start = starts.pop()
             if char != expected:
                 stack.clear()
-                start = None
+                starts.clear()
                 continue
-            if not stack and start is not None:
+            if include_nested or not stack:
                 values.append(text[start : index + 1])
-                start = None
     return values
 
 
@@ -909,7 +1023,8 @@ def _extract_partial_ranking_array(response: str, errors: list[str]):
     """Recover a ranked list from multiple JSON objects in a noisy response."""
     items = []
     item_errors: list[str] = []
-    for raw in _balanced_json_values(response):
+    # 必须扫描嵌套对象：被截断的响应里，只有写完的候选对象是闭合的。
+    for raw in _balanced_json_values(response, include_nested=True):
         parsed = _try_parse_json_lenient(raw, item_errors)
         if isinstance(parsed, dict) and "code" in parsed:
             items.append(parsed)
@@ -928,7 +1043,8 @@ def _call_litellm_router(
     temperature: float,
     json_mode: bool,
     timeout_sec: float,
-    max_tokens: int | None = 2048,
+    max_tokens: int | None = _DEFAULT_RANKING_MAX_TOKENS,
+    meta_out: dict[str, object] | None = None,
 ) -> str | None:
     try:
         import yaml
@@ -963,6 +1079,8 @@ def _call_litellm_router(
                     call_kwargs=kwargs,
                     model_list=model_list,
                 )
+                if meta_out is not None:
+                    meta_out.update(_completion_response_meta(response))
                 return _extract_completion_text(response)
             except Exception:
                 raise

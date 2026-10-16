@@ -409,6 +409,7 @@ def test_pipeline_uses_ranker_success_flag_instead_of_partial_llm_scores(monkeyp
             portfolio_risk="",
             coverage=0.5,
             errors=["coverage below threshold"],
+            failure_reason="invalid_response",
         )
 
     monkeypatch.setattr(screening_pipeline, "load_all_strategies", lambda _path: {"demo": strategy})
@@ -430,7 +431,7 @@ def test_pipeline_uses_ranker_success_flag_instead_of_partial_llm_scores(monkeyp
     assert result.llm_ranked is False
     assert result.picks[0].llm_score is None
     assert result.picks[0].final_score == result.picks[0].screen_score
-    assert "LLM ranking failed: fell back to screen_score" in result.degradation
+    assert "LLM ranking failed: invalid_response; fell back to screen_score" in result.degradation
 
 
 def test_default_scorecard_scores_full_pool_before_seeded_rotation(monkeypatch) -> None:

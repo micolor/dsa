@@ -337,10 +337,10 @@ def screen(
     )
     # 上限把候选压到低于请求条数时必须留痕：picks 由 df_top 构建且此后只会被
     # 子集化或重排、不会再扩充，所以 llm_max_candidates 实际上也封顶了最终返回条数。
-    # 调用方传的 max_results 大于该上限时（默认 20 > 12），要 20 条只会回 12 条，
+    # 调用方传的 max_results 大于该上限时（默认上限 30），要 40 条也只会回 30 条，
     # 而结果里此前没有任何字段说明「只重排了前 top_k 条」——after_filter_count 是
-    # 上限生效前的池子大小，语义是「硬过滤后」，读的人无法据此区分「策略只产出 12 只」
-    # 和「只看了 12 只」。这里与下方 remote post-analysis cap 用同款措辞与相同的
+    # 上限生效前的池子大小，语义是「硬过滤后」，读的人无法据此区分「策略只产出这么多」
+    # 和「只看了这么多」。这里与下方 remote post-analysis cap 用同款措辞与相同的
     # `<上限> < requested output` 判据，便于前端统一识别为「条数被上限压缩」。
     if top_k < output_count:
         degradation.append(
@@ -457,7 +457,11 @@ def screen(
         llm_ranked = llm_result.ranked
         if not llm_ranked:
             picks = llm_fallback_picks
-            degradation.append("LLM ranking failed: fell back to screen_score")
+            # 带上失败原因：不带原因时这条消息无法被 Web 的选股诊断映射识别，会以
+            # 英文原文出现在中文界面里，并和信息渠道里的 llm_parse_errors 重复一次。
+            degradation.append(
+                f"LLM ranking failed: {llm_failure_reason or 'unknown'}; fell back to screen_score"
+            )
             for i, p in enumerate(picks):
                 p.rank = i + 1
                 p.final_score = p.screen_score
