@@ -8,6 +8,7 @@ interface consumed by the AgentExecutor, via LiteLLM.
 
 import json
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -54,6 +55,35 @@ from src.llm.provider_cache import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class LLMCallCancelled(Exception):
+    """Raised when a caller-supplied cancel event interrupts an LLM call.
+
+    Deliberately *not* a subclass of the provider/transport errors handled
+    below: the recovery paths in :meth:`LLMToolAdapter.call_completion` and
+    :meth:`LLMToolAdapter._call_litellm_model` treat any ``Exception`` as a
+    reason to retry — a fallback model or a non-streaming repeat.  A user
+    stop must never be retried, so those handlers re-raise this explicitly.
+    """
+
+
+def _close_stream_quietly(stream: Any) -> None:
+    """Best-effort close of an abandoned streaming response.
+
+    Dropping the connection is what actually stops the provider-side
+    generation, so this is not just hygiene.  Cancellation is already decided
+    by the time we get here, so a stream that refuses to close must not
+    replace :class:`LLMCallCancelled` with a transport error.
+    """
+    for target in (stream, getattr(stream, "response", None)):
+        close = getattr(target, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:  # noqa: BLE001 - never mask the cancellation
+                logger.debug("Closing cancelled LLM stream failed: %s", exc)
+            return
 
 
 def _resolve_litellm_exception(name: str) -> type[BaseException]:
@@ -554,6 +584,7 @@ class LLMToolAdapter:
         timeout: Optional[float] = None,
         *,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> LLMResponse:
         """Send messages + tool declarations to LLM, return normalized response.
 
@@ -565,6 +596,9 @@ class LLMToolAdapter:
             progress_callback: Optional callback invoked with ``content_delta`` stream
                 events as the LLM generates assistant text. When provided, the primary
                 model call runs in streaming mode; failures fall back to non-streaming.
+            cancel_event: Optional event set by the caller to stop generation. Checked
+                between streamed chunks; when set, the call raises
+                :class:`LLMCallCancelled` instead of falling back.
 
         Returns:
             LLMResponse with either content (final answer) or tool_calls.
@@ -575,6 +609,7 @@ class LLMToolAdapter:
             provider=provider,
             timeout=timeout,
             progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
 
     def call_text(
@@ -606,6 +641,7 @@ class LLMToolAdapter:
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> LLMResponse:
         """Shared completion path for both tool and text-only calls."""
         config = self._config
@@ -648,7 +684,12 @@ class LLMToolAdapter:
                     max_tokens=max_tokens,
                     timeout=remaining_timeout,
                     progress_callback=progress_callback,
+                    cancel_event=cancel_event,
                 )
+            except LLMCallCancelled:
+                # A user stop is not a provider failure: no fallback model, no
+                # retry.  Let it reach the runner so it can report "cancelled".
+                raise
             except Exception as e:
                 if isinstance(e, _resolve_litellm_exception("RateLimitError")):
                     logger.warning("Agent LLM rate-limited on %s: %s", model, e)
@@ -700,6 +741,7 @@ class LLMToolAdapter:
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> LLMResponse:
         """Call a specific litellm model with OpenAI-format messages and tools."""
         openai_messages = self._convert_messages(messages, target_model=model)
@@ -789,7 +831,11 @@ class LLMToolAdapter:
                     openai_messages=openai_messages,
                     model_list=recovery_model_list,
                     progress_callback=progress_callback,
+                    cancel_event=cancel_event,
                 )
+            except LLMCallCancelled:
+                # Never "recover" a stop by repeating the request non-streamed.
+                raise
             except Exception as exc:
                 logger.warning(
                     "Agent LLM streaming failed for %s (%s); falling back to non-streaming",
@@ -848,6 +894,7 @@ class LLMToolAdapter:
         openai_messages: List[Dict[str, Any]],
         model_list: Optional[List[Dict[str, Any]]],
         progress_callback: Callable[[Dict[str, Any]], None],
+        cancel_event: Optional[threading.Event] = None,
     ) -> LLMResponse:
         """Consume a streaming litellm completion, emitting content_delta events.
 
@@ -855,6 +902,11 @@ class LLMToolAdapter:
         reassembling tool calls (arguments arrive as deltas) and reasoning content
         into a synthetic response that the shared parser understands. The caller
         must wrap this in a fallback to the non-streaming path on failure.
+
+        When ``cancel_event`` is set mid-stream, the stream is closed and
+        :class:`LLMCallCancelled` is raised: checking here (rather than only
+        between loop steps) is what makes a stop take effect during a long
+        generation instead of after it finishes.
         """
         stream_kwargs = dict(call_kwargs)
         stream_kwargs["stream"] = True
@@ -867,6 +919,9 @@ class LLMToolAdapter:
 
         stream = completion_callable(stream_kwargs)
         for chunk in stream:
+            if cancel_event is not None and cancel_event.is_set():
+                _close_stream_quietly(stream)
+                raise LLMCallCancelled("LLM streaming cancelled by caller")
             if getattr(chunk, "usage", None) is not None:
                 usage_payload = chunk.usage
             choices = getattr(chunk, "choices", None) or []

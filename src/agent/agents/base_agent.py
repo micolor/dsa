@@ -11,6 +11,7 @@ runner, and structured opinion output.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
@@ -101,6 +102,7 @@ class BaseAgent(ABC):
         ctx: AgentContext,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         timeout_seconds: Optional[float] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> StageResult:
         """Execute this agent and return a :class:`StageResult`.
 
@@ -110,6 +112,14 @@ class BaseAgent(ABC):
         3. Delegate to :func:`run_agent_loop`.
         4. Call :meth:`post_process` to produce an opinion.
         5. Append the opinion to ``ctx.opinions``.
+
+        ``cancel_event`` is forwarded to the loop so a user stop takes effect
+        inside the stage (step boundary / streamed chunk) instead of only
+        between stages.  The stage still reports FAILED——the loop produced no
+        answer——but :class:`StageFailureReason` deliberately gains no
+        ``cancelled`` member: the orchestrator sees the event itself right
+        after this call and returns its own cancelled result, so a stopped
+        stage is never reported as a stage failure.
         """
         t0 = time.time()
         result = StageResult(stage_name=self.agent_name, status=StageStatus.RUNNING)
@@ -129,6 +139,7 @@ class BaseAgent(ABC):
                 max_wall_clock_seconds=timeout_seconds,
                 stock_scope=ctx.meta.get("stock_scope"),
                 emit_stage_events=False,
+                cancel_event=cancel_event,
             )
 
             result.tokens_used = loop_result.total_tokens
@@ -143,6 +154,11 @@ class BaseAgent(ABC):
                 result.status = StageStatus.FAILED
                 result.error = loop_result.error or "Agent loop did not produce a final answer"
                 result.failure_reason = failure_reason or StageFailureReason.STAGE_FAILURE
+                if getattr(loop_result, "cancelled", False):
+                    # Not a stage failure: leave no failure reason behind so a
+                    # stop is not recorded as degradation anywhere downstream.
+                    result.failure_reason = None
+                    result.meta["cancelled"] = True
                 return result
 
             # Post-process into structured opinion

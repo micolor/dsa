@@ -24,10 +24,12 @@ can be a drop-in replacement via the factory.
 
 from __future__ import annotations
 
-import json
+import functools
 import inspect
+import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from math import ceil
@@ -118,6 +120,11 @@ class OrchestratorResult:
     error: Optional[str] = None
     stats: Optional[AgentRunStats] = None
     runtime_facts: Optional[AgentRuntimeFacts] = None
+    # True when the caller's cancel event stopped the pipeline.  Carried
+    # explicitly (rather than re-read from the event afterwards) for the same
+    # reason as ``RunLoopResult.cancelled``: the persistence layer must be able
+    # to tell a user stop from a pipeline failure without the event in hand.
+    cancelled: bool = False
 
 
 @dataclass(frozen=True)
@@ -240,6 +247,47 @@ class AgentOrchestrator:
             runtime_facts=build_agent_runtime_facts(ctx) if ctx is not None else None,
         )
 
+    def _build_cancelled_result(
+        self,
+        stats: AgentRunStats,
+        all_tool_calls: List[Dict[str, Any]],
+        models_used: List[str],
+        elapsed_s: float,
+        ctx: Optional[AgentContext] = None,
+        *,
+        stage_name: Optional[str] = None,
+    ) -> OrchestratorResult:
+        """Build the result of a pipeline stopped by the caller's cancel event.
+
+        Unlike the timeout / budget builders this one deliberately assembles
+        *nothing*: no partial dashboard, no partition fallback.  A user stop
+        must not leave half an answer behind (the Chat contract is "stop means
+        stop"), so the caller persists a stop marker instead of content.
+        """
+        stats.total_duration_s = round(elapsed_s, 2)
+        stats.models_used = list(dict.fromkeys(models_used))
+        where = f" before stage '{stage_name}'" if stage_name else ""
+        logger.info(
+            "[Orchestrator] pipeline cancelled%s after %.2fs (%d stage(s) recorded)",
+            where,
+            elapsed_s,
+            stats.total_stages,
+        )
+        return OrchestratorResult(
+            success=False,
+            content="",
+            dashboard=None,
+            tool_calls_log=all_tool_calls,
+            total_steps=stats.total_stages,
+            total_tokens=stats.total_tokens,
+            provider=stats.models_used[0] if stats.models_used else "",
+            model=", ".join(stats.models_used),
+            error=f"Pipeline cancelled by caller{where}",
+            stats=stats,
+            runtime_facts=build_agent_runtime_facts(ctx) if ctx is not None else None,
+            cancelled=True,
+        )
+
     def _build_budget_skip_result(
         self,
         stats: AgentRunStats,
@@ -310,8 +358,8 @@ class AgentOrchestrator:
                 agent.max_steps = min(agent.max_steps, self.max_steps)
         return agent
 
-    def _callable_accepts_timeout_kwarg(self, func: Any) -> Optional[bool]:
-        """Return whether a callable accepts ``timeout_seconds`` when inspectable."""
+    def _callable_accepts_kwarg(self, func: Any, name: str) -> Optional[bool]:
+        """Return whether a callable accepts the keyword ``name`` when inspectable."""
         if not callable(func):
             return None
         try:
@@ -319,12 +367,16 @@ class AgentOrchestrator:
         except (TypeError, ValueError):
             return None
 
-        if "timeout_seconds" in signature.parameters:
+        if name in signature.parameters:
             return True
         return any(
             param.kind is inspect.Parameter.VAR_KEYWORD
             for param in signature.parameters.values()
         )
+
+    def _callable_accepts_timeout_kwarg(self, func: Any) -> Optional[bool]:
+        """Return whether a callable accepts ``timeout_seconds`` when inspectable."""
+        return self._callable_accepts_kwarg(func, "timeout_seconds")
 
     def _agent_run_accepts_timeout(self, run_callable: Any) -> bool:
         """Best-effort compatibility check for legacy test doubles / custom agents."""
@@ -339,12 +391,26 @@ class AgentOrchestrator:
 
         return True
 
+    def _agent_run_accepts_cancel_event(self, run_callable: Any) -> bool:
+        """Best-effort compatibility check for legacy test doubles / custom agents."""
+        side_effect = getattr(run_callable, "side_effect", None)
+        accepts_cancel = self._callable_accepts_kwarg(side_effect, "cancel_event")
+        if accepts_cancel is not None:
+            return accepts_cancel
+
+        accepts_cancel = self._callable_accepts_kwarg(run_callable, "cancel_event")
+        if accepts_cancel is not None:
+            return accepts_cancel
+
+        return True
+
     def _run_stage_agent(
         self,
         agent: Any,
         ctx: AgentContext,
         progress_callback: Optional[Callable] = None,
         timeout_seconds: Optional[float] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> StageResult:
         """Run a stage agent while preserving compatibility with older call signatures."""
         # Clamp by per-agent limit when configured.
@@ -369,6 +435,8 @@ class AgentOrchestrator:
             and self._agent_run_accepts_timeout(agent.run)
         ):
             run_kwargs["timeout_seconds"] = timeout_seconds
+        if cancel_event is not None and self._agent_run_accepts_cancel_event(agent.run):
+            run_kwargs["cancel_event"] = cancel_event
         return agent.run(ctx, **run_kwargs)
 
     @staticmethod
@@ -488,8 +556,16 @@ class AgentOrchestrator:
         turn: PreparedOrchestratorChatTurn,
         *,
         progress_callback: Optional[Callable] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> "AgentResult":
-        """Execute an accepted multi-agent Chat turn and persist its result."""
+        """Execute an accepted multi-agent Chat turn and persist its result.
+
+        ``cancel_event`` is the same cooperative stop the single-agent path
+        honours: it is checked before every stage and forwarded into each
+        stage agent's LLM loop, so a stop lands at the next step boundary or
+        streamed chunk.  An in-flight tool call is not killed (it keeps running
+        and its result is discarded, as everywhere else in this codebase).
+        """
         from src.agent.executor import AgentResult
         from src.agent.conversation import conversation_manager
 
@@ -497,10 +573,18 @@ class AgentOrchestrator:
             turn.context,
             parse_dashboard=False,
             progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
 
         # Persist assistant response
-        if orch_result.success:
+        if orch_result.cancelled:
+            # Mirrors the single-agent branch in chat_executor: a stop is not an
+            # analysis failure, and the note is the only thing left in the thread.
+            conversation_manager.add_message(
+                turn.session_id, "assistant",
+                "[已停止] 本次分析已由用户停止。",
+            )
+        elif orch_result.success:
             conversation_manager.add_message(turn.session_id, "assistant", orch_result.content)
         else:
             conversation_manager.add_message(
@@ -519,6 +603,7 @@ class AgentOrchestrator:
             model=orch_result.model,
             error=orch_result.error,
             runtime_facts=orch_result.runtime_facts,
+            error_code="cancelled" if orch_result.cancelled else None,
         )
 
     # -----------------------------------------------------------------
@@ -530,6 +615,7 @@ class AgentOrchestrator:
         ctx: AgentContext,
         parse_dashboard: bool = True,
         progress_callback: Optional[Callable] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> OrchestratorResult:
         """Run the agent pipeline according to ``self.mode``."""
         stats = AgentRunStats()
@@ -552,6 +638,21 @@ class AgentOrchestrator:
         while index < len(agents):
             agent = agents[index]
             elapsed_s = time.time() - t0
+
+            # A stop takes effect here, before the next stage does any work:
+            # the event was already checked inside the previous stage's LLM
+            # loop, so this is what keeps a cancelled run from paying for
+            # another billing cycle before it reports back.
+            if cancel_event is not None and cancel_event.is_set():
+                return self._build_cancelled_result(
+                    stats,
+                    all_tool_calls,
+                    models_used,
+                    elapsed_s,
+                    ctx,
+                    stage_name=agent.agent_name,
+                )
+
             remaining_budget = timeout_s - elapsed_s if timeout_s else None
             stage_min_budget_s = (
                 _MIN_STAGE_BUDGET_S
@@ -648,7 +749,19 @@ class AgentOrchestrator:
                         ctx,
                         progress_callback=progress_callback,
                         timeout_seconds=remaining_budget,
+                        cancel_event=cancel_event,
                     )
+                    # Checked before the batch results are folded in: a stopped
+                    # run records no stage outcome at all, so a user stop never
+                    # shows up as a degraded stage in the run stats.
+                    if cancel_event is not None and cancel_event.is_set():
+                        return self._build_cancelled_result(
+                            stats,
+                            all_tool_calls,
+                            models_used,
+                            time.time() - t0,
+                            ctx,
+                        )
                     for stage_result in batch.stage_results:
                         stats.record_stage(stage_result)
                         all_tool_calls.extend(
@@ -696,7 +809,19 @@ class AgentOrchestrator:
                 ctx,
                 progress_callback=progress_callback,
                 timeout_seconds=remaining_timeout_s,
+                cancel_event=cancel_event,
             )
+            # Checked before record_stage / the FAILED abort below: a stage that
+            # came back because the user stopped it is not a stage failure, and
+            # its partial tokens are dropped with the rest of the stopped run.
+            if cancel_event is not None and cancel_event.is_set():
+                return self._build_cancelled_result(
+                    stats,
+                    all_tool_calls,
+                    models_used,
+                    time.time() - t0,
+                    ctx,
+                )
             stats.record_stage(result)
             all_tool_calls.extend(
                 tc for tc in (result.meta.get("tool_calls_log") or [])
@@ -899,6 +1024,7 @@ class AgentOrchestrator:
         *,
         progress_callback: Optional[Callable] = None,
         timeout_seconds: Optional[float] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> SkillBatchResult:
         sub_agent_timeout_map = self._get_sub_agent_timeout_map()
         configured_skill_timeout = sub_agent_timeout_map.get("skill", 0.0)
@@ -926,10 +1052,16 @@ class AgentOrchestrator:
                     message=stage_start_message(agent.agent_name),
                 ))
 
+        # The scheduler calls ``run_stage`` positionally, so the event rides
+        # along on the callable: every skill in the wave then stops at its own
+        # next step boundary / streamed chunk instead of finishing first.
+        run_stage = self._run_stage_agent
+        if cancel_event is not None:
+            run_stage = functools.partial(run_stage, cancel_event=cancel_event)
         batch = scheduler.run(
             agents,
             ctx,
-            self._run_stage_agent,
+            run_stage,
             progress_callback=progress_callback,
         )
         if progress_callback:

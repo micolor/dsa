@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, List, Optional
 
-from src.agent.llm_adapter import LLMToolAdapter
+from src.agent.llm_adapter import LLMCallCancelled, LLMToolAdapter
 from src.agent.dashboard_payload import sanitize_agent_dashboard_payload
 from src.agent.protocols import StageFailureReason
 from src.agent.stage_labels import stage_done_message, stage_start_message
@@ -105,6 +105,10 @@ class RunLoopResult:
     models_used: List[str] = field(default_factory=list)
     error: Optional[str] = None
     failure_reason: Optional[StageFailureReason] = None
+    # True when the caller's cancel event stopped the run. Carried explicitly
+    # instead of being re-derived from the event so callers mapping this to a
+    # public error code do not depend on the event's state after the loop.
+    cancelled: bool = False
     # Raw messages list at the end of the loop (callers may want to persist)
     messages: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -323,6 +327,31 @@ def _build_budget_guard_result(
     )
 
 
+def _build_cancelled_result(
+    *,
+    step: int,
+    tool_calls_log: List[Dict[str, Any]],
+    total_tokens: int,
+    provider_used: str,
+    models_used: List[str],
+    messages: List[Dict[str, Any]],
+) -> RunLoopResult:
+    """Build the result for a run the caller stopped mid-flight."""
+    return RunLoopResult(
+        success=False,
+        content="",
+        tool_calls_log=tool_calls_log,
+        total_steps=step,
+        total_tokens=total_tokens,
+        provider=provider_used,
+        models_used=models_used,
+        error="Agent request was cancelled",
+        failure_reason=None,
+        cancelled=True,
+        messages=messages,
+    )
+
+
 # ============================================================
 # Core loop
 # ============================================================
@@ -339,6 +368,7 @@ def run_agent_loop(
     tool_call_timeout_seconds: Optional[float] = None,
     stock_scope: Optional[StockScope] = None,
     emit_stage_events: bool = True,
+    cancel_event: Optional[threading.Event] = None,
 ) -> RunLoopResult:
     """Execute the ReAct LLM ↔ tool loop.
 
@@ -359,6 +389,15 @@ def run_agent_loop(
         emit_stage_events: Whether to emit the synthetic ``agent_loop``
             stage lifecycle. Orchestrated business stages disable this so
             ``stage_start`` / ``stage_done`` only describe real stages.
+        cancel_event: Optional event set by the caller to stop the run. Checked
+            before each step and inside streaming LLM calls (via the adapter).
+            When set, the loop returns a result with ``cancelled=True`` rather
+            than finishing the current step. It is deliberately *not* threaded
+            into ``ToolAccessContext``: doing so would flip the tool surface to
+            controlled execution and refuse every tool not marked
+            ``cancellation_safe``, turning one stop into a broken toolset. An
+            in-flight tool call therefore finishes; the interruption lands at
+            the next LLM call or step boundary.
 
     Returns:
         A :class:`RunLoopResult` with the final content, stats, and the
@@ -406,6 +445,17 @@ def run_agent_loop(
         )
 
     for step in range(max_steps):
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("Agent run cancelled before step %d", step + 1)
+            return _finish(_build_cancelled_result(
+                step=step,
+                tool_calls_log=tool_calls_log,
+                total_tokens=total_tokens,
+                provider_used=provider_used,
+                models_used=models_used,
+                messages=messages,
+            ))
+
         remaining_timeout = _remaining_timeout_seconds(start_time, max_wall_clock_seconds)
         timeout_exhausted = remaining_timeout is not None and remaining_timeout <= 0
         budget_guard_triggered = (
@@ -460,12 +510,26 @@ def run_agent_loop(
             progress_callback(stream_event("thinking", step=step + 1, message=thinking_msg))
 
         # --- LLM call ---
-        response = llm_adapter.call_with_tools(
-            messages,
-            tool_decls,
-            timeout=remaining_timeout,
-            progress_callback=progress_callback,
-        )
+        try:
+            response = llm_adapter.call_with_tools(
+                messages,
+                tool_decls,
+                timeout=remaining_timeout,
+                progress_callback=progress_callback,
+                cancel_event=cancel_event,
+            )
+        except LLMCallCancelled:
+            # Stopped while generating: report it instead of letting the loop
+            # treat this as a failed model call and try the next step.
+            logger.info("Agent run cancelled during LLM call at step %d", step + 1)
+            return _finish(_build_cancelled_result(
+                step=step + 1,
+                tool_calls_log=tool_calls_log,
+                total_tokens=total_tokens,
+                provider_used=provider_used,
+                models_used=models_used,
+                messages=messages,
+            ))
         provider_used = response.provider
         total_tokens += (response.usage or {}).get("total_tokens", 0)
         m = getattr(response, "model", "") or response.provider

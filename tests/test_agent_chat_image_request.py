@@ -257,11 +257,11 @@ def test_stream_endpoint_rejects_a_bad_image_before_the_stream_starts():
             )
         assert e.value.status_code == 400
         assert e.value.detail["error"] == "invalid_image"
-        with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-            assert request_id not in agent_endpoint._ACTIVE_CODEX_STREAMS
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            assert request_id not in agent_endpoint._ACTIVE_AGENT_STREAMS
     finally:
-        with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-            agent_endpoint._ACTIVE_CODEX_STREAMS.pop(request_id, None)
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            agent_endpoint._ACTIVE_AGENT_STREAMS.pop(request_id, None)
 
 
 def test_chat_endpoint_image_error_is_not_swallowed_into_a_500():

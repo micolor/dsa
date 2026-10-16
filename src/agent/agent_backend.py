@@ -117,10 +117,13 @@ class LiteLLMAgentBackend(AgentBackend):
             progress_callback=request.progress_callback,
             max_wall_clock_seconds=request.max_wall_clock_seconds,
             stock_scope=request.stock_scope,
+            cancel_event=request.cancel_event,
         )
         usage = {"total_tokens": loop_result.total_tokens} if loop_result.total_tokens > 0 else None
         error_code = None
-        if not loop_result.success and "timed out" in str(loop_result.error or "").lower():
+        if not loop_result.success and loop_result.cancelled:
+            error_code = "cancelled"
+        elif not loop_result.success and "timed out" in str(loop_result.error or "").lower():
             error_code = "timeout"
         elif not loop_result.success:
             error_code = "unknown_backend_error"

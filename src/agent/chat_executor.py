@@ -161,10 +161,13 @@ class AgentChatExecutor:
                     assistant_message_id=assistant_message_id,
                 )
         else:
-            if not self.backend.runtime_owns_loop:
-                failure_note = f"[分析失败] {result.error or '未知错误'}"
-            elif result.error_code == "cancelled":
+            if result.error_code == "cancelled":
+                # Backend-agnostic: the Codex turn cancel and the LiteLLM cancel
+                # event both report "cancelled" here, so neither should be
+                # persisted to the session as a generic analysis failure.
                 failure_note = "[已停止] 本次分析已由用户停止。"
+            elif not self.backend.runtime_owns_loop:
+                failure_note = f"[分析失败] {result.error or '未知错误'}"
             elif result.error_code == "timeout":
                 failure_note = "[已超时] 本次分析已在时间限制内结束。"
             else:

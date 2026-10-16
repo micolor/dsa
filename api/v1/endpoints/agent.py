@@ -58,8 +58,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ACTIVE_CODEX_STREAMS: Dict[str, threading.Event] = {}
-_ACTIVE_CODEX_STREAMS_LOCK = threading.Lock()
+_ACTIVE_AGENT_STREAMS: Dict[str, threading.Event] = {}
+_ACTIVE_AGENT_STREAMS_LOCK = threading.Lock()
+
+# 两个后端都能被 /chat/stream/{request_id}/cancel 取消：codex 把取消转成 turn
+# interrupt，litellm 由 run_agent_loop 在 step 边界和流式 chunk 之间检查同一个
+# event。注册表因此按 request_id 记所有在跑的 SSE，而不只是 codex 的。
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -490,10 +495,10 @@ def _resolve_stream_wait_timeout(executor) -> Optional[float]:
     hands it to the runner as ``max_wall_clock_seconds``) and emits its own
     terminal event when that budget expires.  A second, hardcoded API-side limit
     races that deadline: under the 600s default a 300s limit fired first, the
-    stream emitted "分析超时" and ended, while the worker thread — which the
-    LiteLLM backend cannot cancel — kept running and later persisted an
-    assistant message the user never saw arrive, so reloading the session showed
-    a reply out of nowhere.
+    stream emitted "分析超时" and ended, while the worker thread — which this
+    deadline does not stop, unlike an explicit user cancel — kept running and
+    later persisted an assistant message the user never saw arrive, so reloading
+    the session showed a reply out of nowhere.
 
     The limit therefore follows the same budget plus a small margin, so the
     runtime's own outcome wins whenever it reaches one and the API deadline
@@ -647,24 +652,23 @@ async def agent_chat_stream(
 
     # 图片校验与视觉调用必须先于 StreamingResponse 完成：一旦开始流式，HTTPException
     # 就无法再变成 400/503 响应，只会退化成一条通用流错误（见设计说明）。也必须在下面
-    # 的 codex 注册之前：注册是有副作用的，中途失败会留下一条永远不会被清理的
-    # _ACTIVE_CODEX_STREAMS 记录，让同一个 request_id 之后一直被 409 挡掉。
+    # 的注册之前：注册是有副作用的，中途失败会留下一条永远不会被清理的
+    # _ACTIVE_AGENT_STREAMS 记录，让同一个 request_id 之后一直被 409 挡掉。
     message_text = await asyncio.to_thread(_resolve_image_message, request)
 
-    if backend_id == "codex_app_server":
-        with _ACTIVE_CODEX_STREAMS_LOCK:
-            if request_id in _ACTIVE_CODEX_STREAMS:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "error": "request_conflict",
-                        "message": "This Agent request is already running",
-                    },
-                )
-            _ACTIVE_CODEX_STREAMS[request_id] = cancel_event
+    with _ACTIVE_AGENT_STREAMS_LOCK:
+        if request_id in _ACTIVE_AGENT_STREAMS:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "request_conflict",
+                    "message": "This Agent request is already running",
+                },
+            )
+        _ACTIVE_AGENT_STREAMS[request_id] = cancel_event
 
     def progress_callback(event: dict):
-        if backend_id == "codex_app_server" and cancel_event.is_set():
+        if cancel_event.is_set():
             return
         # Enrich tool events with display names
         if event.get("type") in ("tool_start", "tool_done"):
@@ -674,14 +678,10 @@ async def agent_chat_stream(
 
     def run_sync(executor, turn):
         try:
-            execute_kwargs = {
-                "progress_callback": progress_callback,
-            }
-            if backend_id == "codex_app_server":
-                execute_kwargs["cancel_event"] = cancel_event
             result = executor.execute_turn(
                 turn,
-                **execute_kwargs,
+                progress_callback=progress_callback,
+                cancel_event=cancel_event,
             )
             event = {
                 "type": "done",
@@ -757,9 +757,10 @@ async def agent_chat_stream(
                         event = await asyncio.wait_for(queue.get(), timeout=stream_wait_timeout)
                 except asyncio.TimeoutError:
                     # The runtime's own budget did not produce a terminal event in
-                    # time.  This backend cannot cancel its worker, so the pipeline
-                    # may still finish and persist its own message afterwards; record
-                    # it, since the user's stream has already ended by then.
+                    # time.  This deadline path does not stop the worker (only an
+                    # explicit cancel does), so the pipeline may still finish and
+                    # persist its own message afterwards; record it, since the
+                    # user's stream has already ended by then.
                     logger.warning(
                         "agent stream wait limit expired after %ss for session %s; "
                         "the %s worker is still running and may persist its result",
@@ -774,7 +775,10 @@ async def agent_chat_stream(
                 if event.get("type") in ("done", "error"):
                     break
         finally:
-            if backend_id == "codex_app_server" and (fut is None or not fut.done()):
+            if fut is None or not fut.done():
+                # 客户端断连（或主动取消）时两个后端都靠这个 event 收工：
+                # 否则 worker 会继续跑完并把一条用户看不到的回复写进会话，
+                # 刷新后才冒出来——这正是 codex 分支注释里记的那个坑。
                 cancel_event.set()
             try:
                 if backend_id == "codex_app_server" and fut is not None:
@@ -797,10 +801,9 @@ async def agent_chat_stream(
             except Exception as exc:
                 logger.warning("agent executor cleanup error (ignored): %s", exc, exc_info=True)
             finally:
-                if backend_id == "codex_app_server":
-                    with _ACTIVE_CODEX_STREAMS_LOCK:
-                        if _ACTIVE_CODEX_STREAMS.get(request_id) is cancel_event:
-                            _ACTIVE_CODEX_STREAMS.pop(request_id, None)
+                with _ACTIVE_AGENT_STREAMS_LOCK:
+                    if _ACTIVE_AGENT_STREAMS.get(request_id) is cancel_event:
+                        _ACTIVE_AGENT_STREAMS.pop(request_id, None)
 
     return StreamingResponse(
         event_generator(),
@@ -815,9 +818,13 @@ async def agent_chat_stream(
 
 @router.post("/chat/stream/{request_id}/cancel")
 async def cancel_agent_chat_stream(request_id: str):
-    """Signal cancellation while the original Codex SSE remains open."""
-    with _ACTIVE_CODEX_STREAMS_LOCK:
-        cancel_event = _ACTIVE_CODEX_STREAMS.get(request_id)
+    """Signal cancellation while the original SSE remains open.
+
+    Applies to both backends: the Codex turn interrupt and the LiteLLM run
+    loop's cancel event are signalled through the same registry entry.
+    """
+    with _ACTIVE_AGENT_STREAMS_LOCK:
+        cancel_event = _ACTIVE_AGENT_STREAMS.get(request_id)
     if cancel_event is None:
         raise HTTPException(
             status_code=404,

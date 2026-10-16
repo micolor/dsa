@@ -137,6 +137,27 @@ def test_cancelled_codex_turn_is_not_persisted_as_analysis_failure() -> None:
     )
 
 
+def test_cancelled_litellm_turn_is_not_persisted_as_analysis_failure() -> None:
+    backend = _failure_backend(
+        runtime_owns_loop=False,
+        error_code="cancelled",
+        error_message="Agent request was cancelled",
+    )
+    prepared = PreparedAgentChat(
+        system_prompt="system",
+        history_messages=[],
+        stock_scope=None,
+    )
+    with patch("src.agent.chat_executor.prepare_agent_chat", return_value=prepared), \
+         patch("src.agent.chat_executor.conversation_manager.get_or_create"), \
+         patch("src.agent.chat_executor.conversation_manager.add_user_message", return_value=1), \
+         patch("src.agent.chat_executor.conversation_manager.add_message", return_value=2) as add_message:
+        result = _executor(backend).chat("question", "session", cancel_event=threading.Event())
+
+    assert result.error_code == "cancelled"
+    add_message.assert_called_once_with("session", "assistant", "[已停止] 本次分析已由用户停止。")
+
+
 def test_timed_out_codex_turn_uses_codex_terminal_note() -> None:
     backend = _failure_backend(
         runtime_owns_loop=True,

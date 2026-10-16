@@ -556,11 +556,11 @@ def test_codex_stream_skill_resolution_failure_does_not_register_request() -> No
                 )
             )
 
-        with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-            assert request_id not in agent_endpoint._ACTIVE_CODEX_STREAMS
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            assert request_id not in agent_endpoint._ACTIVE_AGENT_STREAMS
     finally:
-        with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-            agent_endpoint._ACTIVE_CODEX_STREAMS.pop(request_id, None)
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            agent_endpoint._ACTIVE_AGENT_STREAMS.pop(request_id, None)
 
 
 @pytest.mark.parametrize("failure", ["context preparation failed", "database write failed"])
@@ -608,7 +608,14 @@ def test_server_selects_actual_backend_for_stream() -> None:
     assert first_event["backend"] == "codex_app_server"
 
 
-def test_agent_chat_stream_cancels_backend_when_generator_closes() -> None:
+def test_stream_closed_before_the_backend_starts_leaves_nothing_to_cancel() -> None:
+    """关流发生在 `accepted` 之后、`run_in_executor` 之前：此时没有 worker，收尾只需不抛异常。
+
+    原来的名字（`..._cancels_backend_when_generator_closes`）承诺的是「关流叫停在跑的 backend」，
+    但 `fut` 是在生成器**下一次被推进**时才创建的，拿到 `accepted` 就 `aclose()` 时 worker 根本没起来——
+    加断言实测过 `execute_turn` 从未被调用。真正「叫停一个在跑的回合」由
+    `test_litellm_disconnect_signals_the_running_turn` 覆盖，这里只钉住这个更早的窗口。
+    """
     executor = _executor(_result(backend="codex_app_server", success=False, error_code="cancelled"))
 
     async def exercise() -> dict:
@@ -627,12 +634,13 @@ def test_agent_chat_stream_cancels_backend_when_generator_closes() -> None:
     accepted = asyncio.run(exercise())
     assert accepted["type"] == "accepted"
     assert accepted["backend"] == "codex_app_server"
+    executor.execute_turn.assert_not_called()
 
 
 def test_codex_stop_waits_for_cleanup_and_emits_one_terminal_event() -> None:
     cancel_event = threading.Event()
-    with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-        agent_endpoint._ACTIVE_CODEX_STREAMS["cancel-request"] = cancel_event
+    with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+        agent_endpoint._ACTIVE_AGENT_STREAMS["cancel-request"] = cancel_event
     try:
         assert asyncio.run(agent_endpoint.cancel_agent_chat_stream("cancel-request")) == {
             "accepted": True,
@@ -640,8 +648,8 @@ def test_codex_stop_waits_for_cleanup_and_emits_one_terminal_event() -> None:
         }
         assert cancel_event.is_set()
     finally:
-        with agent_endpoint._ACTIVE_CODEX_STREAMS_LOCK:
-            agent_endpoint._ACTIVE_CODEX_STREAMS.pop("cancel-request", None)
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            agent_endpoint._ACTIVE_AGENT_STREAMS.pop("cancel-request", None)
 
 
 def test_codex_stop_rejects_unknown_or_finished_request() -> None:
@@ -650,8 +658,20 @@ def test_codex_stop_rejects_unknown_or_finished_request() -> None:
     assert getattr(exc_info.value, "status_code", None) == 404
 
 
-def test_litellm_stream_keeps_existing_execution_signature(tmp_path: Path) -> None:
+def test_litellm_stream_receives_the_cancel_event(tmp_path: Path) -> None:
     executor = _executor(_result(backend="litellm"))
+    # The state is read inside the worker call, not from the event afterwards:
+    # this iterator closes the response right after the terminal event, which is
+    # the client-disconnect path, so the endpoint's ``finally`` may set the very
+    # same event object once the worker has already returned.  Reading its state
+    # later would report the disconnect, not what the turn started with.
+    seen_by_the_worker: list = []
+
+    def _execute(turn, *, progress_callback=None, cancel_event=None):
+        seen_by_the_worker.append((cancel_event, cancel_event.is_set()))
+        return _result(backend="litellm")
+
+    executor.execute_turn.side_effect = _execute
     with patch("api.middlewares.auth.is_auth_enabled", return_value=False), \
          patch("api.v1.endpoints.agent.asyncio.to_thread", side_effect=_immediate_to_thread), \
          patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config(report_language="en")), \
@@ -669,7 +689,173 @@ def test_litellm_stream_keeps_existing_execution_signature(tmp_path: Path) -> No
     assert [event["type"] for event in events] == ["accepted", "done"]
     assert events[0]["backend"] == "litellm"
     assert executor.prepare_turn.call_args.kwargs["context"]["report_language"] == "ko"
-    assert "cancel_event" not in executor.execute_turn.call_args.kwargs
+    assert len(seen_by_the_worker) == 1
+    cancel_event_at_call, was_cancelled_at_call = seen_by_the_worker[0]
+    assert isinstance(cancel_event_at_call, threading.Event)
+    # The turn starts uncancelled; a stop has to arrive after it begins.
+    assert was_cancelled_at_call is False
+
+
+def test_litellm_stop_signals_the_running_stream_and_releases_its_request_id() -> None:
+    """End-to-end wiring: the cancel endpoint reaches a LiteLLM turn in flight."""
+    request_id = "litellm-cancel"
+    started = threading.Event()
+    executor = _executor()
+
+    def _execute(turn, *, progress_callback=None, cancel_event=None):
+        assert isinstance(cancel_event, threading.Event)
+        started.set()
+        assert cancel_event.wait(timeout=10) is True
+        return _result(backend="litellm", success=False, error_code="cancelled")
+
+    executor.execute_turn.side_effect = _execute
+
+    async def exercise() -> tuple[dict, list[dict], bool]:
+        with patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config()), \
+             patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+            response = await agent_endpoint.agent_chat_stream(
+                agent_endpoint.ChatRequest(
+                    message="question",
+                    session_id="litellm-cancel-session",
+                    request_id=request_id,
+                ),
+                session_service=AgentChatSessionService(),
+            )
+            registered = request_id in agent_endpoint._ACTIVE_AGENT_STREAMS
+            iterator = response.body_iterator
+            events = [json.loads((await anext(iterator)).removeprefix("data: ").strip())]
+            await asyncio.to_thread(started.wait, 10)
+            cancellation = await agent_endpoint.cancel_agent_chat_stream(request_id)
+            async for chunk in iterator:
+                events.append(json.loads(chunk.removeprefix("data: ").strip()))
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            still_registered = request_id in agent_endpoint._ACTIVE_AGENT_STREAMS
+        return cancellation, events, registered and not still_registered
+
+    cancellation, events, released = asyncio.run(exercise())
+
+    assert cancellation == {"accepted": True, "request_id": request_id}
+    assert [event["type"] for event in events] == ["accepted", "done"]
+    assert events[0]["backend"] == "litellm"
+    assert events[1]["error_code"] == "cancelled"
+    assert released is True
+
+
+def test_litellm_stream_rejects_a_second_stream_with_the_same_request_id() -> None:
+    """注册表从 codex 专属改成全后端共享后，默认后端重复 request_id 也会被 409 挡下。
+
+    此前 LiteLLM 对重复 request_id 完全宽容，复用/重试同一个 id 的客户端从「能跑」变成「被拒」，
+    是这次停止能力改造新引入的对外失败路径；被拒之后原请求必须仍在运行、其 request_id 不能被误释放。
+    """
+    request_id = "litellm-duplicate"
+    started = threading.Event()
+    release = threading.Event()
+    executor = _executor()
+
+    def _execute(turn, *, progress_callback=None, cancel_event=None):
+        started.set()
+        assert release.wait(timeout=10) is True
+        return _result(backend="litellm")
+
+    executor.execute_turn.side_effect = _execute
+
+    async def exercise() -> tuple[dict, Exception, list[dict]]:
+        with patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config()), \
+             patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+            response = await agent_endpoint.agent_chat_stream(
+                agent_endpoint.ChatRequest(
+                    message="question",
+                    session_id="litellm-duplicate-session",
+                    request_id=request_id,
+                ),
+                session_service=AgentChatSessionService(),
+            )
+            iterator = response.body_iterator
+            accepted = json.loads((await anext(iterator)).removeprefix("data: ").strip())
+            await asyncio.to_thread(started.wait, 10)
+            with pytest.raises(Exception) as exc_info:
+                await agent_endpoint.agent_chat_stream(
+                    agent_endpoint.ChatRequest(
+                        message="question",
+                        session_id="litellm-duplicate-session-2",
+                        request_id=request_id,
+                    ),
+                    session_service=AgentChatSessionService(),
+                )
+            release.set()
+            rest = [
+                json.loads(chunk.removeprefix("data: ").strip())
+                async for chunk in iterator
+            ]
+        return accepted, exc_info.value, rest
+
+    accepted, conflict, rest = asyncio.run(exercise())
+
+    assert accepted["type"] == "accepted"
+    assert accepted["backend"] == "litellm"
+    assert getattr(conflict, "status_code", None) == 409
+    # 被 409 挡下的那次调用没有动注册表：原流照常跑完并正常收尾。
+    assert conflict.detail["error"] == "request_conflict"
+    assert [event["type"] for event in rest] == ["done"]
+
+
+def test_litellm_disconnect_signals_the_running_turn() -> None:
+    """客户端断连（刷新页面）这条路径是「幽灵回复」要修的正主，默认后端此前没有断言。
+
+    `test_agent_chat_stream_cancels_backend_when_generator_closes` 只断言 `accepted` 且用 codex 配置，
+    而在拿到 `accepted` 后立刻关流时生成器还没推进到 `run_in_executor`，worker 根本没起来——
+    那条用例证明不了「断连真的叫停了一个在跑的回合」。这里先推进生成器让 worker 进到 `execute_turn`，
+    再模拟 ASGI 层取消这条流任务，断言：worker 手上那个 event 被 set（API 的 `finally` 用的就是它）、
+    回合以 `cancelled` 收口、request_id 随后释放。
+    """
+    request_id = "litellm-disconnect"
+    started = threading.Event()
+    observed: list[tuple[threading.Event, bool]] = []
+    executor = _executor()
+
+    def _execute(turn, *, progress_callback=None, cancel_event=None):
+        assert isinstance(cancel_event, threading.Event)
+        started.set()
+        seen = (cancel_event, cancel_event.wait(timeout=10))
+        observed.append(seen)
+        return _result(backend="litellm", success=False, error_code="cancelled")
+
+    executor.execute_turn.side_effect = _execute
+
+    async def exercise() -> dict:
+        with patch("api.v1.endpoints.agent.get_config", return_value=_litellm_config()), \
+             patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+            response = await agent_endpoint.agent_chat_stream(
+                agent_endpoint.ChatRequest(
+                    message="question",
+                    session_id="litellm-disconnect-session",
+                    request_id=request_id,
+                ),
+                session_service=AgentChatSessionService(),
+            )
+            iterator = response.body_iterator
+            accepted = json.loads((await anext(iterator)).removeprefix("data: ").strip())
+            # 第二路 anext 才会推进到 run_in_executor；它随后阻塞在 queue.get 上等 worker 产出事件。
+            pending = asyncio.ensure_future(anext(iterator))
+            await asyncio.to_thread(started.wait, 10)
+            assert started.is_set(), "worker 未进入 execute_turn，下面断言的是空路径"
+            pending.cancel()
+            try:
+                await pending
+            except asyncio.CancelledError:
+                pass
+            await iterator.aclose()
+        with agent_endpoint._ACTIVE_AGENT_STREAMS_LOCK:
+            released = request_id not in agent_endpoint._ACTIVE_AGENT_STREAMS
+        return {"accepted": accepted, "released": released}
+
+    result = asyncio.run(exercise())
+
+    assert result["accepted"]["type"] == "accepted"
+    assert result["accepted"]["backend"] == "litellm"
+    assert len(observed) == 1, "回合没有真的跑起来"
+    assert observed[0][1] is True, "断连没有叫停正在跑的 LiteLLM 回合"
+    assert result["released"] is True
 
 
 def test_litellm_non_streaming_error_sanitizes_detail(tmp_path: Path) -> None:
