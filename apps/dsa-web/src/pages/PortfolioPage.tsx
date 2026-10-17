@@ -21,6 +21,7 @@ import {
   useToastSync,
 } from '../components/common';
 import { PortfolioSignalSummary } from '../components/decision-signals/DecisionSignalDisplay';
+import { FundNavReviewPanel } from '../components/portfolio/FundNavReviewPanel';
 import { DashboardPanelHeader } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
@@ -1815,6 +1816,8 @@ const PortfolioPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      <FundNavReviewPanel />
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         <div className="glass-card !border-transparent p-4 md:p-5">

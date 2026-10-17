@@ -8,6 +8,7 @@
 - 写入失败、提取失败、告警信号关联失败和通知发送失败都不阻断主分析、告警触发或报告保存。
 - #1756 已将 `decision_profile` 字段化并修正 server-side filter、去重、续期和 active 失效语义；#1757 在该正式字段契约上增加用户确认后的 reassess persist。两者都不新增环境变量、config registry 项或 `.env.example` 内容。
 - 当前没有 `DECISION_SIGNAL_*` 开关；信号功能的关闭或回滚通过 revert 对应代码完成。
+- 场外基金不产生 `DecisionSignal`，其净值后验复盘是独立台账 `fund_nav_reviews`，见 [场外基金净值复盘](fund-nav-review.md)；两者的锚点、状态机、API 和统计互不复用。
 
 ## 字段与枚举
 
@@ -74,8 +75,8 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 - `GET /api/v1/decision-signals/{signal_id}`：查询单条。
 - `PATCH /api/v1/decision-signals/{signal_id}/status`：更新状态和可选 metadata。
 - `GET /api/v1/decision-signals/latest/{stock_code}`：查询股票最新 active 信号。
-- `POST /api/v1/decision-signals/outcomes/run`：显式触发后验评估。
-- `GET /api/v1/decision-signals/outcomes`、`GET /api/v1/decision-signals/outcomes/stats`、`GET /api/v1/decision-signals/{signal_id}/outcomes`：查询后验结果与统计。
+- `POST /api/v1/decision-signals/outcomes/run`：显式触发后验评估；`fetch_benchmark=true` 时同轮回填缺失基准（默认 `false`，不触网）。
+- `GET /api/v1/decision-signals/outcomes`、`GET /api/v1/decision-signals/outcomes/stats`、`GET /api/v1/decision-signals/{signal_id}/outcomes`：查询后验结果与统计；台账接口支持市场、动作与 anchor 日期区间过滤，统计包含月度 breakdown 与基准指标。
 - `GET/PUT /api/v1/decision-signals/{signal_id}/feedback`：查询或写入 useful / not useful 反馈。
 - `POST /api/v1/decision-signals/reassess`：基于来源历史报告快照重新计算不同决策风格下的信号；`persist=false` 只预览，`persist=true` 由服务端重算并保存通过 guardrail 的结果。
 - `POST /api/v1/decision-signals/skill-outcomes/run`：显式触发 skill 意见后验评估，`limit` 控制单次最多评估的 key 数。
@@ -112,6 +113,47 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 - 最大不利波动只使用 outcome 已保存的价格。`buy/add/hold/watch/alert` 按 `(start_price - min_low) / start_price`，`sell/reduce/avoid` 按 `(max_high - start_price) / start_price`，结果不小于 0；价格缺失、非有限或起始价非正时该行不可计算。Bucket 返回可计算行中的最大值；没有可计算行时为 `null`，不会为补齐指标读取行情。
 
 Web 在原有“信号表现统计”卡片内提供“保守 / 均衡 / 进取”三个用户入口，固定默认选择均衡，并只提供“按建议动作”和“按复盘周期”两个细分视图。它不排名、不推荐风格，也不增加请求、路由、导航或设置项；旧后端没有 `profile_calibration` 时仍显示原统计卡片。
+
+## 基准超额收益、复盘台账与月度统计
+
+outcome 在个股收益之外追加基准口径，用于回答“这条建议是否跑赢了市场”。字段均为追加列，`engine_version` 不变（仍为 `decision-signal-v1`），历史 outcome 的股票后验与 hit/miss 判定不受影响。
+
+基准代理映射：
+
+| 市场 | `benchmark_code` | 说明 |
+| --- | --- | --- |
+| `cn` | `510300` | 沪深 300 ETF 代理；不使用 `sh000300`，因为该代码会被数据源归一化为 A 股股票代码 `000300` |
+| `hk` | `hk02800` | 盈富基金代理 |
+| `us` | `SPY` | 标普 500 ETF 代理 |
+| `jp` / `kr` / `tw` | 无 | `benchmark_status=unsupported`，不重试 |
+
+ETF 代理的复权与价格口径不等同于指数点位，`excess_return_pct` 是代理口径的超额收益，不应与指数超额直接比较。
+
+计算口径：
+
+- 基准收益取 anchor 日基准 close 与**股票窗口结束日**（`forward_bars[eval_days-1].date`）的基准 close；个股停牌导致窗口顺延时，基准也跟随同一结束日，不会简单取第 N 根基准 bar。
+- 两端 bar 任一缺失时 `benchmark_status=missing`；`excess_return_pct = stock_return_pct - benchmark_return_pct`。
+- 基准异常不影响股票 outcome 的 hit/miss/neutral 判定（fail-open）。
+- 股票 `eval_status=unable` 时基准字段保持 `NULL`。
+
+状态与回填：
+
+- `benchmark_status` 取值 `available` / `missing` / `unsupported` / `error`；历史行初始为 `NULL`，表示尚未回填。
+- 评估阶段只读本地 `stock_daily`，不联网。缺失基准由独立回填阶段处理：只处理 `completed` 且状态为 `NULL` / `missing` / `error` 的行，`benchmark_checked_at` 有 6 小时冷却，每轮最多 200 行，同一轮内相同 `(benchmark_code, anchor_date, window_end_date)` 只抓取一次。
+- 回填只更新基准列，不更新 `updated_at`，不改变台账排序。
+- 开关：调度器自动任务固定开启回填；`POST /api/v1/decision-signals/outcomes/run` 由请求体 `fetch_benchmark` 控制，默认 `false`，保证显式触发与测试默认不触网。
+
+台账查询（`GET /api/v1/decision-signals/outcomes`）在原有 `signal_id` / `horizon` / `engine_version` / `eval_status` / `outcome` / 分页之上，新增 `market`、`action`、`anchor_from`、`anchor_to`（闭区间，`anchor_from > anchor_to` 返回 400，非法日期 422）。过滤使用 outcome 快照列，与统计口径一致；响应 item 追加 `stock_code`、`stock_name`、`benchmark_code`、`benchmark_return_pct`、`excess_return_pct`、`benchmark_status`。
+
+统计（`GET /api/v1/decision-signals/outcomes/stats`）新增 `month` breakdown（`anchor_date` 的 `YYYY-MM`，升序）以及：
+
+- `benchmark_available`：基准可得的 completed 行数；
+- `benchmark_coverage_pct`：`benchmark_available / completed`；
+- `avg_benchmark_return_pct`、`avg_excess_return_pct`：仅在基准可得行上取均值。
+
+`profile_calibration` 的各 bucket 同步追加三个基准字段，样本不足时仍为 `null`。`avg_stock_return_pct` 继续表示个股收益，不代表策略收益。
+
+Web 在统计区展开后新增“复盘台账”卡片：上半部分为月度表现（月份 / 样本 / 命中率 / 平均个股收益 / 平均基准收益 / 平均超额），下半部分为分页逐条台账（日期 / 股票 / 动作 / 窗口 / 结果 / 个股收益 / 基准收益 / 超额收益 / 基准状态）。统计区收起时不请求台账。
 
 ## Reassess preview 与 persist
 

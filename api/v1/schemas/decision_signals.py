@@ -125,11 +125,14 @@ class DecisionSignalOutcomeRunRequest(BaseModel):
     source_type: Optional[DecisionSignalSourceType] = None
     status: Optional[DecisionSignalStatus] = None
     limit: int = Field(100, ge=1, le=500)
+    fetch_benchmark: bool = False
 
 
 class DecisionSignalOutcomeItem(BaseModel):
     id: int
     signal_id: int
+    stock_code: Optional[str] = None
+    stock_name: Optional[str] = None
     horizon: str
     engine_version: str
     eval_status: str
@@ -144,6 +147,10 @@ class DecisionSignalOutcomeItem(BaseModel):
     max_high: Optional[float] = None
     min_low: Optional[float] = None
     stock_return_pct: Optional[float] = None
+    benchmark_code: Optional[str] = None
+    benchmark_return_pct: Optional[float] = None
+    excess_return_pct: Optional[float] = None
+    benchmark_status: Optional[str] = None
     action: Optional[str] = None
     market: Optional[str] = None
     market_phase: Optional[str] = None
@@ -183,6 +190,10 @@ class DecisionSignalOutcomeStatsBucket(BaseModel):
     neutral: int
     hit_rate_pct: Optional[float] = None
     avg_stock_return_pct: Optional[float] = None
+    benchmark_available: int = 0
+    benchmark_coverage_pct: Optional[float] = None
+    avg_benchmark_return_pct: Optional[float] = None
+    avg_excess_return_pct: Optional[float] = None
     unable_reasons: Dict[str, int] = Field(default_factory=dict)
 
 
@@ -197,6 +208,9 @@ class DecisionSignalProfileCalibrationBucket(BaseModel):
     sample_sufficient: bool
     hit_rate_pct: Optional[float] = None
     avg_stock_return_pct: Optional[float] = None
+    avg_benchmark_return_pct: Optional[float] = None
+    avg_excess_return_pct: Optional[float] = None
+    benchmark_coverage_pct: Optional[float] = None
     miss_rate_pct: Optional[float] = None
     unable_rate_pct: Optional[float] = None
     max_adverse_excursion_pct: Optional[float] = None
@@ -228,6 +242,10 @@ class DecisionSignalOutcomeStatsResponse(BaseModel):
     neutral: int
     hit_rate_pct: Optional[float] = None
     avg_stock_return_pct: Optional[float] = None
+    benchmark_available: int = 0
+    benchmark_coverage_pct: Optional[float] = None
+    avg_benchmark_return_pct: Optional[float] = None
+    avg_excess_return_pct: Optional[float] = None
     unable_reasons: Dict[str, int] = Field(default_factory=dict)
     breakdowns: Dict[str, List[DecisionSignalOutcomeStatsBucket]] = Field(default_factory=dict)
     profile_calibration: DecisionSignalProfileCalibration

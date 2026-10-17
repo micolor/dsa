@@ -189,6 +189,54 @@ def test_fetch_nav_tolerates_ascending_payload():
     assert recs[-1].unit_nav == pytest.approx(1.079)
 
 
+def test_get_nav_range_sends_date_bounds_and_normalizes_records():
+    rows = _nav_rows(8, newest_first=True)
+    pages = [_lsjz_page(rows[:5]), _lsjz_page(rows[5:])]
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(params)
+        idx = len(calls) - 1
+        if idx < len(pages):
+            return _FakeResponse(pages[idx])
+        return _FakeResponse({"Data": {"LSJZList": []}})
+
+    with patch("data_provider.fund_fetcher.requests.get", side_effect=fake_get):
+        recs = FundFetcher().get_nav_range("003095", date(2025, 1, 1), date(2025, 1, 31))
+
+    assert calls[0]["fundCode"] == "003095"
+    assert calls[0]["startDate"] == "2025-01-01"
+    assert calls[0]["endDate"] == "2025-01-31"
+    assert [r.date for r in recs] == sorted(r.date for r in recs)
+    assert recs == sorted(recs, key=lambda r: r.date)
+
+
+def test_get_nav_range_filters_out_of_range_and_duplicate_dates():
+    rows = [
+        ("2024-12-31", 0.9),
+        ("2025-01-02", 1.0),
+        ("2025-01-02", 1.1),
+        ("2025-01-03", 1.2),
+        ("2025-02-01", 1.3),
+    ]
+
+    with patch(
+        "data_provider.fund_fetcher.requests.get",
+        side_effect=[_FakeResponse(_lsjz_page(rows)), _FakeResponse({"Data": {"LSJZList": []}})],
+    ):
+        recs = FundFetcher().get_nav_range("003095", date(2025, 1, 1), date(2025, 1, 31))
+
+    assert [r.date for r in recs] == ["2025-01-02", "2025-01-03"]
+    assert recs[0].unit_nav == pytest.approx(1.1)  # 同日重复时保留后出现的记录
+
+
+def test_get_nav_range_rejects_reversed_bounds_without_network():
+    with patch("data_provider.fund_fetcher.requests.get") as get:
+        recs = FundFetcher().get_nav_range("003095", date(2025, 2, 1), date(2025, 1, 1))
+    assert recs == []
+    get.assert_not_called()
+
+
 def test_default_history_window_can_compute_one_year_return():
     """默认窗口必须大于 TRADING_DAYS，否则「近 1 年」永远是空值。"""
     import inspect

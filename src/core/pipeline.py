@@ -473,8 +473,9 @@ class StockAnalysisPipeline:
                     report_language=report_language,
                     fund_llm=fund_llm,
                 )
+                history_id = 0
                 try:
-                    self.db.save_analysis_history(
+                    history_id = self.db.save_analysis_history(
                         result=fund_result,
                         query_id=query_id,
                         report_type="fund",
@@ -484,6 +485,18 @@ class StockAnalysisPipeline:
                     )
                 except Exception as exc:
                     logger.warning(f"[{code}] 保存基金历史失败: {exc}")
+                # 净值复盘锚点：只用本次已抓到的 profile，不额外联网；失败不影响报告。
+                try:
+                    from src.services.fund_nav_review_service import (
+                        FundNavReviewService,
+                    )
+                    FundNavReviewService().record_anchor(
+                        profile,
+                        analysis_history_id=history_id or None,
+                        source="pipeline",
+                    )
+                except Exception as exc:
+                    logger.warning(f"[{code}] 记录基金净值复盘锚点失败: {exc}")
                 return fund_result
             except Exception as exc:
                 logger.warning(f"[{code}] 基金分析失败: {exc}")

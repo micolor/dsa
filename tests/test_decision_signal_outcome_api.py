@@ -174,6 +174,9 @@ def test_outcome_run_list_stats_signal_outcomes_and_feedback(client_and_db) -> N
         "sample_sufficient": False,
         "hit_rate_pct": None,
         "avg_stock_return_pct": None,
+        "avg_benchmark_return_pct": None,
+        "avg_excess_return_pct": None,
+        "benchmark_coverage_pct": None,
         "miss_rate_pct": None,
         "unable_rate_pct": None,
         "max_adverse_excursion_pct": None,
@@ -319,3 +322,69 @@ def test_outcome_run_uses_hk_alias_stock_code_filter(client_and_db) -> None:
     assert force_data["evaluated"] == 1
     assert force_data["updated"] == 1
     assert force_data["items"][0]["signal_id"] == signal_id
+
+
+def test_outcome_api_exposes_benchmark_ledger_and_monthly_stats(client_and_db) -> None:
+    client, db = client_and_db
+    created_resp = client.post("/api/v1/decision-signals", json=_payload())
+    assert created_resp.status_code == 200, created_resp.text
+    signal_id = created_resp.json()["item"]["id"]
+    _seed_bars(db)
+    with db.session_scope() as session:
+        session.add(StockDaily(code="510300", date=date(2024, 1, 2), open=100, high=101, low=99, close=100))
+        session.add(StockDaily(code="510300", date=date(2024, 1, 3), open=101, high=102, low=100, close=101))
+        session.add(StockDaily(code="510300", date=date(2024, 1, 4), open=102, high=103, low=101, close=102))
+        session.add(StockDaily(code="510300", date=date(2024, 1, 5), open=103, high=104, low=102, close=103))
+
+    run_resp = client.post(
+        "/api/v1/decision-signals/outcomes/run",
+        json={"signal_id": signal_id, "horizons": ["3d"]},
+    )
+    assert run_resp.status_code == 200, run_resp.text
+    item = run_resp.json()["items"][0]
+    assert item["stock_code"] == "600519"
+    assert item["benchmark_code"] == "510300"
+    assert item["benchmark_status"] == "available"
+    assert item["benchmark_return_pct"] == 3.0
+    assert item["excess_return_pct"] == 2.0
+
+    ledger_resp = client.get(
+        "/api/v1/decision-signals/outcomes",
+        params={
+            "market": "cn",
+            "action": "buy",
+            "anchor_from": "2024-01-01",
+            "anchor_to": "2024-01-31",
+        },
+    )
+    assert ledger_resp.status_code == 200, ledger_resp.text
+    ledger = ledger_resp.json()
+    assert ledger["total"] == 1
+    assert ledger["items"][0]["stock_code"] == "600519"
+    assert ledger["items"][0]["stock_name"] == "贵州茅台"
+
+    stats_resp = client.get("/api/v1/decision-signals/outcomes/stats")
+    assert stats_resp.status_code == 200, stats_resp.text
+    stats = stats_resp.json()
+    assert stats["benchmark_available"] == 1
+    assert stats["benchmark_coverage_pct"] == 100.0
+    assert stats["avg_benchmark_return_pct"] == 3.0
+    assert stats["avg_excess_return_pct"] == 2.0
+    assert stats["breakdowns"]["month"][0]["value"] == "2024-01"
+
+
+def test_outcome_api_rejects_invalid_anchor_range(client_and_db) -> None:
+    client, _db = client_and_db
+
+    resp = client.get(
+        "/api/v1/decision-signals/outcomes",
+        params={"anchor_from": "2024-03-01", "anchor_to": "2024-02-01"},
+    )
+
+    assert resp.status_code == 400
+
+    malformed = client.get(
+        "/api/v1/decision-signals/outcomes",
+        params={"anchor_from": "not-a-date"},
+    )
+    assert malformed.status_code == 422

@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, or_, select, update
 
 from src.storage import (
     DatabaseManager,
@@ -24,6 +25,15 @@ class OutcomeStatsRow:
     outcome: DecisionSignalOutcomeRecord
     decision_profile: Optional[str]
     metadata_json: Optional[str]
+
+
+@dataclass(frozen=True)
+class OutcomeLedgerRow:
+    """Outcome plus the signal identity shown in the review ledger."""
+
+    outcome: DecisionSignalOutcomeRecord
+    stock_code: Optional[str]
+    stock_name: Optional[str]
 
 
 class DecisionSignalOutcomeRepository:
@@ -142,9 +152,13 @@ class DecisionSignalOutcomeRepository:
         engine_version: Optional[str] = None,
         eval_status: Optional[str] = None,
         outcome: Optional[str] = None,
+        market: Optional[str] = None,
+        action: Optional[str] = None,
+        anchor_from: Optional[date] = None,
+        anchor_to: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[DecisionSignalOutcomeRecord], int]:
+    ) -> Tuple[List[OutcomeLedgerRow], int]:
         safe_page = max(1, int(page))
         safe_page_size = max(1, min(int(page_size), 100))
         conditions = []
@@ -158,6 +172,14 @@ class DecisionSignalOutcomeRepository:
             conditions.append(DecisionSignalOutcomeRecord.eval_status == eval_status)
         if outcome:
             conditions.append(DecisionSignalOutcomeRecord.outcome == outcome)
+        if market:
+            conditions.append(DecisionSignalOutcomeRecord.market == market)
+        if action:
+            conditions.append(DecisionSignalOutcomeRecord.action == action)
+        if anchor_from:
+            conditions.append(DecisionSignalOutcomeRecord.anchor_date >= anchor_from)
+        if anchor_to:
+            conditions.append(DecisionSignalOutcomeRecord.anchor_date <= anchor_to)
         where_clause = and_(*conditions) if conditions else True
         offset = (safe_page - 1) * safe_page_size
         with self.db.get_session() as session:
@@ -167,13 +189,110 @@ class DecisionSignalOutcomeRepository:
                 .where(where_clause)
             ).scalar() or 0
             rows = session.execute(
-                select(DecisionSignalOutcomeRecord)
+                select(
+                    DecisionSignalOutcomeRecord,
+                    DecisionSignalRecord.stock_code,
+                    DecisionSignalRecord.stock_name,
+                )
+                .outerjoin(
+                    DecisionSignalRecord,
+                    DecisionSignalRecord.id == DecisionSignalOutcomeRecord.signal_id,
+                )
                 .where(where_clause)
                 .order_by(desc(DecisionSignalOutcomeRecord.updated_at), desc(DecisionSignalOutcomeRecord.id))
                 .offset(offset)
                 .limit(safe_page_size)
-            ).scalars().all()
-            return list(rows), int(total)
+            ).all()
+            return [
+                OutcomeLedgerRow(
+                    outcome=outcome_row,
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                )
+                for outcome_row, stock_code, stock_name in rows
+            ], int(total)
+
+    def list_outcomes_needing_benchmark(
+        self,
+        *,
+        engine_version: str,
+        checked_before: datetime,
+        limit: int = 200,
+    ) -> List[OutcomeLedgerRow]:
+        """Completed outcomes whose benchmark might still be recoverable.
+
+        `benchmark_checked_at IS NULL` means "never attempted". `unsupported`
+        and `available` are terminal and never returned.
+        """
+        safe_limit = max(1, min(int(limit), 500))
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(
+                    DecisionSignalOutcomeRecord,
+                    DecisionSignalRecord.stock_code,
+                    DecisionSignalRecord.stock_name,
+                )
+                .outerjoin(
+                    DecisionSignalRecord,
+                    DecisionSignalRecord.id == DecisionSignalOutcomeRecord.signal_id,
+                )
+                .where(
+                    and_(
+                        DecisionSignalOutcomeRecord.engine_version == engine_version,
+                        DecisionSignalOutcomeRecord.eval_status == "completed",
+                        or_(
+                            DecisionSignalOutcomeRecord.benchmark_status.is_(None),
+                            DecisionSignalOutcomeRecord.benchmark_status.in_(
+                                ("missing", "error")
+                            ),
+                        ),
+                        or_(
+                            DecisionSignalOutcomeRecord.benchmark_checked_at.is_(None),
+                            DecisionSignalOutcomeRecord.benchmark_checked_at <= checked_before,
+                        ),
+                    )
+                )
+                .order_by(
+                    DecisionSignalOutcomeRecord.benchmark_checked_at.asc().nullsfirst(),
+                    DecisionSignalOutcomeRecord.id,
+                )
+                .limit(safe_limit)
+            ).all()
+            return [
+                OutcomeLedgerRow(
+                    outcome=outcome_row,
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                )
+                for outcome_row, stock_code, stock_name in rows
+            ]
+
+    def update_benchmark_fields(
+        self,
+        *,
+        outcome_id: int,
+        fields: Dict[str, Any],
+    ) -> bool:
+        """Update benchmark columns only, keeping `updated_at` untouched."""
+        allowed = {
+            "benchmark_code",
+            "benchmark_return_pct",
+            "excess_return_pct",
+            "benchmark_status",
+            "benchmark_checked_at",
+        }
+        values = {key: value for key, value in fields.items() if key in allowed}
+        if not values:
+            return False
+        values["updated_at"] = DecisionSignalOutcomeRecord.updated_at
+        with self.db.get_session() as session:
+            result = session.execute(
+                update(DecisionSignalOutcomeRecord)
+                .where(DecisionSignalOutcomeRecord.id == int(outcome_id))
+                .values(**values)
+            )
+            session.commit()
+            return bool(result.rowcount)
 
     def list_stats_rows(
         self,

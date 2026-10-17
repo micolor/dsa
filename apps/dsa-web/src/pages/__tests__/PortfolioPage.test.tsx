@@ -32,6 +32,8 @@ const {
   listDecisionSignals,
   getLatestDecisionSignals,
   getQuote,
+  listFundNavReviews,
+  getFundNavReviewStats,
 } = vi.hoisted(() => ({
   getAccounts: vi.fn(),
   getSnapshot: vi.fn(),
@@ -55,12 +57,21 @@ const {
   listDecisionSignals: vi.fn(),
   getLatestDecisionSignals: vi.fn(),
   getQuote: vi.fn(),
+  listFundNavReviews: vi.fn(),
+  getFundNavReviewStats: vi.fn(),
 }));
 
 vi.mock('../../api/decisionSignals', () => ({
   decisionSignalsApi: {
     list: listDecisionSignals,
     getLatest: getLatestDecisionSignals,
+  },
+}));
+
+vi.mock('../../api/fundNavReviews', () => ({
+  fundNavReviewsApi: {
+    list: listFundNavReviews,
+    getStats: getFundNavReviewStats,
   },
 }));
 
@@ -438,6 +449,21 @@ describe('PortfolioPage FX refresh', () => {
       analysisPhase: 'auto',
     });
     getLatestDecisionSignals.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1 });
+    listFundNavReviews.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    getFundNavReviewStats.mockResolvedValue({
+      engineVersion: 'fund-nav-v1',
+      horizons: [],
+      total: 0,
+      anchorCount: 0,
+      pending: 0,
+      evaluated: 0,
+      unable: 0,
+      positiveRatePct: null,
+      avgNavReturnPct: null,
+      avgMaxDrawdownPct: null,
+      unableReasons: {},
+      breakdowns: { horizon: [], month: [] },
+    });
   });
 
   function renderEnglishPage() {
@@ -465,6 +491,17 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(await screen.findByText('过期')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
+  });
+
+  it('mounts the fund NAV review panel collapsed without loading it', async () => {
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    const toggle = screen.getByRole('button', { name: /基金净值复盘/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(listFundNavReviews).not.toHaveBeenCalled();
+    expect(getFundNavReviewStats).not.toHaveBeenCalled();
   });
 
   it('shows aggregate partial valuation limitations near summary totals', async () => {

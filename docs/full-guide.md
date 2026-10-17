@@ -1504,6 +1504,10 @@ P5 在 Web `/decision-signals` 页面筛选区下方展示当前 outcome engine 
 
 #1758 在同一个 `GET /api/v1/decision-signals/outcomes/stats` 响应中追加 `profile_calibration`，按 decision profile、profile + action、profile + horizon、profile + market phase、profile + frozen data quality 和 profile source 返回结构化分组。每个分组独立要求 `completed >= 30`，不足时只保留 counts，五项描述性指标统一返回 `null`；Web 只展示样本量和“样本不足，仅供观察。”，不排名或推荐风格。命中/未命中率的分母是 `hit + miss`，无法评估率的分母是 total；最大不利波动只从 outcome 已保存的 `start_price/min_low/max_high` 计算，不触发行情读取。`decision_profile` 和 metadata-backed `profile_source` 是查询时关联信号的当前归因；action、horizon、market phase、data quality 继续使用 outcome 冻结值。新 outcome 的 data quality 在 summary 没有显式 level 时才 fallback 到规范化的 metadata level，既有 outcome 不会静默重写。Web 复用原统计请求和 Card，只提供保守/均衡/进取及按动作/按周期两个用户视图；旧后端缺少新字段时原统计仍可用。完整口径见 [DecisionSignal 决策信号专题](decision-signals.md)。
 
+outcome 追加基准超额收益与复盘台账：`cn/hk/us` 分别使用 `510300` / `hk02800` / `SPY` 作为 ETF 代理，`jp/kr/tw` 标记 `unsupported`；基准收益取 anchor 日与股票窗口结束日的基准 close，`excess_return_pct = stock_return_pct - benchmark_return_pct`。基准缺失由独立回填阶段处理（6 小时冷却、每轮最多 200 行、不更新 `updated_at`），调度器自动开启，`POST /outcomes/run` 由 `fetch_benchmark` 控制且默认关闭。`GET /outcomes` 新增 `market/action/anchor_from/anchor_to` 过滤并返回股票与基准字段；`GET /outcomes/stats` 新增 `month` breakdown 与基准覆盖率、平均基准/超额收益。Web 统计区展开后新增“复盘台账”卡片，提供月度表与分页逐条台账；统计区收起时不请求。完整口径见 [DecisionSignal 决策信号专题](decision-signals.md)。
+
+场外基金净值复盘是独立于 `decision_signals` 的 `fund_nav_reviews` 台账：每次 `fund:<6位代码>` 体检把最新单位净值写成 1m/3m/6m/1y 锚点，到期后按锚点之后第 22/66/126/252 条净值评估区间收益与最大回撤。`FUND_NAV_REVIEW_AUTO_EVAL_ENABLED` 默认 `true`，由调度器每 6 小时评估到期锚点；关闭后仍可调用 `POST /api/v1/fund-nav-reviews/run`。历史报告补录默认 dry-run 且不联网。组合页提供默认折叠的复盘面板。完整口径见 [场外基金净值复盘](fund-nav-review.md)。
+
 持仓页会把 AI 建议作为非阻断增强异步加载：组合快照和风险模块先按原逻辑渲染，随后按当前快照中的唯一持仓调用 `GET /api/v1/decision-signals/latest/{stock_code}?market=<market>&limit=1` 查询 latest active 信号；不再通过 `holding_only=true` 通用列表分页扫描，也不存在固定页数截断。单个持仓 latest 查询失败时，页面保留其他已加载信号并显示可见降级提示；无匹配信号时持仓行显示空占位。匹配逻辑复用 Web 端股票代码等价规则，覆盖 A 股 `600519/SH600519/600519.SH`、港股 `00700/HK00700/00700.HK` 和美股大小写 ticker。
 
 #1390 P6 将 `DecisionSignal` 复用到告警、通知和组合风险，不新增表、迁移或配置。真实股票级告警触发会优先关联同标的 latest active 信号，并把低敏 `decision_signal_summary` 写入 `alert_triggers.diagnostics`；没有 active 信号时，worker 只创建最小 `source_type=alert`、`action=alert` 信号，`trace_id=alert-rule-<hash>` 仅用于同源重试的 best-effort 幂等去重，不覆盖 active 信号本体，且不写 `market_phase` 避免跨阶段重复。告警通知和分析通知只引用摘要中的 `action/horizon/reason/watch_conditions/risk_summary/source_report_id` 等公开字段，通知失败不影响 trigger 或信号写入。`GET /api/v1/portfolio/risk` 追加 `decision_signal_risk` 聚合块，只统计当前持仓中的 active `sell/reduce/alert` 信号，明确排除 `avoid/buy/add/hold/watch`；信号查询失败时风险接口 fail-open，Web 风险区显示降级状态。
@@ -1625,9 +1629,9 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/api/v1/history/{record_id}/flow` | GET | 查询历史报告运行流快照，普通个股和 `MARKET/market_review` 大盘复盘复用同一契约 |
 | `/api/v1/decision-signals` | POST | 显式创建或按同源键去重决策信号，返回 `{ item, created }` |
 | `/api/v1/decision-signals` | GET | 分页查询决策信号，支持股票、市场、动作、阶段、风格、来源、状态、时间范围和 cache-only 持仓过滤 |
-| `/api/v1/decision-signals/outcomes/run` | POST | 显式触发信号后验评估，默认跳过 completed/终态 unable、重算可恢复 unable，`force=true` 重算覆盖 |
-| `/api/v1/decision-signals/outcomes` | GET | 分页查询信号后验结果 |
-| `/api/v1/decision-signals/outcomes/stats` | GET | 查询当前后验引擎统计，默认排除 archived 信号 |
+| `/api/v1/decision-signals/outcomes/run` | POST | 显式触发信号后验评估，默认跳过 completed/终态 unable、重算可恢复 unable，`force=true` 重算覆盖，`fetch_benchmark=true` 同轮回填缺失基准 |
+| `/api/v1/decision-signals/outcomes` | GET | 分页查询信号后验台账，支持 `market/action/anchor_from/anchor_to` 过滤，返回股票与基准字段 |
+| `/api/v1/decision-signals/outcomes/stats` | GET | 查询当前后验引擎统计，默认排除 archived 信号，含 `month` breakdown 与基准覆盖率/平均超额 |
 | `/api/v1/decision-signals/{signal_id}/outcomes` | GET | 查询单个信号在当前后验引擎下的结果 |
 | `/api/v1/decision-signals/{signal_id}/feedback` | GET | 查询单个信号的用户反馈；无反馈时返回 `feedback_value=null` |
 | `/api/v1/decision-signals/{signal_id}/feedback` | PUT | 写入或更新单个信号的 `useful|not_useful` 反馈 |

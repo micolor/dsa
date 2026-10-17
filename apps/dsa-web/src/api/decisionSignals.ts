@@ -316,6 +316,10 @@ function toOutcomeListParams(params: DecisionSignalOutcomeListParams = {}): Reco
     engine_version: params.engineVersion,
     eval_status: params.evalStatus,
     outcome: params.outcome,
+    market: params.market,
+    action: params.action,
+    anchor_from: params.anchorFrom,
+    anchor_to: params.anchorTo,
     page: params.page,
     page_size: params.pageSize,
   }) as Record<string, string | number>;

@@ -119,6 +119,38 @@ def test_fund_report_survives_an_unconfigured_llm():
     assert result.dashboard["report_type"] == "fund"
 
 
+def test_fund_branch_records_a_nav_review_anchor():
+    from src.services.fund_nav_review_service import FundNavReviewService
+
+    analyzer = MagicMock()
+    analyzer.run_fund_analysis.return_value = {}
+    with patch.object(FundNavReviewService, "record_anchor") as record_anchor:
+        result = _analyze_fund(analyzer)
+
+    assert result is not None
+    record_anchor.assert_called_once()
+    profile = record_anchor.call_args.args[0]
+    assert profile.code == "003095"
+    assert record_anchor.call_args.kwargs["source"] == "pipeline"
+
+
+def test_anchor_failure_does_not_break_the_fund_report(caplog):
+    from src.services.fund_nav_review_service import FundNavReviewService
+
+    analyzer = MagicMock()
+    analyzer.run_fund_analysis.return_value = {}
+    with patch.object(
+        FundNavReviewService,
+        "record_anchor",
+        side_effect=RuntimeError("db down"),
+    ), caplog.at_level(logging.WARNING):
+        result = _analyze_fund(analyzer)
+
+    assert result is not None
+    assert result.dashboard["report_type"] == "fund"
+    assert "记录基金净值复盘锚点失败" in caplog.text
+
+
 # ------------------------------------------------------------ 外层 process_stock
 
 

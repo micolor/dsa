@@ -451,6 +451,7 @@ class RuntimeSchedulerService:
         tasks = list(self._current_agent_event_monitor_background_tasks(config))
         tasks.extend(self._current_paper_valuation_background_tasks(config))
         tasks.extend(self._current_signal_outcome_background_tasks(config))
+        tasks.extend(self._current_fund_nav_review_background_tasks(config))
         return tasks
 
     def _current_paper_valuation_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
@@ -517,11 +518,44 @@ class RuntimeSchedulerService:
                 except Exception as exc:  # pragma: no cover - defensive branch
                     logger.warning("skill opinion outcome evaluation failed: %s", exc)
                 try:
-                    DecisionSignalOutcomeService().run_outcomes()
+                    DecisionSignalOutcomeService(
+                        fetch_missing_benchmark=True,
+                    ).run_outcomes()
                 except Exception as exc:  # pragma: no cover - defensive branch
                     logger.warning("decision signal outcome evaluation failed: %s", exc)
 
             cached = {"task": signal_outcome_task, "interval_seconds": interval_seconds}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_fund_nav_review_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "fund_nav_review_evaluation"
+        if not getattr(config, "fund_nav_review_auto_eval_enabled", True):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            interval_seconds = 21600  # 6h; due dates are daily and runs are idempotent
+
+            def fund_nav_review_task() -> None:
+                from src.services.fund_nav_review_service import FundNavReviewService
+
+                try:
+                    FundNavReviewService().run_reviews(limit=100)
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("fund nav review evaluation failed: %s", exc)
+
+            cached = {"task": fund_nav_review_task, "interval_seconds": interval_seconds}
             self._background_task_cache[name] = cached
 
         run_immediately = name not in self._background_task_registered_names

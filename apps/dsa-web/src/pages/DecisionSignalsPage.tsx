@@ -34,6 +34,7 @@ import { useStockIndex } from '../hooks/useStockIndex';
 import type { UiTextKey } from '../i18n/uiText';
 import type { DecisionAction, MarketPhaseValue, StockBarItem } from '../types/analysis';
 import type {
+  DecisionSignalBenchmarkStatus,
   DecisionSignalItem,
   DecisionSignalFeedbackItem,
   DecisionSignalFeedbackValue,
@@ -41,6 +42,7 @@ import type {
   DecisionSignalMarket,
   DecisionSignalOutcomeItem,
   DecisionSignalOutcomeStatsResponse,
+  DecisionSignalOutcomeValue,
   DecisionSignalReassessResponse,
   DecisionSignalReassessBlockedError,
   DecisionSignalHorizon,
@@ -72,6 +74,7 @@ const PAGE_SIZE = 20;
 const DEDUPE_PAGE_SIZE = 100;
 const QUEUE_PAGE_SIZE = 100;
 const TIMELINE_PAGE_SIZE = 100;
+const LEDGER_PAGE_SIZE = 20;
 const STOCK_CANDIDATE_LIMIT = 8;
 const DAY_MS = 86400_000;
 
@@ -147,6 +150,19 @@ const STATUS_LABEL_KEYS: Record<DecisionSignalStatus, UiTextKey> = {
   invalidated: 'decisionSignals.invalidated',
   closed: 'decisionSignals.closed',
   archived: 'decisionSignals.archived',
+};
+
+const OUTCOME_VALUE_LABEL_KEYS: Record<DecisionSignalOutcomeValue, UiTextKey> = {
+  hit: 'decisionSignals.outcome.hit',
+  miss: 'decisionSignals.outcome.miss',
+  neutral: 'decisionSignals.outcome.neutral',
+};
+
+const BENCHMARK_STATUS_LABEL_KEYS: Record<DecisionSignalBenchmarkStatus, UiTextKey> = {
+  available: 'decisionSignals.ledgerBenchmarkAvailable',
+  missing: 'decisionSignals.ledgerBenchmarkMissing',
+  unsupported: 'decisionSignals.ledgerBenchmarkUnsupported',
+  error: 'decisionSignals.ledgerBenchmarkError',
 };
 
 const STATUS_ACTION_LABEL_KEYS: Record<PendingStatusChange['status'], UiTextKey> = {
@@ -527,6 +543,11 @@ const DecisionSignalsPage: React.FC = () => {
   // 页面刷新按钮会被永久禁用。
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<ParsedApiError | null>(null);
+  const [ledgerItems, setLedgerItems] = useState<DecisionSignalOutcomeItem[]>([]);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerError, setLedgerError] = useState<ParsedApiError | null>(null);
   const [skillStats, setSkillStats] = useState<SkillOpinionPerformanceStatsResponse | null>(null);
   const [skillStatsLoading, setSkillStatsLoading] = useState(false);
   const [skillStatsError, setSkillStatsError] = useState<ParsedApiError | null>(null);
@@ -562,6 +583,7 @@ const DecisionSignalsPage: React.FC = () => {
   const [reassessError, setReassessError] = useState<ParsedApiError | null>(null);
   const requestIdRef = useRef(0);
   const statsRequestIdRef = useRef(0);
+  const ledgerRequestIdRef = useRef(0);
   const skillStatsRequestIdRef = useRef(0);
   const latestRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
@@ -690,6 +712,31 @@ const DecisionSignalsPage: React.FC = () => {
     }
   }, []);
 
+  const loadOutcomeLedger = useCallback(async () => {
+    const requestId = ledgerRequestIdRef.current + 1;
+    ledgerRequestIdRef.current = requestId;
+    setLedgerLoading(true);
+    try {
+      const response = await decisionSignalsApi.listOutcomes({
+        page: ledgerPage,
+        pageSize: LEDGER_PAGE_SIZE,
+      });
+      if (ledgerRequestIdRef.current !== requestId) return;
+      setLedgerItems(response.items);
+      setLedgerTotal(response.total);
+      setLedgerError(null);
+    } catch (err) {
+      if (ledgerRequestIdRef.current !== requestId) return;
+      setLedgerItems([]);
+      setLedgerTotal(0);
+      setLedgerError(getParsedApiError(err));
+    } finally {
+      if (ledgerRequestIdRef.current === requestId) {
+        setLedgerLoading(false);
+      }
+    }
+  }, [ledgerPage]);
+
   const loadSkillOutcomeStats = useCallback(async () => {
     const requestId = skillStatsRequestIdRef.current + 1;
     skillStatsRequestIdRef.current = requestId;
@@ -787,6 +834,15 @@ const DecisionSignalsPage: React.FC = () => {
       statsRequestIdRef.current += 1;
     };
   }, [loadOutcomeStats, statsExpanded]);
+
+  // 台账与统计同属展开态内容：收起时不请求，展开后按当前页并行加载。
+  useEffect(() => {
+    if (!statsExpanded) return undefined;
+    void loadOutcomeLedger();
+    return () => {
+      ledgerRequestIdRef.current += 1;
+    };
+  }, [loadOutcomeLedger, statsExpanded]);
 
   useEffect(() => {
     if (!statsExpanded) return undefined;
@@ -1233,6 +1289,7 @@ const DecisionSignalsPage: React.FC = () => {
       // 统计区收起时不请求，与挂载、页面刷新按钮保持同一契约（spec §4.3）。
       if (statsExpanded) {
         await loadOutcomeStats();
+        await loadOutcomeLedger();
       }
     } catch (err) {
       setError(getParsedApiError(err));
@@ -1485,7 +1542,20 @@ const DecisionSignalsPage: React.FC = () => {
   const skillStatsProgress = summarizeSkillStatsProgress(skillStats?.buckets ?? []);
   // 页面刷新按钮的禁用与转圈必须同源：disabled 覆盖主列表、待处理区、统计与单股追踪的
   // 在途状态，icon 若只看 loading，就会出现「按钮已灰却不转」的假死观感。
-  const pageRefreshing = loading || queueLoading || statsLoading || skillStatsLoading || latestLoading || timelineLoading;
+  const pageRefreshing = loading
+    || queueLoading
+    || statsLoading
+    || ledgerLoading
+    || skillStatsLoading
+    || latestLoading
+    || timelineLoading;
+  const ledgerTotalPages = Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE));
+  // 月度数据在台账卡片里单独成表，通用 breakdown 循环排除它，避免重复渲染。
+  const statsBreakdowns = useMemo(
+    () => Object.entries(outcomeStats?.breakdowns ?? {}).filter(([dimension]) => dimension !== 'month'),
+    [outcomeStats],
+  );
+  const monthlyBuckets = outcomeStats?.breakdowns?.month ?? [];
 
   // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
   useToastSync('decision-signals-list-error', error, (err) => ({
@@ -1515,6 +1585,7 @@ const DecisionSignalsPage: React.FC = () => {
                 // 统计区收起时不请求，避免收起状态下的无谓请求与按钮自锁。
                 if (statsExpanded) {
                   void loadOutcomeStats();
+                  void loadOutcomeLedger();
                   void loadSkillOutcomeStats();
                 }
                 // 单股追踪只在用户已经应用了当前股票后才刷新，避免凭空发起
@@ -1981,13 +2052,21 @@ const DecisionSignalsPage: React.FC = () => {
                         </div>
                       </div>
                       <p className="mt-3 text-xs text-secondary-text">{t('decisionSignals.statsLegend')}</p>
+                      <p className="mt-1 text-xs text-secondary-text">
+                        {t('decisionSignals.statsBenchmarkCoverage', {
+                          available: outcomeStats.benchmarkAvailable ?? 0,
+                          completed: outcomeStats.completed,
+                          coverage: formatStatPercent(outcomeStats.benchmarkCoveragePct),
+                          excess: formatStatPercent(outcomeStats.avgExcessReturnPct),
+                        })}
+                      </p>
                       {outcomeStats.profileCalibration ? (
                         <DecisionSignalProfileCalibration calibration={outcomeStats.profileCalibration} />
                       ) : null}
 
-                      {outcomeStats.breakdowns && Object.keys(outcomeStats.breakdowns).length > 0 ? (
+                      {statsBreakdowns.length > 0 ? (
                         <div className="mt-4 space-y-4">
-                          {Object.entries(outcomeStats.breakdowns).map(([dimension, buckets]) => (
+                          {statsBreakdowns.map(([dimension, buckets]) => (
                             <div key={dimension}>
                               <p className="mb-1.5 text-xs font-semibold text-secondary-text">
                                 {dimension === 'horizon'
@@ -2029,6 +2108,164 @@ const DecisionSignalsPage: React.FC = () => {
                       className="border-none bg-transparent py-6 shadow-none"
                       title={t('decisionSignals.noReviewedStatsTitle')}
                       description={t('decisionSignals.noReviewedStatsDescription')}
+                      icon={<BarChart3 className="h-6 w-6" />}
+                    />
+                  )}
+                </Card>
+
+                <Card
+                  title={t('decisionSignals.ledgerTitle')}
+                  subtitle={t('decisionSignals.ledgerDescription')}
+                  padding="md"
+                >
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">
+                      {t('decisionSignals.ledgerMonthTitle')}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-secondary inline-flex h-9 items-center justify-center gap-2"
+                      onClick={() => void loadOutcomeLedger()}
+                      disabled={ledgerLoading}
+                      aria-label={t('decisionSignals.ledgerRefreshAria')}
+                    >
+                      <RefreshCw className={cn('h-4 w-4', ledgerLoading ? 'animate-spin' : '')} />
+                      {t('decisionSignals.ledgerRefresh')}
+                    </button>
+                  </div>
+
+                  {monthlyBuckets.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[560px] space-y-1">
+                        <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,auto)] items-center gap-x-4 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-text">
+                          <span>{t('decisionSignals.ledgerColumnMonth')}</span>
+                          <span>{t('decisionSignals.ledgerColumnSamples')}</span>
+                          <span>{t('decisionSignals.ledgerColumnHitRate')}</span>
+                          <span>{t('decisionSignals.ledgerColumnAvgStock')}</span>
+                          <span>{t('decisionSignals.ledgerColumnAvgBenchmark')}</span>
+                          <span>{t('decisionSignals.ledgerColumnAvgExcess')}</span>
+                        </div>
+                        {monthlyBuckets.map((bucket) => (
+                          <div
+                            key={`month-${bucket.value}`}
+                            className="grid grid-cols-[minmax(0,1fr)_repeat(5,auto)] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                          >
+                            <span className="font-medium text-foreground">{bucket.value}</span>
+                            <span className="tabular-nums text-secondary-text">{bucket.total}</span>
+                            <span className="tabular-nums text-secondary-text">{formatStatPercent(bucket.hitRatePct)}</span>
+                            <span className="tabular-nums text-secondary-text">{formatStatPercent(bucket.avgStockReturnPct)}</span>
+                            <span className="tabular-nums text-secondary-text">{formatStatPercent(bucket.avgBenchmarkReturnPct)}</span>
+                            <span
+                              className={cn(
+                                'tabular-nums',
+                                (bucket.avgExcessReturnPct ?? 0) >= 0 ? 'text-success' : 'text-danger',
+                              )}
+                            >
+                              {formatStatPercent(bucket.avgExcessReturnPct)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-secondary-text">{t('decisionSignals.ledgerMonthEmpty')}</p>
+                  )}
+
+                  <p className="mb-3 mt-5 text-xs font-semibold uppercase tracking-wide text-muted-text">
+                    {t('decisionSignals.ledgerDetailTitle')}
+                  </p>
+                  {ledgerError ? (
+                    <ApiErrorAlert
+                      error={{ ...ledgerError, title: t('decisionSignals.ledgerErrorTitle') }}
+                      actionLabel={t('common.retry')}
+                      onAction={() => void loadOutcomeLedger()}
+                    />
+                  ) : ledgerLoading ? (
+                    <p className="text-sm text-secondary-text">{t('common.loading')}...</p>
+                  ) : ledgerItems.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="overflow-x-auto">
+                        <div className="min-w-[860px] space-y-1">
+                          <div className="grid grid-cols-[auto_minmax(0,1.4fr)_auto_auto_auto_auto_auto_auto_minmax(0,1fr)] items-center gap-x-4 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-text">
+                            <span>{t('decisionSignals.ledgerColumnDate')}</span>
+                            <span>{t('decisionSignals.ledgerColumnStock')}</span>
+                            <span>{t('decisionSignals.ledgerColumnAction')}</span>
+                            <span>{t('decisionSignals.ledgerColumnWindow')}</span>
+                            <span>{t('decisionSignals.ledgerColumnResult')}</span>
+                            <span>{t('decisionSignals.ledgerColumnStockReturn')}</span>
+                            <span>{t('decisionSignals.ledgerColumnBenchmark')}</span>
+                            <span>{t('decisionSignals.ledgerColumnExcess')}</span>
+                            <span>{t('decisionSignals.ledgerColumnStatus')}</span>
+                          </div>
+                          {ledgerItems.map((item) => {
+                            const resultLabel = item.evalStatus === 'unable'
+                              ? t('decisionSignals.outcome.unable')
+                              : item.outcome
+                                ? t(OUTCOME_VALUE_LABEL_KEYS[item.outcome])
+                                : '-';
+                            return (
+                              <div
+                                key={item.id}
+                                className="grid grid-cols-[auto_minmax(0,1.4fr)_auto_auto_auto_auto_auto_auto_minmax(0,1fr)] items-center gap-x-4 rounded-lg border border-border/50 bg-elevated/25 px-3 py-1.5 text-xs"
+                              >
+                                <span className="tabular-nums text-secondary-text">
+                                  {item.anchorDate ? item.anchorDate.slice(0, 10) : '-'}
+                                </span>
+                                <span className="min-w-0 truncate font-medium text-foreground">
+                                  {item.stockCode ?? item.signalId}
+                                  {item.stockName ? (
+                                    <span className="ml-2 text-secondary-text">{item.stockName}</span>
+                                  ) : null}
+                                </span>
+                                <span className="text-secondary-text">
+                                  {item.action ? actionLabels[item.action] ?? item.action : '-'}
+                                </span>
+                                <span className="text-secondary-text">
+                                  {item.horizon ? getDecisionSignalHorizonLabel(item.horizon, t) : '-'}
+                                </span>
+                                <span className={cn(
+                                  item.outcome === 'hit' ? 'text-success' : item.outcome === 'miss' ? 'text-danger' : 'text-secondary-text',
+                                )}
+                                >
+                                  {resultLabel}
+                                </span>
+                                <span className="tabular-nums text-secondary-text">
+                                  {formatStatPercent(item.stockReturnPct)}
+                                </span>
+                                <span className="tabular-nums text-secondary-text">
+                                  {formatStatPercent(item.benchmarkReturnPct)}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'tabular-nums',
+                                    item.excessReturnPct == null
+                                      ? 'text-secondary-text'
+                                      : item.excessReturnPct >= 0 ? 'text-success' : 'text-danger',
+                                  )}
+                                >
+                                  {formatStatPercent(item.excessReturnPct)}
+                                </span>
+                                <span className="text-secondary-text">
+                                  {item.benchmarkStatus
+                                    ? t(BENCHMARK_STATUS_LABEL_KEYS[item.benchmarkStatus])
+                                    : t('decisionSignals.ledgerBenchmarkPending')}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <Pagination
+                        currentPage={ledgerPage}
+                        totalPages={ledgerTotalPages}
+                        onPageChange={setLedgerPage}
+                      />
+                    </div>
+                  ) : (
+                    <EmptyState
+                      className="border-none bg-transparent py-6 shadow-none"
+                      title={t('decisionSignals.ledgerEmptyTitle')}
+                      description={t('decisionSignals.ledgerEmptyDescription')}
                       icon={<BarChart3 className="h-6 w-6" />}
                     />
                   )}

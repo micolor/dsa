@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import logging
 from typing import List, Optional
 
@@ -247,6 +248,7 @@ def run_outcomes(request: DecisionSignalOutcomeRunRequest) -> DecisionSignalOutc
                 source_type=request.source_type,
                 status=request.status,
                 limit=request.limit,
+                fetch_missing_benchmark=request.fetch_benchmark,
             )
         )
     except DecisionSignalNotFoundError as exc:
@@ -276,6 +278,10 @@ def list_outcomes(
     engine_version: Optional[str] = Query(None),
     eval_status: Optional[str] = Query(None),
     outcome: Optional[str] = Query(None),
+    market: Optional[str] = Query(None, description="Optional market filter: cn/hk/us/jp/kr/tw"),
+    action: Optional[str] = Query(None, description="Optional frozen outcome action filter"),
+    anchor_from: Optional[date] = Query(None, description="Anchor date lower bound (inclusive)"),
+    anchor_to: Optional[date] = Query(None, description="Anchor date upper bound (inclusive)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> DecisionSignalOutcomeListResponse:
@@ -288,6 +294,10 @@ def list_outcomes(
                 engine_version=engine_version,
                 eval_status=eval_status,
                 outcome=outcome,
+                market=market,
+                action=action,
+                anchor_from=anchor_from,
+                anchor_to=anchor_to,
                 page=page,
                 page_size=page_size,
             )

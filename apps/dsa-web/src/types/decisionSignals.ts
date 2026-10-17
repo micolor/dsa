@@ -13,6 +13,7 @@ export type DecisionSignalHorizon = 'intraday' | '1d' | '3d' | '5d' | '10d' | 's
 export type DecisionSignalMarket = 'cn' | 'hk' | 'us' | 'jp' | 'kr' | 'tw';
 export type DecisionSignalOutcomeEvalStatus = 'completed' | 'unable';
 export type DecisionSignalOutcomeValue = 'hit' | 'miss' | 'neutral';
+export type DecisionSignalBenchmarkStatus = 'available' | 'missing' | 'unsupported' | 'error';
 export type DecisionSignalFeedbackValue = 'useful' | 'not_useful';
 export type DecisionSignalFeedbackSource = 'web' | 'api';
 export type DecisionProfile = 'conservative' | 'balanced' | 'aggressive';
@@ -180,6 +181,8 @@ export interface DecisionSignalListResponse {
 export interface DecisionSignalOutcomeItem {
   id: number;
   signalId: number;
+  stockCode?: string | null;
+  stockName?: string | null;
   horizon: DecisionSignalHorizon;
   engineVersion: string;
   evalStatus: DecisionSignalOutcomeEvalStatus;
@@ -194,6 +197,10 @@ export interface DecisionSignalOutcomeItem {
   maxHigh?: number | null;
   minLow?: number | null;
   stockReturnPct?: number | null;
+  benchmarkCode?: string | null;
+  benchmarkReturnPct?: number | null;
+  excessReturnPct?: number | null;
+  benchmarkStatus?: DecisionSignalBenchmarkStatus | null;
   action?: DecisionAction | null;
   market?: DecisionSignalMarket | null;
   marketPhase?: MarketPhaseValue | null;
@@ -233,6 +240,10 @@ export interface DecisionSignalOutcomeListParams {
   engineVersion?: string;
   evalStatus?: DecisionSignalOutcomeEvalStatus;
   outcome?: DecisionSignalOutcomeValue;
+  market?: DecisionSignalMarket;
+  action?: DecisionAction;
+  anchorFrom?: string;
+  anchorTo?: string;
   page?: number;
   pageSize?: number;
 }
@@ -255,6 +266,10 @@ export interface DecisionSignalOutcomeStatsBucket {
   neutral: number;
   hitRatePct?: number | null;
   avgStockReturnPct?: number | null;
+  benchmarkAvailable?: number;
+  benchmarkCoveragePct?: number | null;
+  avgBenchmarkReturnPct?: number | null;
+  avgExcessReturnPct?: number | null;
   unableReasons: Record<string, number>;
 }
 
@@ -269,6 +284,9 @@ export interface DecisionSignalProfileCalibrationBucket {
   sampleSufficient: boolean;
   hitRatePct: number | null;
   avgStockReturnPct: number | null;
+  avgBenchmarkReturnPct: number | null;
+  avgExcessReturnPct: number | null;
+  benchmarkCoveragePct: number | null;
   missRatePct: number | null;
   unableRatePct: number | null;
   maxAdverseExcursionPct: number | null;
@@ -300,6 +318,10 @@ export interface DecisionSignalOutcomeStatsResponse {
   neutral: number;
   hitRatePct?: number | null;
   avgStockReturnPct?: number | null;
+  benchmarkAvailable?: number;
+  benchmarkCoveragePct?: number | null;
+  avgBenchmarkReturnPct?: number | null;
+  avgExcessReturnPct?: number | null;
   unableReasons: Record<string, number>;
   breakdowns: Record<string, DecisionSignalOutcomeStatsBucket[]>;
   profileCalibration?: DecisionSignalProfileCalibration;

@@ -311,6 +311,65 @@ class FundFetcher:
         except Exception:
             return None
 
+    def get_nav_range(
+        self,
+        code: str,
+        start_date: date,
+        end_date: date,
+        *,
+        page_size: int = 60,
+        max_pages: int = 100,
+    ) -> List[NavRecord]:
+        """取 ``[start_date, end_date]`` 区间内的净值，按日期正序返回。
+
+        东财 lsjz 支持 ``startDate`` / ``endDate``，但分页行为仍需自己处理：
+        接口按日期倒序返回，且可能夹带区间外记录。这里统一过滤并按日期去重，
+        让评估服务可以稳定地用「锚点日期 + 第 N 条」定位窗口。
+
+        区间无数据返回空列表；请求/解析异常向上抛，由调用方决定重试语义。
+        """
+        if start_date > end_date:
+            return []
+        base = strip_fund_prefix(code)
+        start_key = start_date.isoformat()
+        end_key = end_date.isoformat()
+        by_date: dict = {}
+        page = 1
+        while page <= max_pages:
+            batch = self._request_nav_page(
+                base,
+                page,
+                page_size,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if not batch:  # 只在真正取空时停止：服务端可能把 pageSize 截到更小值
+                break
+            for record in batch:
+                day = (record.date or "")[:10]
+                if start_key <= day <= end_key:
+                    by_date[day] = record
+            page += 1
+        return [by_date[day] for day in sorted(by_date)]
+
+    def _request_nav_page(
+        self,
+        code: str,
+        page: int,
+        page_size: int,
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[NavRecord]:
+        params = dict(fundCode=code, pageIndex=page, pageSize=page_size)
+        if start_date is not None:
+            params["startDate"] = start_date.isoformat()
+        if end_date is not None:
+            params["endDate"] = end_date.isoformat()
+        r = requests.get(_FUND_NAV_URL, params=params, headers=_HEADERS, timeout=20)
+        r.raise_for_status()
+        return parse_lsjz(r.json())
+
     def _fetch_nav(self, code: str, limit: int) -> List[NavRecord]:
         """取最近 ``limit`` 条净值，返回**按净值日期正序（旧 → 新）**的序列。
 
@@ -323,11 +382,7 @@ class FundFetcher:
         page_size = 60
         page = 1
         while len(recs) < limit:
-            r = requests.get(_FUND_NAV_URL,
-                params=dict(fundCode=code, pageIndex=page, pageSize=page_size),
-                headers=_HEADERS, timeout=20)
-            r.raise_for_status()
-            batch = parse_lsjz(r.json())
+            batch = self._request_nav_page(code, page, page_size)
             if not batch:          # only stop when exhausted
                 break
             recs.extend(batch)

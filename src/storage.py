@@ -1217,6 +1217,14 @@ class DecisionSignalOutcomeRecord(Base):
     min_low = Column(Float)
     stock_return_pct = Column(Float)
 
+    # Benchmark components are additive columns on the same outcome row; they
+    # never affect the stock hit/miss/neutral classification.
+    benchmark_code = Column(String(32))
+    benchmark_return_pct = Column(Float)
+    excess_return_pct = Column(Float)
+    benchmark_status = Column(String(24))
+    benchmark_checked_at = Column(DateTime)
+
     action = Column(String(16), index=True)
     market = Column(String(8), index=True)
     market_phase = Column(String(24), index=True)
@@ -1233,6 +1241,76 @@ class DecisionSignalOutcomeRecord(Base):
         UniqueConstraint('signal_id', 'horizon', 'engine_version', name='uix_decision_signal_outcome_key'),
         Index('ix_decision_signal_outcome_stats_action', 'engine_version', 'action', 'horizon'),
         Index('ix_decision_signal_outcome_stats_market', 'engine_version', 'market', 'horizon'),
+        Index(
+            'ix_decision_signal_outcome_benchmark_backlog',
+            'engine_version',
+            'benchmark_status',
+            'benchmark_checked_at',
+        ),
+    )
+
+
+class FundNavReviewRecord(Base):
+    """Forward NAV review for one fund check anchor and horizon.
+
+    Fund checks are deterministic NAV health checks and never produce decision
+    signals. Each check records its latest NAV as an anchor; the scheduler later
+    evaluates the 22/66/126/252nd NAV record after that anchor, matching the
+    existing ``compute_metrics`` windows.
+    """
+
+    __tablename__ = 'fund_nav_reviews'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fund_code = Column(String(16), nullable=False, index=True)
+    fund_name = Column(String(128), nullable=False, default='')
+    horizon = Column(String(4), nullable=False, index=True)
+    engine_version = Column(String(32), nullable=False, default='fund-nav-v1', index=True)
+
+    anchor_date = Column(Date, nullable=False, index=True)
+    anchor_nav = Column(Float, nullable=False)
+    due_date = Column(Date, nullable=False, index=True)
+
+    eval_status = Column(String(16), nullable=False, default='pending', index=True)
+    unable_reason = Column(String(64), index=True)
+    eval_date = Column(Date)
+    eval_nav = Column(Float)
+    nav_return_pct = Column(Float)
+    max_drawdown_pct = Column(Float)
+    eval_window_records = Column(Integer)
+
+    analysis_history_id = Column(Integer, index=True)
+    anchor_source = Column(String(16), nullable=False, default='pipeline', index=True)
+
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(String(64))
+    checked_at = Column(DateTime, index=True)
+    evaluated_at = Column(DateTime)
+
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'fund_code', 'anchor_date', 'horizon', 'engine_version',
+            name='uix_fund_nav_review_key',
+        ),
+        CheckConstraint(
+            "horizon IN ('1m', '3m', '6m', '1y')",
+            name='ck_fund_nav_review_horizon',
+        ),
+        CheckConstraint(
+            "eval_status IN ('pending', 'evaluated', 'unable')",
+            name='ck_fund_nav_review_status',
+        ),
+        Index(
+            'ix_fund_nav_review_due',
+            'engine_version', 'eval_status', 'due_date', 'checked_at',
+        ),
+        Index(
+            'ix_fund_nav_review_stats',
+            'engine_version', 'horizon', 'eval_status',
+        ),
     )
 
 
@@ -1454,6 +1532,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             Base.metadata.create_all(self._engine)
             self._ensure_llm_usage_telemetry_columns()
             self._ensure_paper_trade_fee_column()
+            self._ensure_decision_signal_outcome_benchmark_columns()
             self._ensure_decision_signal_profile_schema()
             self._ensure_intelligence_item_scope_values()
             self._ensure_schema_migration_record()
@@ -1838,6 +1917,77 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                         time.sleep(delay)
                     continue
                 raise
+
+    def _ensure_decision_signal_outcome_benchmark_columns(self) -> None:
+        """Add nullable benchmark columns to existing SQLite outcome tables.
+
+        `create_all` only creates missing tables, so databases created before
+        benchmark excess tracking keep a `decision_signal_outcomes` table
+        without these columns. Historical rows stay NULL and are backfilled by
+        the benchmark backfill stage; nothing is recomputed here.
+        """
+        if not self._is_sqlite_engine:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns(
+                    DecisionSignalOutcomeRecord.__tablename__
+                )
+            }
+        except Exception as exc:
+            logger.warning(
+                "[decision signal outcome] failed to inspect benchmark columns; "
+                "skipping best-effort SQLite benchmark column backfill: %s",
+                exc,
+            )
+            return
+
+        column_sql = {
+            "benchmark_code": "VARCHAR(32)",
+            "benchmark_return_pct": "FLOAT",
+            "excess_return_pct": "FLOAT",
+            "benchmark_status": "VARCHAR(24)",
+            "benchmark_checked_at": "DATETIME",
+        }
+        max_retries = self._sqlite_write_retry_max
+        for column, column_type in column_sql.items():
+            if column in existing:
+                continue
+            for attempt in range(max_retries + 1):
+                try:
+                    with self._engine.begin() as connection:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE {DecisionSignalOutcomeRecord.__tablename__} "
+                            f"ADD COLUMN {column} {column_type}"
+                        )
+                    existing.add(column)
+                    break
+                except OperationalError as exc:
+                    if self._is_sqlite_duplicate_column_error(exc, column):
+                        existing.add(column)
+                        break
+                    if self._is_sqlite_locked_error(exc) and attempt < max_retries:
+                        delay = self._sqlite_write_retry_base_delay * (2 ** attempt)
+                        logger.warning(
+                            "[decision signal outcome] SQLite benchmark column backfill "
+                            "locked, retrying: %s (%s/%s, %.2fs)",
+                            column,
+                            attempt + 1,
+                            max_retries,
+                            delay,
+                        )
+                        if delay > 0:
+                            time.sleep(delay)
+                        continue
+                    raise
+
+        with self._engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_decision_signal_outcome_benchmark_backlog "
+                "ON decision_signal_outcomes "
+                "(engine_version, benchmark_status, benchmark_checked_at)"
+            )
 
     def _ensure_llm_usage_telemetry_columns(self) -> None:
         """Add nullable P0a usage telemetry columns to existing SQLite DBs."""

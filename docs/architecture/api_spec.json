@@ -7561,6 +7561,80 @@
             }
           },
           {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional market filter: cn/hk/us/jp/kr/tw",
+              "title": "Market"
+            },
+            "description": "Optional market filter: cn/hk/us/jp/kr/tw"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional frozen outcome action filter",
+              "title": "Action"
+            },
+            "description": "Optional frozen outcome action filter"
+          },
+          {
+            "name": "anchor_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Anchor date lower bound (inclusive)",
+              "title": "Anchor From"
+            },
+            "description": "Anchor date lower bound (inclusive)"
+          },
+          {
+            "name": "anchor_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Anchor date upper bound (inclusive)",
+              "title": "Anchor To"
+            },
+            "description": "Anchor date upper bound (inclusive)"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -8582,6 +8656,439 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/fund-nav-reviews": {
+      "get": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "查询基金净值复盘台账",
+        "description": "分页查询基金体检锚点及其后续净值表现；与 decision_signals 完全独立。",
+        "operationId": "listFundNavReviews",
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fund_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fund Code"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "1m",
+                    "3m",
+                    "6m",
+                    "1y"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          },
+          {
+            "name": "eval_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Eval Status"
+            }
+          },
+          {
+            "name": "anchor_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Anchor date lower bound (inclusive)",
+              "title": "Anchor From"
+            },
+            "description": "Anchor date lower bound (inclusive)"
+          },
+          {
+            "name": "anchor_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Anchor date upper bound (inclusive)",
+              "title": "Anchor To"
+            },
+            "description": "Anchor date upper bound (inclusive)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavReviewListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "查询参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "查询参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "查询失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fund-nav-reviews/stats": {
+      "get": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "查询基金净值复盘统计",
+        "description": "返回全部复盘样本及 horizon / 月份聚合；比率在无已评估样本时为 null。",
+        "operationId": "getFundNavReviewStats",
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "horizons",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "1m",
+                      "3m",
+                      "6m",
+                      "1y"
+                    ],
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizons"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavReviewStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "查询参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "统计失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fund-nav-reviews/run": {
+      "post": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "手动评估基金净值复盘",
+        "description": "按到期锚点抓取区间净值并计算表现；该接口会访问外部数据源。",
+        "operationId": "runFundNavReviews",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundNavReviewRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavReviewRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求字段非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "评估失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/fund-nav-reviews/backfill/run": {
+      "post": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "从历史基金报告补录净值锚点",
+        "description": "默认 dry_run=true 且不联网；旧报告缺少净值日期时需显式 resolve_missing=true。",
+        "operationId": "backfillFundNavReviews",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundNavReviewBackfillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavReviewBackfillResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求字段非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "补录失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/v1/screening/status": {
@@ -13896,6 +14403,28 @@
             "type": "integer",
             "title": "Signal Id"
           },
+          "stock_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Code"
+          },
+          "stock_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Name"
+          },
           "horizon": {
             "type": "string",
             "title": "Horizon"
@@ -14028,6 +14557,50 @@
               }
             ],
             "title": "Stock Return Pct"
+          },
+          "benchmark_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Code"
+          },
+          "benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Pct"
+          },
+          "excess_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excess Return Pct"
+          },
+          "benchmark_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Status"
           },
           "action": {
             "anyOf": [
@@ -14310,6 +14883,11 @@
             "minimum": 1.0,
             "title": "Limit",
             "default": 100
+          },
+          "fetch_benchmark": {
+            "type": "boolean",
+            "title": "Fetch Benchmark",
+            "default": false
           }
         },
         "type": "object",
@@ -14411,6 +14989,44 @@
             ],
             "title": "Avg Stock Return Pct"
           },
+          "benchmark_available": {
+            "type": "integer",
+            "title": "Benchmark Available",
+            "default": 0
+          },
+          "benchmark_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Coverage Pct"
+          },
+          "avg_benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Benchmark Return Pct"
+          },
+          "avg_excess_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Excess Return Pct"
+          },
           "unable_reasons": {
             "additionalProperties": {
               "type": "integer"
@@ -14504,6 +15120,44 @@
               }
             ],
             "title": "Avg Stock Return Pct"
+          },
+          "benchmark_available": {
+            "type": "integer",
+            "title": "Benchmark Available",
+            "default": 0
+          },
+          "benchmark_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Coverage Pct"
+          },
+          "avg_benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Benchmark Return Pct"
+          },
+          "avg_excess_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Excess Return Pct"
           },
           "unable_reasons": {
             "additionalProperties": {
@@ -14803,6 +15457,39 @@
               }
             ],
             "title": "Avg Stock Return Pct"
+          },
+          "avg_benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Benchmark Return Pct"
+          },
+          "avg_excess_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Excess Return Pct"
+          },
+          "benchmark_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Coverage Pct"
           },
           "miss_rate_pct": {
             "anyOf": [
@@ -15435,6 +16122,610 @@
         "type": "object",
         "title": "ExtractItem",
         "description": "单条提取结果（代码、名称、置信度）"
+      },
+      "FundNavReviewBackfillRequest": {
+        "properties": {
+          "fund_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Code"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": true
+          },
+          "resolve_missing": {
+            "type": "boolean",
+            "title": "Resolve Missing",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 200
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundNavReviewBackfillRequest"
+      },
+      "FundNavReviewBackfillResponse": {
+        "properties": {
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "unmatched": {
+            "type": "integer",
+            "title": "Unmatched"
+          },
+          "funds": {
+            "type": "integer",
+            "title": "Funds"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanned",
+          "created",
+          "skipped",
+          "unmatched",
+          "funds",
+          "dry_run",
+          "engine_version"
+        ],
+        "title": "FundNavReviewBackfillResponse"
+      },
+      "FundNavReviewItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "fund_code": {
+            "type": "string",
+            "title": "Fund Code"
+          },
+          "fund_name": {
+            "type": "string",
+            "title": "Fund Name"
+          },
+          "horizon": {
+            "type": "string",
+            "title": "Horizon"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "anchor_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Anchor Date"
+          },
+          "anchor_nav": {
+            "type": "number",
+            "title": "Anchor Nav"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Due Date"
+          },
+          "eval_status": {
+            "type": "string",
+            "title": "Eval Status"
+          },
+          "unable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable Reason"
+          },
+          "eval_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Date"
+          },
+          "eval_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Nav"
+          },
+          "nav_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Return Pct"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "eval_window_records": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Window Records"
+          },
+          "analysis_history_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis History Id"
+          },
+          "anchor_source": {
+            "type": "string",
+            "title": "Anchor Source"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluated At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fund_code",
+          "fund_name",
+          "horizon",
+          "engine_version",
+          "anchor_date",
+          "anchor_nav",
+          "due_date",
+          "eval_status",
+          "anchor_source",
+          "attempts"
+        ],
+        "title": "FundNavReviewItem"
+      },
+      "FundNavReviewListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FundNavReviewItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "FundNavReviewListResponse"
+      },
+      "FundNavReviewRunRequest": {
+        "properties": {
+          "fund_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Code"
+          },
+          "horizons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "1m",
+                    "3m",
+                    "6m",
+                    "1y"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizons"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 400.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundNavReviewRunRequest"
+      },
+      "FundNavReviewRunResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FundNavReviewItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "evaluated": {
+            "type": "integer",
+            "title": "Evaluated"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "unable": {
+            "type": "integer",
+            "title": "Unable"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evaluated",
+          "pending",
+          "unable",
+          "skipped",
+          "engine_version"
+        ],
+        "title": "FundNavReviewRunResponse"
+      },
+      "FundNavReviewStatsBucket": {
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "anchor_count": {
+            "type": "integer",
+            "title": "Anchor Count"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "evaluated": {
+            "type": "integer",
+            "title": "Evaluated"
+          },
+          "unable": {
+            "type": "integer",
+            "title": "Unable"
+          },
+          "positive_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positive Rate Pct"
+          },
+          "avg_nav_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Nav Return Pct"
+          },
+          "avg_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Max Drawdown Pct"
+          },
+          "unable_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unable Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dimension",
+          "value",
+          "total",
+          "anchor_count",
+          "pending",
+          "evaluated",
+          "unable"
+        ],
+        "title": "FundNavReviewStatsBucket"
+      },
+      "FundNavReviewStatsResponse": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "horizons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Horizons"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "anchor_count": {
+            "type": "integer",
+            "title": "Anchor Count"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "evaluated": {
+            "type": "integer",
+            "title": "Evaluated"
+          },
+          "unable": {
+            "type": "integer",
+            "title": "Unable"
+          },
+          "positive_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positive Rate Pct"
+          },
+          "avg_nav_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Nav Return Pct"
+          },
+          "avg_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Max Drawdown Pct"
+          },
+          "unable_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unable Reasons"
+          },
+          "breakdowns": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/FundNavReviewStatsBucket"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Breakdowns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine_version",
+          "total",
+          "anchor_count",
+          "pending",
+          "evaluated",
+          "unable"
+        ],
+        "title": "FundNavReviewStatsResponse"
       },
       "GenerationBackendStatus": {
         "properties": {

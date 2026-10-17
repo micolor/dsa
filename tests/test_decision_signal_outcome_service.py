@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -157,7 +157,7 @@ def _seed_bars(
             session.add(
                 StockDaily(
                     code=code,
-                    date=date(2024, 1, 2 + index),
+                    date=anchor + timedelta(days=index),
                     open=close,
                     high=close + 1,
                     low=close - 1,
@@ -757,3 +757,221 @@ def test_batch_uses_oldest_retryable_horizon_timestamp_for_signal_order(isolated
 
     assert result["updated"] == 2
     assert {item["signal_id"] for item in result["items"]} == {multi_horizon_id}
+
+
+def _seed_benchmark_bars(
+    db: DatabaseManager,
+    *,
+    code: str,
+    anchor: date = date(2024, 1, 2),
+    start_close: float = 100.0,
+    closes: list[float],
+) -> None:
+    _seed_bars(db, code=code, anchor=anchor, start_close=start_close, closes=closes)
+
+
+def test_outcome_computes_benchmark_and_excess_return(isolated_db) -> None:
+    signal_id = _add_signal(isolated_db, code="600519", market="cn", action="buy", horizon="3d")
+    _seed_bars(isolated_db, code="600519", closes=[103, 104, 105, 106, 107, 108])
+    _seed_benchmark_bars(isolated_db, code="510300", closes=[101, 102, 103, 104, 105, 106])
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+
+    item = service.run_outcomes(signal_id=signal_id, horizons=["3d"])["items"][0]
+
+    assert item["outcome"] == "hit"
+    assert item["stock_return_pct"] == 5.0
+    assert item["benchmark_code"] == "510300"
+    assert item["benchmark_status"] == "available"
+    assert item["benchmark_return_pct"] == 3.0
+    assert item["excess_return_pct"] == 2.0
+
+
+def test_outcome_marks_benchmark_missing_and_unsupported(isolated_db) -> None:
+    cn_signal_id = _add_signal(isolated_db, code="600519", market="cn", action="buy", horizon="3d")
+    _seed_bars(isolated_db, code="600519", closes=[103, 104, 105])
+    jp_signal_id = _add_signal(
+        isolated_db, code="7203", market="jp", action="buy", horizon="3d"
+    )
+    _seed_bars(isolated_db, code="7203", closes=[103, 104, 105])
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+
+    cn_item = service.run_outcomes(signal_id=cn_signal_id, horizons=["3d"])["items"][0]
+    jp_item = service.run_outcomes(signal_id=jp_signal_id, horizons=["3d"])["items"][0]
+
+    assert cn_item["benchmark_code"] == "510300"
+    assert cn_item["benchmark_status"] == "missing"
+    assert cn_item["benchmark_return_pct"] is None
+    assert jp_item["benchmark_status"] == "unsupported"
+    assert jp_item["benchmark_code"] is None
+
+
+def test_outcome_backfills_benchmark_from_fetcher_and_dedupes(isolated_db) -> None:
+    import pandas as pd
+
+    first_id = _add_signal(isolated_db, code="600519", market="cn", action="buy", horizon="3d")
+    second_id = _add_signal(isolated_db, code="000001", market="cn", action="buy", horizon="3d")
+    for code in ("600519", "000001"):
+        _seed_bars(isolated_db, code=code, closes=[103, 104, 105])
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+    service.run_outcomes(signal_id=first_id, horizons=["3d"])
+    service.run_outcomes(signal_id=second_id, horizons=["3d"])
+
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_fetcher(code: str, start: str, end: str):
+        calls.append((code, start, end))
+        return pd.DataFrame(
+            [
+                {"date": "2024-01-02", "open": 100, "high": 101, "low": 99, "close": 100},
+                {"date": "2024-01-03", "open": 101, "high": 102, "low": 100, "close": 101},
+                {"date": "2024-01-04", "open": 102, "high": 103, "low": 101, "close": 102},
+                {"date": "2024-01-05", "open": 103, "high": 104, "low": 102, "close": 103},
+            ]
+        ), "fake"
+
+    with isolated_db.session_scope() as session:
+        before = session.query(DecisionSignalOutcomeRecord).filter_by(signal_id=first_id).one()
+        updated_at_before = before.updated_at
+
+    DecisionSignalOutcomeService(
+        db_manager=isolated_db,
+        fetch_missing_benchmark=True,
+        benchmark_fetcher=fake_fetcher,
+    ).run_outcomes(horizons=["3d"], limit=10)
+
+    assert calls == [("510300", "2024-01-02", "2024-01-05")]
+    with isolated_db.session_scope() as session:
+        rows = session.query(DecisionSignalOutcomeRecord).filter(
+            DecisionSignalOutcomeRecord.signal_id.in_([first_id, second_id])
+        ).all()
+        assert {row.benchmark_status for row in rows} == {"available"}
+        assert {round(row.excess_return_pct, 4) for row in rows} == {2.0}
+        first_row = next(row for row in rows if row.signal_id == first_id)
+        assert first_row.updated_at == updated_at_before
+
+
+def test_outcome_benchmark_failure_gets_cooldown(isolated_db) -> None:
+    signal_id = _add_signal(isolated_db, code="600519", market="cn", action="buy", horizon="3d")
+    _seed_bars(isolated_db, code="600519", closes=[103, 104, 105])
+    DecisionSignalOutcomeService(db_manager=isolated_db).run_outcomes(
+        signal_id=signal_id, horizons=["3d"]
+    )
+    calls: list[str] = []
+
+    def failing_fetcher(code: str, start: str, end: str):
+        calls.append(code)
+        raise RuntimeError("network down")
+
+    service = DecisionSignalOutcomeService(
+        db_manager=isolated_db,
+        fetch_missing_benchmark=True,
+        benchmark_fetcher=failing_fetcher,
+    )
+    service.run_outcomes(horizons=["3d"], limit=10)
+    service.run_outcomes(horizons=["3d"], limit=10)
+
+    assert calls == ["510300"]
+    with isolated_db.session_scope() as session:
+        row = session.query(DecisionSignalOutcomeRecord).filter_by(signal_id=signal_id).one()
+        assert row.benchmark_status == "error"
+        assert row.benchmark_checked_at is not None
+
+
+def test_outcome_ledger_returns_stock_fields_and_filters(isolated_db) -> None:
+    signal_id = _add_signal(
+        isolated_db, code="600519", market="cn", action="buy", horizon="3d", session_date="2024-02-05"
+    )
+    _seed_bars(isolated_db, code="600519", anchor=date(2024, 2, 5), closes=[103, 104, 105])
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+    service.run_outcomes(signal_id=signal_id, horizons=["3d"])
+
+    ledger = service.list_outcomes(market="cn", action="buy", anchor_from="2024-02-01", anchor_to="2024-02-29")
+
+    assert ledger["total"] == 1
+    item = ledger["items"][0]
+    assert item["stock_code"] == "600519"
+    assert item["stock_name"] == "贵州茅台"
+    assert service.list_outcomes(market="us")["total"] == 0
+    assert service.list_outcomes(anchor_from="2024-03-01")["total"] == 0
+    with pytest.raises(ValueError):
+        service.list_outcomes(anchor_from="2024-03-01", anchor_to="2024-02-01")
+
+
+def test_stats_month_breakdown_and_benchmark_aggregates(isolated_db) -> None:
+    first_id = _add_signal(
+        isolated_db, code="600519", market="cn", action="buy", horizon="3d", session_date="2024-01-02"
+    )
+    second_id = _add_signal(
+        isolated_db, code="000001", market="cn", action="buy", horizon="3d", session_date="2024-02-02"
+    )
+    for code, anchor in (("600519", date(2024, 1, 2)), ("000001", date(2024, 2, 2))):
+        _seed_bars(isolated_db, code=code, anchor=anchor, closes=[103, 104, 105])
+    _seed_bars(isolated_db, code="510300", anchor=date(2024, 1, 2), closes=[101, 102, 103])
+    _seed_bars(isolated_db, code="510300", anchor=date(2024, 2, 2), closes=[100, 102, 104])
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+    service.run_outcomes(signal_id=first_id, horizons=["3d"])
+    service.run_outcomes(signal_id=second_id, horizons=["3d"])
+
+    stats = service.get_stats()
+
+    months = {bucket["value"]: bucket for bucket in stats["breakdowns"]["month"]}
+    assert set(months) == {"2024-01", "2024-02"}
+    assert months["2024-01"]["completed"] == 1
+    assert stats["benchmark_available"] == 2
+    assert stats["benchmark_coverage_pct"] == 100.0
+    assert stats["avg_benchmark_return_pct"] == 3.5
+    assert stats["avg_excess_return_pct"] == 1.5
+
+
+def test_legacy_outcome_table_gains_benchmark_columns(tmp_path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy_outcome.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE decision_signal_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                horizon VARCHAR(16) NOT NULL,
+                engine_version VARCHAR(32) NOT NULL,
+                eval_status VARCHAR(24) NOT NULL,
+                stock_return_pct FLOAT,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO decision_signal_outcomes "
+            "(signal_id, horizon, engine_version, eval_status, stock_return_pct) "
+            "VALUES (1, '3d', 'decision-signal-v1', 'completed', 2.5)"
+        )
+        conn.commit()
+
+    DatabaseManager.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{db_path}")
+    DatabaseManager.reset_instance()
+    DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(decision_signal_outcomes)").fetchall()
+        }
+        benchmark_status = conn.execute(
+            "SELECT benchmark_status FROM decision_signal_outcomes WHERE id = 1"
+        ).fetchone()[0]
+        indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(decision_signal_outcomes)").fetchall()
+        }
+    assert {
+        "benchmark_code",
+        "benchmark_return_pct",
+        "excess_return_pct",
+        "benchmark_status",
+        "benchmark_checked_at",
+    } <= columns
+    assert benchmark_status is None
+    assert "ix_decision_signal_outcome_benchmark_backlog" in indexes

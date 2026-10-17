@@ -35,6 +35,7 @@ vi.mock('../../api/decisionSignals', () => ({
     list: vi.fn(),
     getLatest: vi.fn(),
     getOutcomeStats: vi.fn(),
+    listOutcomes: vi.fn(),
     getSignalOutcomes: vi.fn(),
     // 页面挂载时会拉 Skill 表现统计；工厂漏掉这两个方法会让 api 调用同步抛 TypeError，
     // 渲染出一个常驻的「加载 Skill 表现失败」alert，抢在测试真正断言的 alert 前面。
@@ -378,6 +379,10 @@ const outcomeStats: DecisionSignalOutcomeStatsResponse = {
   neutral: 0,
   hitRatePct: 50,
   avgStockReturnPct: 2.5,
+  benchmarkAvailable: 2,
+  benchmarkCoveragePct: 100,
+  avgBenchmarkReturnPct: 1.2,
+  avgExcessReturnPct: 1.3,
   unableReasons: { missing_anchor_price: 1 },
   breakdowns: {},
   profileCalibration: {
@@ -395,6 +400,9 @@ const outcomeStats: DecisionSignalOutcomeStatsResponse = {
           sampleSufficient: false,
           hitRatePct: null,
           avgStockReturnPct: null,
+          avgBenchmarkReturnPct: null,
+          avgExcessReturnPct: null,
+          benchmarkCoveragePct: null,
           missRatePct: null,
           unableRatePct: null,
           maxAdverseExcursionPct: null,
@@ -410,6 +418,9 @@ const outcomeStats: DecisionSignalOutcomeStatsResponse = {
           sampleSufficient: false,
           hitRatePct: null,
           avgStockReturnPct: null,
+          avgBenchmarkReturnPct: null,
+          avgExcessReturnPct: null,
+          benchmarkCoveragePct: null,
           missRatePct: null,
           unableRatePct: null,
           maxAdverseExcursionPct: null,
@@ -599,6 +610,7 @@ beforeEach(() => {
   ));
   vi.mocked(decisionSignalsApi.getLatest).mockResolvedValue(listResponse([signal]));
   vi.mocked(decisionSignalsApi.getOutcomeStats).mockResolvedValue(outcomeStats);
+  vi.mocked(decisionSignalsApi.listOutcomes).mockResolvedValue(outcomeList);
   vi.mocked(decisionSignalsApi.getSignalOutcomes).mockResolvedValue(outcomeList);
   vi.mocked(decisionSignalsApi.getSkillOutcomeStats).mockResolvedValue(skillStatsResponse);
   vi.mocked(decisionSignalsApi.getFeedback).mockResolvedValue(emptyFeedback);
@@ -771,6 +783,59 @@ describe('DecisionSignalsPage', () => {
     expect(screen.queryByText('暂无 Skill 表现样本')).not.toBeInTheDocument();
     expect(screen.getByText('当前统计为全局已复盘 outcome 口径，不等于当前可见信号数量，也不随当前股票过滤。')).toBeInTheDocument();
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
+  });
+
+  it('renders monthly performance and the outcome ledger with benchmark returns', async () => {
+    vi.mocked(decisionSignalsApi.getOutcomeStats).mockResolvedValueOnce({
+      ...outcomeStats,
+      breakdowns: {
+        month: [
+          {
+            dimension: 'month',
+            value: '2024-01',
+            total: 2,
+            completed: 2,
+            unable: 0,
+            hit: 1,
+            miss: 1,
+            neutral: 0,
+            hitRatePct: 50,
+            avgStockReturnPct: 2.5,
+            benchmarkAvailable: 2,
+            benchmarkCoveragePct: 100,
+            avgBenchmarkReturnPct: 1.2,
+            avgExcessReturnPct: 1.3,
+            unableReasons: {},
+          },
+        ],
+      },
+    });
+    vi.mocked(decisionSignalsApi.listOutcomes).mockResolvedValueOnce({
+      items: [
+        {
+          ...outcomeList.items[0],
+          stockCode: '600519',
+          stockName: '贵州茅台',
+          benchmarkCode: '510300',
+          benchmarkReturnPct: 1.2,
+          excessReturnPct: 3.8,
+          benchmarkStatus: 'available',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    renderPage();
+    await expandStatsSection();
+
+    expect(await screen.findByText('分月表现')).toBeInTheDocument();
+    expect(screen.getByText('2024-01')).toBeInTheDocument();
+    expect(screen.getByText('复盘台账')).toBeInTheDocument();
+    expect(await screen.findByText('基准可得')).toBeInTheDocument();
+    expect(screen.getByText('3.8%')).toBeInTheDocument();
+    expect(decisionSignalsApi.listOutcomes).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
   });
 
   it('shows a skill-specific empty state when no skill performance sample is available', async () => {

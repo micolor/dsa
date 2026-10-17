@@ -106,7 +106,22 @@ def test_latest_nav_comes_from_the_newest_record():
     ]
     profile = FundProfile(code="003095", name="测试基金", nav_history=navs)
 
-    assert build_fund_report(profile)["latest_nav"] == 1.9
+    report = build_fund_report(profile)
+    assert report["latest_nav"] == 1.9
+    assert report["latest_nav_date"] == "2026-09-18"
+
+
+def test_latest_nav_date_reaches_the_dashboard_for_offline_backfill():
+    from data_provider.fund_fetcher import FundProfile, NavRecord as NR
+    from src.services.fund_analysis import map_fund_report_to_report_result
+
+    profile = FundProfile(
+        code="003095",
+        name="测试基金",
+        nav_history=[NR(date="2026-09-18", unit_nav=1.9, acc_nav=1.9, change_pct=0.0)],
+    )
+    result = map_fund_report_to_report_result(build_fund_report(profile))
+    assert result.dashboard["latest_nav_date"] == "2026-09-18"
 
 
 def test_latest_nav_in_llm_prompt_comes_from_the_newest_record():

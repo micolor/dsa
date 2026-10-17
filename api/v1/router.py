@@ -20,6 +20,7 @@ from api.v1.endpoints import (
     backtest,
     data_quality,
     decision_signals,
+    fund_nav_reviews,
     health,
     history,
     intelligence,
@@ -105,6 +106,12 @@ router.include_router(
     decision_signals.router,
     prefix="/decision-signals",
     tags=["DecisionSignals"]
+)
+
+router.include_router(
+    fund_nav_reviews.router,
+    prefix="/fund-nav-reviews",
+    tags=["FundNavReviews"]
 )
 
 router.include_router(

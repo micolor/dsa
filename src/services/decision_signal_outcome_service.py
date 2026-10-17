@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 import logging
 import math
@@ -18,6 +18,16 @@ from src.repositories.decision_signal_outcome_repo import (
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.stock_repo import StockRepository
 from src.schemas.decision_profile import VALID_DECISION_PROFILES
+from src.services.decision_signal_benchmark_service import (
+    BENCHMARK_STATUS_AVAILABLE,
+    BENCHMARK_STATUS_ERROR,
+    BENCHMARK_STATUS_MISSING,
+    BENCHMARK_STATUS_UNSUPPORTED,
+    BenchmarkFetcher,
+    benchmark_code_for_market,
+    compute_benchmark_return,
+    ensure_benchmark_bars,
+)
 from src.services.decision_signal_data_quality import normalize_decision_signal_data_quality
 from src.services.decision_signal_service import (
     HORIZONS,
@@ -31,6 +41,7 @@ from src.storage import (
     DecisionSignalFeedbackRecord,
     DecisionSignalOutcomeRecord,
     DecisionSignalRecord,
+    utc_naive_now,
 )
 from src.utils.sanitize import sanitize_decision_signal_text
 
@@ -59,6 +70,19 @@ RETRYABLE_UNABLE_REASONS = frozenset({
 })
 BATCH_CANDIDATE_SCAN_PAGE_SIZE = 500
 MIN_PROFILE_CALIBRATION_SAMPLE_SIZE = 30
+BENCHMARK_BACKFILL_BATCH_SIZE = 200
+BENCHMARK_BACKFILL_COOLDOWN = timedelta(hours=6)
+STATS_BREAKDOWN_DIMENSIONS = (
+    "action",
+    "market",
+    "month",
+    "market_phase",
+    "source_type",
+    "source_agent",
+    "plan_quality",
+    "data_quality_level",
+    "holding_state",
+)
 PROFILE_SOURCES = frozenset({
     "auto_default",
     "backfill_defaulted",
@@ -88,10 +112,15 @@ class DecisionSignalOutcomeService:
         signal_repo: Optional[DecisionSignalRepository] = None,
         stock_repo: Optional[StockRepository] = None,
         db_manager: Optional[DatabaseManager] = None,
+        fetch_missing_benchmark: bool = False,
+        benchmark_fetcher: Optional[BenchmarkFetcher] = None,
     ):
         self.repo = repo or DecisionSignalOutcomeRepository(db_manager)
         self.signal_repo = signal_repo or DecisionSignalRepository(db_manager)
         self.stock_repo = stock_repo or StockRepository(db_manager)
+        self.db_manager = db_manager or self.repo.db
+        self.fetch_missing_benchmark = bool(fetch_missing_benchmark)
+        self.benchmark_fetcher = benchmark_fetcher
 
     def run_outcomes(
         self,
@@ -105,6 +134,7 @@ class DecisionSignalOutcomeService:
         source_type: Optional[str] = None,
         status: Optional[str] = None,
         limit: int = 100,
+        fetch_missing_benchmark: Optional[bool] = None,
     ) -> Dict[str, Any]:
         signal_id_norm = self._optional_positive_int(signal_id, "signal_id")
         market_norm = DecisionSignalService._normalize_optional_market(market)
@@ -156,7 +186,13 @@ class DecisionSignalOutcomeService:
                 )
                 if existing is not None and not force and not self._should_recompute_outcome(existing):
                     skipped_count += 1
-                    items.append(self._serialize_outcome(existing))
+                    items.append(
+                        self._serialize_outcome(
+                            existing,
+                            stock_code=signal.stock_code,
+                            stock_name=signal.stock_name,
+                        )
+                    )
                     continue
 
                 fields = self._evaluate_signal_horizon(signal, horizon)
@@ -165,7 +201,21 @@ class DecisionSignalOutcomeService:
                     created_count += 1
                 else:
                     updated_count += 1
-                items.append(self._serialize_outcome(row))
+                items.append(
+                    self._serialize_outcome(
+                        row,
+                        stock_code=signal.stock_code,
+                        stock_name=signal.stock_name,
+                    )
+                )
+
+        should_backfill_benchmarks = (
+            self.fetch_missing_benchmark
+            if fetch_missing_benchmark is None
+            else bool(fetch_missing_benchmark)
+        )
+        if should_backfill_benchmarks:
+            self._backfill_benchmarks()
 
         return {
             "items": items,
@@ -175,6 +225,122 @@ class DecisionSignalOutcomeService:
             "skipped": skipped_count,
             "engine_version": DECISION_SIGNAL_OUTCOME_ENGINE_VERSION,
         }
+
+    def _backfill_benchmarks(self) -> None:
+        """Fill benchmark components for completed outcomes, outside candidate scan.
+
+        Historical completed rows are not made retryable in
+        `_should_recompute_outcome`: doing so would crowd recoverable unable
+        rows out of the candidate scan and rewrite `updated_at`.
+        """
+        now = utc_naive_now()
+        checked_before = now - BENCHMARK_BACKFILL_COOLDOWN
+        ledger_rows = self.repo.list_outcomes_needing_benchmark(
+            engine_version=DECISION_SIGNAL_OUTCOME_ENGINE_VERSION,
+            checked_before=checked_before,
+            limit=BENCHMARK_BACKFILL_BATCH_SIZE,
+        )
+        attempted: set = set()
+        for ledger in ledger_rows:
+            outcome = ledger.outcome
+            benchmark_code = benchmark_code_for_market(outcome.market)
+            if benchmark_code is None:
+                self.repo.update_benchmark_fields(
+                    outcome_id=outcome.id,
+                    fields={
+                        "benchmark_code": None,
+                        "benchmark_return_pct": None,
+                        "excess_return_pct": None,
+                        "benchmark_status": BENCHMARK_STATUS_UNSUPPORTED,
+                        "benchmark_checked_at": now,
+                    },
+                )
+                continue
+
+            window_end_date = self._stock_window_end_date(ledger, outcome)
+            if window_end_date is None:
+                self.repo.update_benchmark_fields(
+                    outcome_id=outcome.id,
+                    fields={
+                        "benchmark_code": benchmark_code,
+                        "benchmark_return_pct": None,
+                        "excess_return_pct": None,
+                        "benchmark_status": BENCHMARK_STATUS_MISSING,
+                        "benchmark_checked_at": now,
+                    },
+                )
+                continue
+
+            key = (benchmark_code, outcome.anchor_date, window_end_date)
+            fetch_failed = False
+            if key not in attempted:
+                attempted.add(key)
+                try:
+                    fetch_failed = not ensure_benchmark_bars(
+                        db_manager=self.db_manager,
+                        benchmark_code=benchmark_code,
+                        anchor_date=outcome.anchor_date,
+                        window_end_date=window_end_date,
+                        fetcher=self.benchmark_fetcher,
+                    )
+                except Exception as exc:
+                    logger.warning("基准日线补全异常(%s): %s", benchmark_code, exc)
+                    fetch_failed = True
+
+            try:
+                benchmark = compute_benchmark_return(
+                    stock_repo=self.stock_repo,
+                    benchmark_code=benchmark_code,
+                    anchor_date=outcome.anchor_date,
+                    window_end_date=window_end_date,
+                )
+            except Exception as exc:
+                logger.warning("基准收益计算失败(%s): %s", benchmark_code, exc)
+                benchmark = {
+                    "benchmark_status": BENCHMARK_STATUS_ERROR,
+                    "benchmark_return_pct": None,
+                }
+
+            status = benchmark["benchmark_status"]
+            if status != BENCHMARK_STATUS_AVAILABLE and fetch_failed:
+                status = BENCHMARK_STATUS_ERROR
+            benchmark_return_pct = benchmark["benchmark_return_pct"]
+            stock_value = self._finite_float(outcome.stock_return_pct)
+            excess_return_pct = (
+                stock_value - float(benchmark_return_pct)
+                if benchmark_return_pct is not None and stock_value is not None
+                else None
+            )
+            self.repo.update_benchmark_fields(
+                outcome_id=outcome.id,
+                fields={
+                    "benchmark_code": benchmark_code,
+                    "benchmark_return_pct": benchmark_return_pct,
+                    "excess_return_pct": excess_return_pct,
+                    "benchmark_status": status,
+                    "benchmark_checked_at": now,
+                },
+            )
+
+    def _stock_window_end_date(self, ledger: Any, outcome: DecisionSignalOutcomeRecord) -> Optional[date]:
+        stock_code = getattr(ledger, "stock_code", None)
+        if not stock_code or outcome.anchor_date is None:
+            return None
+        eval_days = outcome.eval_window_days
+        if not eval_days:
+            return None
+        try:
+            forward_bars = self.stock_repo.get_forward_bars(
+                code=stock_code,
+                analysis_date=outcome.anchor_date,
+                eval_window_days=int(eval_days),
+            )
+        except Exception as exc:
+            logger.warning("读取股票窗口结束日失败(%s): %s", stock_code, exc)
+            return None
+        if len(forward_bars) < int(eval_days):
+            return None
+        return forward_bars[int(eval_days) - 1].date
 
     def _list_actionable_candidate_signals(
         self,
@@ -284,6 +450,10 @@ class DecisionSignalOutcomeService:
         engine_version: Optional[str] = None,
         eval_status: Optional[str] = None,
         outcome: Optional[str] = None,
+        market: Optional[str] = None,
+        action: Optional[str] = None,
+        anchor_from: Optional[Any] = None,
+        anchor_to: Optional[Any] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
@@ -292,6 +462,12 @@ class DecisionSignalOutcomeService:
         engine_version_norm = str(engine_version or DECISION_SIGNAL_OUTCOME_ENGINE_VERSION).strip()
         eval_status_norm = self._normalize_optional_enum(eval_status, EVAL_STATUSES, "eval_status")
         outcome_norm = self._normalize_optional_enum(outcome, OUTCOME_VALUES, "outcome")
+        market_norm = DecisionSignalService._normalize_optional_market(market)
+        action_norm = DecisionSignalService._normalize_optional_action(action)
+        anchor_from_norm = self._optional_date(anchor_from, "anchor_from")
+        anchor_to_norm = self._optional_date(anchor_to, "anchor_to")
+        if anchor_from_norm and anchor_to_norm and anchor_from_norm > anchor_to_norm:
+            raise ValueError("anchor_from must be on or before anchor_to")
         safe_page = max(1, int(page))
         safe_page_size = max(1, min(int(page_size), 100))
         rows, total = self.repo.list_outcomes(
@@ -300,15 +476,39 @@ class DecisionSignalOutcomeService:
             engine_version=engine_version_norm,
             eval_status=eval_status_norm,
             outcome=outcome_norm,
+            market=market_norm,
+            action=action_norm,
+            anchor_from=anchor_from_norm,
+            anchor_to=anchor_to_norm,
             page=safe_page,
             page_size=safe_page_size,
         )
         return {
-            "items": [self._serialize_outcome(row) for row in rows],
+            "items": [
+                self._serialize_outcome(
+                    ledger.outcome,
+                    stock_code=ledger.stock_code,
+                    stock_name=ledger.stock_name,
+                )
+                for ledger in rows
+            ],
             "total": total,
             "page": safe_page,
             "page_size": safe_page_size,
         }
+
+    @staticmethod
+    def _optional_date(value: Any, field: str) -> Optional[date]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(str(value))
+        except ValueError as exc:
+            raise ValueError(f"{field} must be an ISO date") from exc
 
     def list_signal_outcomes(self, signal_id: int) -> Dict[str, Any]:
         signal_id_norm = self._require_existing_signal(signal_id).id
@@ -339,19 +539,9 @@ class DecisionSignalOutcomeService:
             statuses=statuses_norm,
         )
         rows = [stats_row.outcome for stats_row in stats_rows]
-        dimensions = (
-            "action",
-            "market",
-            "market_phase",
-            "source_type",
-            "source_agent",
-            "plan_quality",
-            "data_quality_level",
-            "holding_state",
-        )
         breakdowns = {
             dimension: self._breakdown(rows, dimension)
-            for dimension in dimensions
+            for dimension in STATS_BREAKDOWN_DIMENSIONS
         }
         return {
             **self._aggregate(rows),
@@ -447,7 +637,7 @@ class DecisionSignalOutcomeService:
                 engine_version=DECISION_SIGNAL_OUTCOME_ENGINE_VERSION,
             ),
         )
-        return {
+        fields = {
             **base,
             "eval_status": evaluation.get("eval_status"),
             "outcome": evaluation.get("outcome"),
@@ -461,6 +651,83 @@ class DecisionSignalOutcomeService:
             "max_high": evaluation.get("max_high"),
             "min_low": evaluation.get("min_low"),
             "stock_return_pct": evaluation.get("stock_return_pct"),
+        }
+        if evaluation.get("eval_status") == "completed":
+            fields.update(
+                self._local_benchmark_fields(
+                    market=signal.market,
+                    anchor_date=anchor_date,
+                    forward_bars=forward_bars,
+                    eval_days=eval_days,
+                    stock_return_pct=evaluation.get("stock_return_pct"),
+                )
+            )
+        return fields
+
+    def _local_benchmark_fields(
+        self,
+        *,
+        market: Optional[str],
+        anchor_date: date,
+        forward_bars: List[Any],
+        eval_days: int,
+        stock_return_pct: Optional[float],
+    ) -> Dict[str, Any]:
+        """Compute benchmark fields from local bars only; never fetches here."""
+        benchmark_code = benchmark_code_for_market(market)
+        if benchmark_code is None:
+            return {
+                "benchmark_code": None,
+                "benchmark_return_pct": None,
+                "excess_return_pct": None,
+                "benchmark_status": BENCHMARK_STATUS_UNSUPPORTED,
+                "benchmark_checked_at": utc_naive_now(),
+            }
+
+        if len(forward_bars) < eval_days:
+            return {
+                "benchmark_code": benchmark_code,
+                "benchmark_return_pct": None,
+                "excess_return_pct": None,
+                "benchmark_status": BENCHMARK_STATUS_MISSING,
+                "benchmark_checked_at": None,
+            }
+
+        window_end_date = forward_bars[eval_days - 1].date
+        try:
+            benchmark = compute_benchmark_return(
+                stock_repo=self.stock_repo,
+                benchmark_code=benchmark_code,
+                anchor_date=anchor_date,
+                window_end_date=window_end_date,
+            )
+        except Exception as exc:
+            logger.warning("基准收益计算失败(%s): %s", benchmark_code, exc)
+            return {
+                "benchmark_code": benchmark_code,
+                "benchmark_return_pct": None,
+                "excess_return_pct": None,
+                "benchmark_status": BENCHMARK_STATUS_ERROR,
+                "benchmark_checked_at": utc_naive_now(),
+            }
+
+        benchmark_return_pct = benchmark["benchmark_return_pct"]
+        excess_return_pct = None
+        stock_value = self._finite_float(stock_return_pct)
+        if benchmark_return_pct is not None and stock_value is not None:
+            excess_return_pct = stock_value - float(benchmark_return_pct)
+        return {
+            "benchmark_code": benchmark_code,
+            "benchmark_return_pct": benchmark_return_pct,
+            "excess_return_pct": excess_return_pct,
+            "benchmark_status": benchmark["benchmark_status"],
+            # A local miss stays NULL so the same run's backfill can try the
+            # network immediately; failures recorded by backfill get cooldown.
+            "benchmark_checked_at": (
+                utc_naive_now()
+                if benchmark["benchmark_status"] == BENCHMARK_STATUS_AVAILABLE
+                else None
+            ),
         }
 
     @staticmethod
@@ -599,6 +866,14 @@ class DecisionSignalOutcomeService:
         return None
 
     @staticmethod
+    def _finite_float(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    @staticmethod
     def _is_positive_finite(value: Any) -> bool:
         try:
             number = float(value)
@@ -670,10 +945,17 @@ class DecisionSignalOutcomeService:
         return text
 
     @staticmethod
-    def _serialize_outcome(row: DecisionSignalOutcomeRecord) -> Dict[str, Any]:
+    def _serialize_outcome(
+        row: DecisionSignalOutcomeRecord,
+        *,
+        stock_code: Optional[str] = None,
+        stock_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return {
             "id": row.id,
             "signal_id": row.signal_id,
+            "stock_code": stock_code,
+            "stock_name": stock_name,
             "horizon": row.horizon,
             "engine_version": row.engine_version,
             "eval_status": row.eval_status,
@@ -688,6 +970,10 @@ class DecisionSignalOutcomeService:
             "max_high": row.max_high,
             "min_low": row.min_low,
             "stock_return_pct": row.stock_return_pct,
+            "benchmark_code": row.benchmark_code,
+            "benchmark_return_pct": row.benchmark_return_pct,
+            "excess_return_pct": row.excess_return_pct,
+            "benchmark_status": row.benchmark_status,
             "action": row.action,
             "market": row.market,
             "market_phase": row.market_phase,
@@ -781,6 +1067,15 @@ class DecisionSignalOutcomeService:
             "sample_sufficient": sample_sufficient,
             "hit_rate_pct": aggregate["hit_rate_pct"] if sample_sufficient else None,
             "avg_stock_return_pct": aggregate["avg_stock_return_pct"] if sample_sufficient else None,
+            "avg_benchmark_return_pct": (
+                aggregate["avg_benchmark_return_pct"] if sample_sufficient else None
+            ),
+            "avg_excess_return_pct": (
+                aggregate["avg_excess_return_pct"] if sample_sufficient else None
+            ),
+            "benchmark_coverage_pct": (
+                aggregate["benchmark_coverage_pct"] if sample_sufficient else None
+            ),
             "miss_rate_pct": (
                 round(int(aggregate["miss"]) / direction_denominator * 100, 2)
                 if sample_sufficient and direction_denominator
@@ -831,8 +1126,12 @@ class DecisionSignalOutcomeService:
     def _breakdown(self, rows: List[DecisionSignalOutcomeRecord], dimension: str) -> List[Dict[str, Any]]:
         grouped: Dict[str, List[DecisionSignalOutcomeRecord]] = defaultdict(list)
         for row in rows:
-            value = getattr(row, dimension, None)
-            key = str(value or "unknown")
+            if dimension == "month":
+                anchor_date = row.anchor_date
+                key = anchor_date.strftime("%Y-%m") if anchor_date else "unknown"
+            else:
+                value = getattr(row, dimension, None)
+                key = str(value or "unknown")
             grouped[key].append(row)
         buckets = [
             {
@@ -842,6 +1141,14 @@ class DecisionSignalOutcomeService:
             }
             for value, bucket_rows in grouped.items()
         ]
+        if dimension == "month":
+            return sorted(
+                buckets,
+                key=lambda item: (
+                    str(item["value"]) == "unknown",
+                    str(item["value"]),
+                ),
+            )
         return sorted(buckets, key=lambda item: (-int(item["total"]), str(item["value"])))
 
     @staticmethod
@@ -858,6 +1165,21 @@ class DecisionSignalOutcomeService:
             for row in completed
             if row.stock_return_pct is not None
         ]
+        benchmark_returns = [
+            float(row.benchmark_return_pct)
+            for row in completed
+            if row.benchmark_return_pct is not None
+        ]
+        excess_returns = [
+            float(row.excess_return_pct)
+            for row in completed
+            if row.excess_return_pct is not None
+        ]
+        benchmark_available = sum(
+            1
+            for row in completed
+            if row.benchmark_status == BENCHMARK_STATUS_AVAILABLE
+        )
         unable_reasons = Counter(row.unable_reason or "unknown" for row in unable)
         return {
             "total": total,
@@ -868,5 +1190,21 @@ class DecisionSignalOutcomeService:
             "neutral": neutral,
             "hit_rate_pct": round(hit / denominator * 100, 2) if denominator else None,
             "avg_stock_return_pct": round(sum(returns) / len(returns), 4) if returns else None,
+            "benchmark_available": benchmark_available,
+            "benchmark_coverage_pct": (
+                round(benchmark_available / len(completed) * 100, 2)
+                if completed
+                else None
+            ),
+            "avg_benchmark_return_pct": (
+                round(sum(benchmark_returns) / len(benchmark_returns), 4)
+                if benchmark_returns
+                else None
+            ),
+            "avg_excess_return_pct": (
+                round(sum(excess_returns) / len(excess_returns), 4)
+                if excess_returns
+                else None
+            ),
             "unable_reasons": dict(sorted(unable_reasons.items())),
         }
