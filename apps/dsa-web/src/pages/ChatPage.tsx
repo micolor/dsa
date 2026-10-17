@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -27,6 +27,7 @@ import {
   sanitizeFollowUpStockName,
 } from '../utils/chatFollowUp';
 import { isNearBottom } from '../utils/chatScroll';
+import { useEscTopLayer } from '../hooks/useEscTopLayer';
 import { getReportText } from '../utils/reportLanguage';
 import { extractStockCodesFromMessage } from '../utils/chatStockCode';
 import { findMatchingStockCode, includesStockCode, normalizeStockCode } from '../utils/stockCode';
@@ -314,6 +315,9 @@ const ChatPage: React.FC = () => {
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const skillPickerContainerRef = useRef<HTMLDivElement>(null);
+  const { modalRef: skillPickerLayerRef, isCovered: isSkillPickerCovered } = useEscTopLayer();
   const isMountedRef = useRef(true);
   const followUpHydrationTokenRef = useRef(0);
   const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
@@ -500,6 +504,62 @@ const ChatPage: React.FC = () => {
     setShowJumpToBottom(false);
   }, []);
 
+  // 输入框只有 placeholder 时不会触发 onInput，高度会停在 rows={1} 的 44px；
+  // 窄屏下 placeholder 折成多行就被裁掉。挂载、输入和窗口尺寸变化时都按内容重算。
+  const resizeInputTextarea = useCallback(() => {
+    const el = inputTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeInputTextarea();
+  }, [input, resizeInputTextarea]);
+
+  useEffect(() => {
+    window.addEventListener('resize', resizeInputTextarea);
+    return () => window.removeEventListener('resize', resizeInputTextarea);
+  }, [resizeInputTextarea]);
+
+  // 策略面板浮在消息区上：点面板和按钮以外的位置、或按 Esc 收起。
+  // 上面还压着别的浮层时 Esc 让位，规则见 `useEscTopLayer`。
+  useEffect(() => {
+    if (!mobileSkillPickerOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!skillPickerContainerRef.current?.contains(event.target as Node)) {
+        setMobileSkillPickerOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSkillPickerCovered()) {
+        setMobileSkillPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileSkillPickerOpen, isSkillPickerCovered]);
+
+  // 面板向上浮在按钮上方：矮屏或输入框撑高后，按钮到视口顶部的距离可能小于面板内容高度
+  // （375px 高的横屏只有约 175px），按实际可用空间收紧 max-height，避免面板顶部被裁掉。
+  useLayoutEffect(() => {
+    const container = skillPickerContainerRef.current;
+    if (!container || !mobileSkillPickerOpen) return;
+    const updateMaxHeight = () => {
+      container.style.setProperty(
+        '--skill-picker-max-h',
+        `${Math.max(96, container.getBoundingClientRect().top - 16)}px`,
+      );
+    };
+    updateMaxHeight();
+    window.addEventListener('resize', updateMaxHeight);
+    return () => window.removeEventListener('resize', updateMaxHeight);
+  }, [mobileSkillPickerOpen, input]);
+
   const handleMessagesScroll = useCallback(() => {
     syncScrollState();
   }, [syncScrollState]);
@@ -524,6 +584,16 @@ const ChatPage: React.FC = () => {
   }, [sessionId, messages.length, requestScrollToBottom, scrollToBottom]);
 
   useEffect(() => {
+    // 空态没有「最新消息」可看：首次挂载时滚到底会把欢迎卡片的上半截推出视口，
+    // 窄屏上标题和输入示例都看不到。切到空会话时容器还沿用上一段对话的 scrollTop
+    // （浏览器只会把它夹到新的最大滚动值），显式回到顶部。
+    if (messages.length === 0 && progressSteps.length === 0 && !loading) {
+      const viewport = messagesViewportRef.current;
+      if (viewport && viewport.scrollTop > 0) {
+        viewport.scrollTo({ top: 0 });
+      }
+      return;
+    }
     const behavior = pendingScrollBehaviorRef.current;
     const shouldAutoScroll = shouldStickToBottomRef.current;
     if (!shouldAutoScroll) {
@@ -1478,7 +1548,7 @@ const ChatPage: React.FC = () => {
         <div className="mb-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
+            className="lg:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
             aria-label={t('chat.historyTitle')}
           >
             <svg
@@ -1594,15 +1664,16 @@ const ChatPage: React.FC = () => {
 
         {/* Content row: sidebar + main chat */}
         <div className="flex min-h-0 flex-1 gap-4">
-          {/* Desktop sidebar */}
-          <div className="hidden w-64 flex-shrink-0 flex-col overflow-hidden glass-card md:flex">
+          {/* Desktop sidebar：768–1023px 宽度下常驻侧栏会把正文挤到 ~460px，
+              长回复每行只剩二十来个字；这段宽度改用抽屉，1024px 起才常驻。 */}
+          <div className="hidden w-64 flex-shrink-0 flex-col overflow-hidden glass-card lg:flex">
             {sidebarContent}
           </div>
 
           {/* Mobile sidebar overlay */}
           {sidebarOpen && (
             <div
-              className="fixed inset-0 z-40 md:hidden"
+              className="fixed inset-0 z-40 lg:hidden"
               onClick={() => setSidebarOpen(false)}
             >
               <div className="page-drawer-overlay absolute inset-0" />
@@ -1680,12 +1751,14 @@ const ChatPage: React.FC = () => {
                 return (
                 <div
                   key={msg.id}
-                  className={`flex ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  className={`mx-auto flex w-full max-w-[52rem] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
                   {/* 不再渲染头像：一行的两边直接由内容自己交代 —— 用户气泡贴右、
-                      AI 回复占满整行。左右各让出的 48px（32px 头像 + 16px gap）回到正文宽度。
-                      AI 回复不是气泡（flex-1，不收窄到内容宽度、也不压 48rem 上限），没有内边距，
-                      文字与面板内边距对齐；用户气泡保持 w-fit + 48rem 上限 + 自己的 chip 内边距。 */}
+                      AI 回复左侧起排。左右各让出的 48px（32px 头像 + 16px gap）回到正文宽度。
+                      AI 回复不是气泡（不收缩到内容宽度、没有内边距），文字与面板内边距对齐。
+                      整列对话压一个 52rem 的阅读宽度上限并居中：宽屏上正文不会拉出上百字符的长行，
+                      面板更宽时两侧均匀留白，用户气泡也贴在这条列宽的内侧，而不是漂到面板最右。
+                      用户气泡保持 w-fit + 48rem 上限 + 自己的 chip 内边距。 */}
                   <div
                     className={cn(
                       'group/message min-w-0 overflow-hidden py-3.5 transition-colors',
@@ -1833,7 +1906,10 @@ const ChatPage: React.FC = () => {
               onDrop={handleImageDrop}
               onDragOver={(e) => e.preventDefault()}
             >
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2">
+              {/* 上下文压缩和「策略 ▾」都是单行控件，各自占一整行时白白吃掉 ~52px 高度，
+                  在 756/600 这类矮窗口里直接挤占消息区。sm 以上并排放，更窄仍上下堆叠。 */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2 sm:flex-1 sm:basis-64">
                 <label
                   className={cn(
                     'inline-flex items-center gap-2 text-sm',
@@ -1861,10 +1937,14 @@ const ChatPage: React.FC = () => {
                 </span>
               </div>
               {skills.length > 0 && (
-                <div className="space-y-2">
+                <div ref={skillPickerContainerRef} className="relative space-y-2 sm:flex-1 sm:basis-64">
+                  {/* 13 个策略勾选项全展开时会铺成 2–3 行（约 50–100px），在低分辨率或
+                      低高度窗口里把消息区挤掉一大块；所有宽度统一收进这个「策略 ▾」折叠控件，
+                      选中项由右侧摘要交代。面板浮在消息区上方而不是把输入区撑高，
+                      打开时消息区高度不变。 */}
                   <button
                     type="button"
-                    className="home-surface-button flex h-10 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-foreground md:hidden"
+                    className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 text-left text-sm text-foreground transition-colors hover:border-white/12 hover:bg-surface/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-label={mobileSkillPickerOpen ? '收起策略选择' : '展开策略选择'}
                     aria-expanded={mobileSkillPickerOpen}
                     aria-controls="chat-skill-picker-panel"
@@ -1885,11 +1965,13 @@ const ChatPage: React.FC = () => {
                     />
                   </button>
                   <div
+                    ref={skillPickerLayerRef}
                     id="chat-skill-picker-panel"
                     data-testid="chat-skill-picker-panel"
+                    data-esc-layer="true"
                     className={cn(
                       mobileSkillPickerOpen ? 'flex' : 'hidden',
-                      'max-h-40 flex-wrap items-start gap-x-5 gap-y-2 overflow-y-auto rounded-xl border border-white/6 bg-surface/25 px-3 py-2 md:flex md:max-h-none md:overflow-visible md:border-0 md:bg-transparent md:p-0',
+                      'absolute bottom-full left-0 right-0 z-30 mb-2 max-h-[min(16rem,var(--skill-picker-max-h,50vh))] flex-wrap items-start gap-x-5 gap-y-2 overflow-y-auto rounded-xl border border-border/60 bg-card/95 px-3 py-2 shadow-soft-card backdrop-blur-xl',
                     )}
                   >
                     <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
@@ -1946,6 +2028,7 @@ const ChatPage: React.FC = () => {
                   </div>
                 </div>
               )}
+              </div>
 
             {activeStockCode && (
               <div className="flex items-center gap-2">
@@ -2011,6 +2094,7 @@ const ChatPage: React.FC = () => {
 
               <div className="flex items-end gap-3">
                 <textarea
+                  ref={inputTextareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -2027,12 +2111,7 @@ const ChatPage: React.FC = () => {
                   disabled={loading || !agentAvailable}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ height: 'auto' }}
-                  onInput={(e) => {
-                    const t = e.target as HTMLTextAreaElement;
-                    t.style.height = 'auto';
-                    t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
-                  }}
+                  onInput={resizeInputTextarea}
                 />
                 {loading ? (
                   <Button
