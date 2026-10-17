@@ -194,6 +194,8 @@ export const PaperTradingPage: React.FC = () => {
             value={backfillFrom}
             onChange={setBackfillFrom}
             placeholder={text.backfill}
+            /* 占位符与右侧按钮文案同字面，不单独给名字读屏会把两个控件念成同一个。 */
+            ariaLabel={text.backfillAria}
             className="h-9 w-44"
           />
           <button
@@ -254,6 +256,8 @@ export const PaperTradingPage: React.FC = () => {
                 key={key}
                 type="button"
                 onClick={() => handleTabChange(key)}
+                // 选中态只体现在配色上，读屏听不出当前是哪个 Tab；这里补上 aria-pressed。
+                aria-pressed={activeSection === key}
                 className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                   activeSection === key
                     ? 'bg-[var(--nav-active-bg)] text-[hsl(var(--primary))]'

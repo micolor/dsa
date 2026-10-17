@@ -131,6 +131,20 @@ describe('BacktestPage', () => {
     expect(screen.getByText('平均模拟收益')).toBeInTheDocument();
   });
 
+  // 参数行的可见文案在相邻的 span 里，不是 label。这里的输入框/下拉框因此要么没有可访问名称，
+  // 要么只剩 placeholder（「10」「14」）当名字，读屏会把占位提示念成字段名。
+  it('exposes accessible names for the evaluation window, phase and min-age controls', async () => {
+    render(<BacktestPage />);
+
+    expect(await screen.findByLabelText('评估窗口（交易日天数）')).toBeInTheDocument();
+    expect(screen.getByLabelText('阶段筛选')).toBeInTheDocument();
+    expect(screen.getByLabelText('最小天龄（天数）')).toBeInTheDocument();
+
+    // 同排两个日期框空着时，名字必须能区分「开始」和「结束」。
+    expect(screen.getByRole('button', { name: '分析开始日期' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '分析结束日期' })).toBeInTheDocument();
+  });
+
   it('falls back to the taxonomy label when backtest actionLabel is missing', async () => {
     mockGetResults.mockResolvedValueOnce({
       total: 1,
@@ -256,8 +270,9 @@ describe('BacktestPage', () => {
     const filterInput = await screen.findByPlaceholderText('按股票代码筛选（留空表示全部）');
     const windowInput = screen.getByPlaceholderText('10');
     const phaseSelect = screen.getByDisplayValue('全部阶段');
-    const fromInput = screen.getByLabelText('分析开始日期');
-    const toInput = screen.getByLabelText('分析结束日期');
+    // 触发按钮也带同一个字段名，这里要的是隐藏的原生 date 输入（真正接值的那个）。
+    const fromInput = screen.getByLabelText('分析开始日期', { selector: 'input[type="date"]' });
+    const toInput = screen.getByLabelText('分析结束日期', { selector: 'input[type="date"]' });
 
     fireEvent.change(filterInput, { target: { value: 'aapl' } });
     fireEvent.change(windowInput, { target: { value: '20' } });
@@ -299,8 +314,9 @@ describe('BacktestPage', () => {
 
     const filterInput = await screen.findByPlaceholderText('按股票代码筛选（留空表示全部）');
     const windowInput = screen.getByPlaceholderText('10');
-    const fromInput = screen.getByLabelText('分析开始日期');
-    const toInput = screen.getByLabelText('分析结束日期');
+    // 触发按钮也带同一个字段名，这里要的是隐藏的原生 date 输入（真正接值的那个）。
+    const fromInput = screen.getByLabelText('分析开始日期', { selector: 'input[type="date"]' });
+    const toInput = screen.getByLabelText('分析结束日期', { selector: 'input[type="date"]' });
 
     fireEvent.change(filterInput, { target: { value: '600519.SH' } });
     fireEvent.change(windowInput, { target: { value: '15' } });
@@ -357,8 +373,9 @@ describe('BacktestPage', () => {
 
     const filterInput = await screen.findByPlaceholderText('按股票代码筛选（留空表示全部）');
     const windowInput = screen.getByPlaceholderText('10');
-    const fromInput = screen.getByLabelText('分析开始日期');
-    const toInput = screen.getByLabelText('分析结束日期');
+    // 触发按钮也带同一个字段名，这里要的是隐藏的原生 date 输入（真正接值的那个）。
+    const fromInput = screen.getByLabelText('分析开始日期', { selector: 'input[type="date"]' });
+    const toInput = screen.getByLabelText('分析结束日期', { selector: 'input[type="date"]' });
 
     fireEvent.change(filterInput, { target: { value: '600519.SH' } });
     fireEvent.change(windowInput, { target: { value: '' } });

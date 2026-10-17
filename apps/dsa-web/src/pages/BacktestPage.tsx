@@ -622,6 +622,7 @@ const BacktestPage: React.FC = () => {
                 value={evalDays}
                 onChange={(e) => setEvalDays(e.target.value)}
                 onBlur={handleEvalWindowBlur}
+                aria-label={text.evalWindowAria}
                 placeholder="10"
                 disabled={isRunning}
                 className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24 text-center tabular-nums`}
@@ -665,6 +666,7 @@ const BacktestPage: React.FC = () => {
               <select
                 value={phaseFilter}
                 onChange={(e) => setPhaseFilter(e.target.value as BacktestPhaseFilter)}
+                aria-label={text.phaseAria}
                 disabled={isRunning}
                 className={`${SELECT_CHEVRON_CLASS} !h-10 w-28`}
               >
@@ -682,6 +684,7 @@ const BacktestPage: React.FC = () => {
                 min={0}
                 value={minAgeDays}
                 onChange={(e) => setMinAgeDays(e.target.value)}
+                aria-label={text.minAgeDaysAria}
                 placeholder="14"
                 disabled={isRunning}
                 className={`${BACKTEST_COMPACT_INPUT_CLASS} w-20 text-center tabular-nums`}

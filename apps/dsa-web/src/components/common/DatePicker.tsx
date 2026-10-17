@@ -181,6 +181,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
+        /* 按钮可见文案就是日期值（空时是占位符），所以名字要同时带上字段含义与当前值：
+           只给值，同排两个日期框会念成同一个名字；只给含义，当前选中日期就念不出来。 */
+        aria-label={ariaLabel ? (value ? `${ariaLabel}: ${value}` : ariaLabel) : undefined}
         className={cn(
           SELECT_INPUT_CLASS,
           'flex w-full items-center justify-between gap-2 pr-3 text-left',
@@ -198,7 +201,8 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         <div
           ref={attachPopup}
           role="dialog"
-          aria-label={t('common.selectDate')}
+          /* 同一个页面上可能有多个日期弹层，调用方给了字段名就用字段名，别再统一叫「选择日期」。 */
+          aria-label={ariaLabel ?? t('common.selectDate')}
           data-esc-layer="true"
           className="fixed z-[200] rounded-xl border border-border/60 bg-card/95 p-3 shadow-soft-card backdrop-blur-xl"
           style={{ ...popupStyle, maxHeight: '24rem', overflowY: 'auto' }}

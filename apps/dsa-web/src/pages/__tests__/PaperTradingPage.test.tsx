@@ -82,6 +82,19 @@ describe('PaperTradingPage', () => {
     expect(screen.getByText('No equity data')).toBeInTheDocument();
   });
 
+  // 回填日期框的占位符与右侧按钮同字面（都是「Backfill history」），
+  // 不给日期框单独命名，读屏会把这两个相邻控件念成同一个名字。
+  it('distinguishes the backfill date picker from the backfill button', async () => {
+    render(
+      <UiLanguageProvider>
+        <PaperTradingPage />
+      </UiLanguageProvider>
+    );
+
+    expect(await screen.findByRole('button', { name: 'Backfill start date' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Backfill history' })).toBeInTheDocument();
+  });
+
   it('renders an open position row', async () => {
     mockGetSnapshot.mockResolvedValue({
       ...emptySnapshot,
@@ -155,15 +168,22 @@ describe('PaperTradingPage', () => {
     expect(screen.getByRole('button', { name: 'Signals' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Trades' })).toBeInTheDocument();
 
+    // 选中态不能只靠配色：读屏要能从 aria-pressed 听出当前是哪个 Tab。
+    expect(screen.getByRole('button', { name: 'Positions' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Signals' })).toHaveAttribute('aria-pressed', 'false');
+
     // Switch to signals (positions are unmounted, so 贵州茅台 now refers to the signal row).
     screen.getByRole('button', { name: 'Signals' }).click();
     await waitFor(() => expect(screen.getByText('贵州茅台')).toBeInTheDocument());
     expect(screen.getByText('Buy')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Signals' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Positions' })).toHaveAttribute('aria-pressed', 'false');
 
     // Switch to trades.
     screen.getByRole('button', { name: 'Trades' }).click();
     await waitFor(() => expect(screen.getByText('测试')).toBeInTheDocument());
     expect(screen.getByText('Buy')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trades' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   // 翻页没有请求序号守卫时，先翻到第 3 页再翻回第 2 页，第 3 页的响应后到就会覆盖第 2 页：
