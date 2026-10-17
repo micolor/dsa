@@ -58,6 +58,9 @@ DSA_SCREENING_HOTSPOT_CACHE_PATH = DSA_SCREENING_DATA_DIR / "hotspots.json"
 DSA_SCREENING_HOTSPOT_HISTORY_PATH = DSA_SCREENING_DATA_DIR / "hotspot.history.jsonl"
 DSA_SCREENING_MIN_HOTSPOT_CACHE_COUNT = 3
 DSA_SCREENING_HOTSPOT_DETAIL_CACHE_TTL_SECONDS = 30 * 60
+# 热点快照只在手动刷新时更新，没有自动过期。超过这个时长仍照常返回，
+# 但要在 payload 里标 stale，让前端提示用户去刷新。
+DSA_SCREENING_HOTSPOT_CACHE_STALE_AFTER_SECONDS = 24 * 60 * 60
 DSA_SCREENING_HOTSPOT_EVENT_SUMMARY_MAX_CHARS = 90
 DSA_SCREENING_HOTSPOT_PREFETCH_DETAIL_COUNT = 8
 DSA_SCREENING_HOTSPOT_CALL_TIMEOUT_SECONDS = 8
@@ -299,6 +302,14 @@ def _load_screening_hotspot_cache(*, provider: str, top: int) -> Optional[Dict[s
         return None
 
     selected = hotspots[:top_count]
+    cached_at = raw.get("cached_at") or payload.get("cached_at")
+    stale = bool(payload.get("stale"))
+    stale_age_hours = payload.get("stale_age_hours")
+    cached_dt = _parse_cache_datetime(cached_at)
+    if cached_dt is not None:
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - cached_dt).total_seconds())
+        stale = stale or age_seconds > DSA_SCREENING_HOTSPOT_CACHE_STALE_AFTER_SECONDS
+        stale_age_hours = round(age_seconds / 3600.0, 1)
     cached = dict(payload)
     cached.update({
         "enabled": True,
@@ -306,7 +317,9 @@ def _load_screening_hotspot_cache(*, provider: str, top: int) -> Optional[Dict[s
         "hotspots": selected,
         "hotspot_count": len(selected),
         "cache_used": True,
-        "cached_at": raw.get("cached_at") or payload.get("cached_at"),
+        "cached_at": cached_at,
+        "stale": stale,
+        "stale_age_hours": stale_age_hours,
     })
     cached["source_errors"] = list(cached.get("source_errors") or [])
     return _remove_non_finite_json_values(cached)

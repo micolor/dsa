@@ -272,6 +272,36 @@ describe('StockScreeningPage', () => {
     });
   });
 
+  // 热点快照只有手动刷新才会更新，后端标了 stale 时页面必须提示，否则用户看到的
+  // 是几天前的题材却以为是最新的。
+  it('warns when the cached hotspot snapshot is stale', async () => {
+    getScreeningStatus.mockResolvedValueOnce({
+      enabled: true,
+      available: true,
+    });
+    getHotspots.mockResolvedValue({
+      enabled: true,
+      provider: 'akshare',
+      providerUsed: 'akshare',
+      cacheUsed: true,
+      cachedAt: '2026-06-07T08:00:00Z',
+      stale: true,
+      staleAgeHours: 50,
+      hotspots: [{ topic: 'AI算力', name: 'AI算力', heatScore: 88 }],
+      hotspotCount: 1,
+    });
+
+    render(<StockScreeningPage />);
+
+    await waitFor(() => expect(getHotspots).toHaveBeenCalled());
+    expect(await screen.findByText(/热点数据已 2 天未更新，展开后可点击/)).toBeInTheDocument();
+    expect(screen.getByText(/更新于 .*已 2 天未更新/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开热点题材/ }));
+
+    expect(await screen.findByText(/热点数据已 2 天未更新，点击/)).toBeInTheDocument();
+  });
+
   it('searches recent hotspot news only when requested and links the result', async () => {
     getScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
     getHotspots.mockResolvedValueOnce({

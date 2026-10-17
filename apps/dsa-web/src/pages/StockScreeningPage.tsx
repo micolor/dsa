@@ -730,6 +730,11 @@ const formatStockChangeText = (value: unknown) => {
   return formatted === '-' ? '暂无行情' : `${formatted}%`;
 };
 
+// 热点快照不会自动更新，越久越可能已经不是当前市场的主线。
+const formatHotspotStaleAge = (ageHours: number) => (
+  ageHours >= 24 ? `${Math.floor(ageHours / 24)} 天` : `${Math.max(1, Math.round(ageHours))} 小时`
+);
+
 const formatHotspotUpdatedAt = (value: string | null) => {
   if (!value) {
     return '待刷新';
@@ -902,6 +907,11 @@ const StockScreeningPage: React.FC = () => {
   const [candidates, setCandidates] = useState<ScreeningCandidate[]>(restoredResult?.candidates ?? []);
   const [hotspots, setHotspots] = useState<ScreeningHotspot[]>([]);
   const [hotspotsUpdatedAt, setHotspotsUpdatedAt] = useState<string | null>(null);
+  // 后端按 cached_at 计算出的过期标记；缓存没有自动刷新，需要据此提示用户手动刷新。
+  const [hotspotStaleness, setHotspotStaleness] = useState<{ stale: boolean; ageHours: number | null }>({
+    stale: false,
+    ageHours: null,
+  });
   const [hotspotsExpanded, setHotspotsExpanded] = useState(false);
   const [selectedHotspotTopic, setSelectedHotspotTopic] = useState<string | null>(null);
   const selectedHotspotTopicRef = useRef<string | null>(null);
@@ -1076,6 +1086,10 @@ const StockScreeningPage: React.FC = () => {
       hotspotsRef.current = nextHotspots;
       setHotspots(nextHotspots);
       setHotspotsUpdatedAt(result.cachedAt || (nextHotspots.length > 0 ? new Date().toISOString() : null));
+      setHotspotStaleness({
+        stale: Boolean(result.stale),
+        ageHours: typeof result.staleAgeHours === 'number' ? result.staleAgeHours : null,
+      });
       setSelectedHotspotTopic(nextTopic);
       selectedHotspotTopicRef.current = nextTopic;
       setHotspotDetailError('');
@@ -1421,6 +1435,11 @@ const StockScreeningPage: React.FC = () => {
     message,
   }));
 
+  const hotspotStaleAgeText = hotspotStaleness.ageHours != null
+    ? formatHotspotStaleAge(hotspotStaleness.ageHours)
+    : null;
+  const showHotspotStaleNotice = hotspotStaleness.stale && hotspots.length > 0;
+
   return (
     <AppPage className="space-y-6 pb-12 pt-6">
 
@@ -1463,7 +1482,18 @@ const StockScreeningPage: React.FC = () => {
           }
         />
         {hotspotsUpdatedAt ? (
-          <p className="mb-3 text-right text-xs text-secondary-text">更新于 {formatHotspotUpdatedAt(hotspotsUpdatedAt)}</p>
+          <p className={`mb-3 text-right text-xs ${showHotspotStaleNotice ? 'text-warning' : 'text-secondary-text'}`}>
+            更新于 {formatHotspotUpdatedAt(hotspotsUpdatedAt)}
+            {showHotspotStaleNotice && hotspotStaleAgeText ? `（已 ${hotspotStaleAgeText}未更新）` : ''}
+          </p>
+        ) : null}
+
+        {showHotspotStaleNotice ? (
+          <InlineAlert
+            variant="warning"
+            className="mb-3"
+            message={`热点数据${hotspotStaleAgeText ? `已 ${hotspotStaleAgeText}未更新` : '可能已过期'}，${hotspotsExpanded ? '点击“刷新热点题材”获取最新数据。' : '展开后可点击“刷新热点题材”获取最新数据。'}`}
+          />
         ) : null}
 
         {hotspotsExpanded && hotspotError ? (

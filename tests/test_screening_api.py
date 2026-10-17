@@ -12,7 +12,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -516,6 +516,55 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["hotspot_count"], 1)
         self.assertEqual(payload["hotspots"][0]["topic"], "玻璃基板")
         discover.assert_not_called()
+
+    def _hotspots_with_cached_at(self, cached_at: str) -> Dict[str, Any]:
+        config = self._config(enabled=True)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "hotspots.json"
+            cache_path.write_text(
+                json.dumps({
+                    "cached_at": cached_at,
+                    "payload": {
+                        "enabled": True,
+                        "provider": "akshare",
+                        "cache_used": False,
+                        "cached_at": cached_at,
+                        "hotspots": [
+                            {"topic": "玻璃基板", "heat_score": 88.0},
+                            {"topic": "机器人执行器", "heat_score": 80.0},
+                            {"topic": "固态电池", "heat_score": 76.0},
+                        ],
+                        "hotspot_count": 3,
+                    },
+                }),
+                encoding="utf-8",
+            )
+            with (
+                patch("src.services.screening_service.DSA_SCREENING_HOTSPOT_CACHE_PATH", cache_path),
+                patch("src.services.screening_service._get_screening_status_snapshot", return_value=({}, True, {})),
+            ):
+                return self._hotspots(config=config, provider="akshare", top=3, refresh=False)
+
+    def test_hotspots_marks_day_old_cache_as_stale(self) -> None:
+        # 热点快照没有自动过期，只按手动刷新更新；超过一天的缓存仍然可用，
+        # 但必须让调用方知道它已经旧了，否则页面上的「更新于」看不出问题。
+        cached_at = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = self._hotspots_with_cached_at(cached_at)
+
+        self.assertTrue(payload["cache_used"])
+        self.assertTrue(payload["stale"])
+        self.assertAlmostEqual(payload["stale_age_hours"], 72.0, delta=0.5)
+
+    def test_hotspots_keeps_recent_cache_fresh(self) -> None:
+        cached_at = (datetime.now(timezone.utc) - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = self._hotspots_with_cached_at(cached_at)
+
+        self.assertTrue(payload["cache_used"])
+        self.assertFalse(payload["stale"])
+        self.assertAlmostEqual(payload["stale_age_hours"], 10 / 60, delta=0.05)
 
     def test_hotspots_refresh_falls_back_to_cache_when_provider_returns_only_errors(self) -> None:
         config = self._config(enabled=True)
