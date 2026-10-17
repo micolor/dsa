@@ -1233,6 +1233,8 @@ class Config:
     signal_outcome_auto_eval_enabled: bool = True
     # 是否启用基金净值复盘自动评估（按到期锚点抓取区间净值）
     fund_nav_review_auto_eval_enabled: bool = True
+    # 是否启用基金复权指标每日自动回填（默认关闭；开启后会联网）
+    fund_nav_review_auto_restore_enabled: bool = False
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2254,6 +2256,9 @@ class Config:
             ),
             fund_nav_review_auto_eval_enabled=(
                 os.getenv('FUND_NAV_REVIEW_AUTO_EVAL_ENABLED', 'true').lower() != 'false'
+            ),
+            fund_nav_review_auto_restore_enabled=(
+                os.getenv('FUND_NAV_REVIEW_AUTO_RESTORE_ENABLED', 'false').lower() == 'true'
             ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),

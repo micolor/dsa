@@ -16,6 +16,12 @@ vi.mock('../../../api/stocks', () => ({
   },
 }));
 
+vi.mock('../../../api/fundNavReviews', () => ({
+  fundNavReviewsApi: {
+    list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
+  },
+}));
+
 const baseMeta = {
   queryId: 'q-1',
   stockCode: '600519',
@@ -68,6 +74,8 @@ describe('ReportSummary', () => {
     render(<ReportSummary data={fundReport()} />);
 
     expect(screen.getByTestId('fund-metrics-card')).toBeInTheDocument();
+    // 基金报告展示净值复盘摘要
+    expect(screen.getByRole('region', { name: '净值复盘' })).toBeInTheDocument();
     // 基金报告不得出现股票式 K 线图与买卖点策略区
     expect(screen.queryByTestId('stock-price-chart')).not.toBeInTheDocument();
     expect(screen.queryByTestId('stock-price-chart-loading')).not.toBeInTheDocument();
@@ -134,5 +142,6 @@ describe('ReportSummary', () => {
     expect(screen.getByTestId('stock-price-chart-loading')).toBeInTheDocument();
     expect(screen.getByText('狙击点位')).toBeInTheDocument();
     expect(screen.queryByTestId('fund-metrics-card')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '净值复盘' })).not.toBeInTheDocument();
   });
 });

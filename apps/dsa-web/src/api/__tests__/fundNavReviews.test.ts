@@ -133,6 +133,46 @@ describe('fundNavReviewsApi', () => {
     expect(response.positiveRatePct).toBeNull();
   });
 
+  it('serializes nav range params and camelizes the response', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        fund_code: '003095',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
+        adjustment_status: 'available',
+        truncated: false,
+        events: { dividends: 1, splits: 0 },
+        items: [
+          {
+            date: '2025-01-02',
+            unit_nav: 1,
+            acc_nav: 1.1,
+            adjusted_nav: 1,
+            change_pct: 0,
+          },
+        ],
+      },
+    });
+
+    const result = await fundNavReviewsApi.getNavRange({
+      fund_code: '003095',
+      start_date: '2025-01-01',
+      end_date: '2025-01-31',
+    });
+
+    expect(get).toHaveBeenCalledWith('/api/v1/fund-nav-reviews/nav-range', {
+      params: {
+        fund_code: '003095',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
+      },
+    });
+    expect(result.adjustmentStatus).toBe('available');
+    expect(result.events).toEqual({ dividends: 1, splits: 0 });
+    expect(result.items[0].adjustedNav).toBe(1);
+    expect(result.items[0].accNav).toBe(1.1);
+  });
+
   it('sends the run payload with snake_case keys', async () => {
     post.mockResolvedValueOnce({
       data: {

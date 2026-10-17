@@ -76,3 +76,75 @@ def test_background_task_list_includes_fund_review():
     )
     names = [task["name"] for task in svc._current_background_tasks(config)]
     assert names == ["fund_nav_review_evaluation"]
+
+
+restore_enabled_config = SimpleNamespace(fund_nav_review_auto_restore_enabled=True)
+restore_disabled_config = SimpleNamespace(fund_nav_review_auto_restore_enabled=False)
+
+
+def test_restore_backfill_task_disabled_by_default():
+    svc = _svc()
+    assert svc._current_fund_nav_restore_background_tasks(restore_disabled_config) == []
+
+
+def test_restore_backfill_task_registered_when_enabled():
+    svc = _svc()
+    tasks = svc._current_fund_nav_restore_background_tasks(restore_enabled_config)
+
+    assert len(tasks) == 1
+    assert tasks[0]["name"] == "fund_nav_review_restore_backfill"
+    assert tasks[0]["run_immediately"] is True
+    assert tasks[0]["interval_seconds"] == 86400
+    assert callable(tasks[0]["task"])
+
+
+def test_restore_backfill_task_invokes_backfill_with_limit():
+    svc = _svc()
+    task = svc._current_fund_nav_restore_background_tasks(restore_enabled_config)[0]["task"]
+    service = mock.Mock()
+    with mock.patch(
+        "src.services.fund_nav_review_service.FundNavReviewService",
+        return_value=service,
+    ):
+        task()
+
+    kwargs = service.backfill_restored_metrics.call_args.kwargs
+    assert kwargs["dry_run"] is False
+    assert kwargs["limit"] == 400
+
+
+def test_restore_backfill_task_survives_service_failure():
+    svc = _svc()
+    task = svc._current_fund_nav_restore_background_tasks(restore_enabled_config)[0]["task"]
+    service = mock.Mock()
+    service.backfill_restored_metrics.side_effect = RuntimeError("boom")
+    with mock.patch(
+        "src.services.fund_nav_review_service.FundNavReviewService",
+        return_value=service,
+    ):
+        task()  # must not raise
+
+
+def test_restore_backfill_task_removed_when_disabled_and_cache_cleared():
+    svc = _svc()
+    svc._current_fund_nav_restore_background_tasks(restore_enabled_config)
+    assert "fund_nav_review_restore_backfill" in svc._background_task_cache
+
+    assert svc._current_fund_nav_restore_background_tasks(restore_disabled_config) == []
+    assert "fund_nav_review_restore_backfill" not in svc._background_task_cache
+
+
+def test_background_task_list_includes_restore_backfill():
+    svc = _svc()
+    config = SimpleNamespace(
+        agent_event_monitor_enabled=False,
+        paper_trading_enabled=False,
+        signal_outcome_auto_eval_enabled=False,
+        fund_nav_review_auto_eval_enabled=True,
+        fund_nav_review_auto_restore_enabled=True,
+    )
+    names = [task["name"] for task in svc._current_background_tasks(config)]
+    assert names == [
+        "fund_nav_review_evaluation",
+        "fund_nav_review_restore_backfill",
+    ]

@@ -151,6 +151,52 @@ class FundNavReviewRepository:
             ).scalars().all()
             return list(rows)
 
+    def list_restore_backlog(
+        self,
+        *,
+        engine_version: str,
+        fund_code: Optional[str] = None,
+        horizon: Optional[str] = None,
+        anchor_from: Optional[date] = None,
+        anchor_to: Optional[date] = None,
+        force: bool = False,
+        limit: int = 400,
+    ) -> List[FundNavReviewRecord]:
+        """Rows that still need restore metrics computed.
+
+        Only already-evaluated rows are candidates: a row without an evaluation
+        has no window to restore. ``force`` re-processes rows that already have
+        ``restored_checked_at`` so operators can refresh after an algorithm or
+        data-source fix.
+        """
+        safe_limit = max(1, min(int(limit), 400))
+        conditions = [
+            FundNavReviewRecord.engine_version == engine_version,
+            FundNavReviewRecord.eval_status == 'evaluated',
+        ]
+        if fund_code:
+            conditions.append(FundNavReviewRecord.fund_code == fund_code)
+        if horizon:
+            conditions.append(FundNavReviewRecord.horizon == horizon)
+        if anchor_from:
+            conditions.append(FundNavReviewRecord.anchor_date >= anchor_from)
+        if anchor_to:
+            conditions.append(FundNavReviewRecord.anchor_date <= anchor_to)
+        if not force:
+            conditions.append(FundNavReviewRecord.restored_checked_at.is_(None))
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(FundNavReviewRecord)
+                .where(and_(*conditions))
+                .order_by(
+                    FundNavReviewRecord.restored_checked_at.asc().nullsfirst(),
+                    FundNavReviewRecord.anchor_date,
+                    FundNavReviewRecord.id,
+                )
+                .limit(safe_limit)
+            ).scalars().all()
+            return list(rows)
+
     def update_review(self, *, review_id: int, fields: Dict[str, Any]) -> bool:
         allowed = {
             'fund_name',
@@ -165,6 +211,16 @@ class FundNavReviewRepository:
             'last_error',
             'checked_at',
             'evaluated_at',
+            'anchor_acc_nav',
+            'eval_acc_nav',
+            'acc_nav_return_pct',
+            'acc_max_drawdown_pct',
+            'restored_return_pct',
+            'restored_max_drawdown_pct',
+            'restored_basis',
+            'restored_reason',
+            'restored_events',
+            'restored_checked_at',
         }
         values = {key: value for key, value in fields.items() if key in allowed}
         if not values:

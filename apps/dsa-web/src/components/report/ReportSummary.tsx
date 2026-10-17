@@ -9,6 +9,7 @@ import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
 import { StockPriceChart } from './StockPriceChart';
 import { FundMetricsCard } from './FundMetricsCard';
+import { FundNavReviewSummary } from './FundNavReviewSummary';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -61,6 +62,9 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
   // 场外基金净值体检：无 K 线与买卖点，用净值指标卡替代 StockPriceChart + ReportStrategy。
   if (meta.reportType === 'fund') {
+    // 基金报告历史记录的 stock_code 可能已去掉 `fund:` 前缀；复盘接口要求带前缀。
+    const rawCode = (meta.stockCode || '').trim();
+    const fundReviewCode = /^\d{6}$/.test(rawCode) ? `fund:${rawCode}` : rawCode;
     return (
       <div className="space-y-5 pb-8 animate-fade-in">
         {/* 概览区（首屏） */}
@@ -74,6 +78,9 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
         {/* 净值指标卡（无 K 线 / 买卖点） */}
         <FundMetricsCard dashboard={details?.rawResult?.dashboard} language={reportLanguage} />
+
+        {/* 净值复盘摘要（只读，数据来自 fund_nav_reviews） */}
+        <FundNavReviewSummary fundCode={fundReviewCode} />
 
         {/* 资讯区 */}
         <ReportNews recordId={recordId} limit={8} language={reportLanguage} />

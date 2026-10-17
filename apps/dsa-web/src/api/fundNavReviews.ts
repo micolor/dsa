@@ -5,6 +5,8 @@ import type {
   FundNavReviewBackfillResponse,
   FundNavReviewListParams,
   FundNavReviewListResponse,
+  FundNavRangeParams,
+  FundNavRangeResponse,
   FundNavReviewRunRequest,
   FundNavReviewRunResponse,
   FundNavReviewStatsResponse,
@@ -76,6 +78,20 @@ export const fundNavReviewsApi = {
       },
     });
     return toCamelCase<FundNavReviewStatsResponse>(response.data);
+  },
+
+  async getNavRange(params: FundNavRangeParams): Promise<FundNavRangeResponse> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      '/api/v1/fund-nav-reviews/nav-range',
+      {
+        params: {
+          fund_code: params.fund_code,
+          start_date: params.start_date,
+          end_date: params.end_date,
+        },
+      },
+    );
+    return toCamelCase<FundNavRangeResponse>(response.data);
   },
 
   async run(payload: FundNavReviewRunRequest = {}): Promise<FundNavReviewRunResponse> {

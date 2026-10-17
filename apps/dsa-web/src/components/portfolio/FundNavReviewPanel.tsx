@@ -23,14 +23,30 @@ import type {
 } from '../../types/fundNavReviews';
 import { cn } from '../../utils/cn';
 import { formatPct, formatSignedPct } from '../../utils/portfolioFormat';
+import { FundNavTrendChart } from './FundNavTrendChart';
 
 const PAGE_SIZE = 10;
 const HORIZONS: FundNavReviewHorizon[] = ['1m', '3m', '6m', '1y'];
 const STATUSES: FundNavReviewStatus[] = ['pending', 'evaluated', 'unable'];
+type Basis = 'restored' | 'unit';
 
 function returnClass(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value) || value === 0) return 'text-secondary-text';
   return value > 0 ? 'text-success' : 'text-danger';
+}
+
+function formatLocalDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function trendWindow(): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 365);
+  return { startDate: formatLocalDate(start), endDate: formatLocalDate(end) };
 }
 
 /**
@@ -46,6 +62,8 @@ export function FundNavReviewPanel() {
   const [horizon, setHorizon] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  const [basis, setBasis] = useState<Basis>('restored');
+  const [selectedFundCode, setSelectedFundCode] = useState('');
 
   const [items, setItems] = useState<FundNavReviewItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -149,6 +167,21 @@ export function FundNavReviewPanel() {
     }
     return value || '--';
   };
+  const basisLabel = (value: string | null | undefined) => {
+    if (value === 'dividend_reinvested' || value === 'acc_nav' || value === 'unit_nav') {
+      return t(`fundReviews.basis.${value === 'dividend_reinvested' ? 'dividendReinvested' : value === 'acc_nav' ? 'accNav' : 'unitNav'}`);
+    }
+    return '--';
+  };
+  const statsReturn = basis === 'restored' ? stats?.avgRestoredReturnPct : stats?.avgNavReturnPct;
+  const statsDrawdown = basis === 'restored' ? stats?.avgRestoredMaxDrawdownPct : stats?.avgMaxDrawdownPct;
+  const statsPositiveRate = basis === 'restored' ? stats?.restoredPositiveRatePct : stats?.positiveRatePct;
+  const statsEvaluated = basis === 'restored' ? stats?.restoredEvaluated ?? 0 : stats?.evaluated ?? 0;
+  const itemReturn = (item: FundNavReviewItem) =>
+    basis === 'restored' ? item.restoredReturnPct : item.navReturnPct;
+  const itemDrawdown = (item: FundNavReviewItem) =>
+    basis === 'restored' ? item.restoredMaxDrawdownPct : item.maxDrawdownPct;
+  const trend = trendWindow();
 
   return (
     <Collapsible
@@ -190,6 +223,26 @@ export function FundNavReviewPanel() {
               ]}
             />
           </div>
+          <div className="flex items-center gap-1" role="group" aria-label={t('fundReviews.basis.label')}>
+            <Button
+              type="button"
+              variant={basis === 'restored' ? 'secondary' : 'outline'}
+              size="sm"
+              aria-pressed={basis === 'restored'}
+              onClick={() => setBasis('restored')}
+            >
+              {t('fundReviews.basis.restored')}
+            </Button>
+            <Button
+              type="button"
+              variant={basis === 'unit' ? 'secondary' : 'outline'}
+              size="sm"
+              aria-pressed={basis === 'unit'}
+              onClick={() => setBasis('unit')}
+            >
+              {t('fundReviews.basis.unit')}
+            </Button>
+          </div>
           <Button type="button" variant="secondary" size="sm" onClick={handleRefresh} disabled={listLoading || statsLoading || running}>
             <RefreshCw className={cn('h-4 w-4', (listLoading || statsLoading) && 'animate-spin')} />
             <span>{t('fundReviews.refresh')}</span>
@@ -201,6 +254,7 @@ export function FundNavReviewPanel() {
         </div>
 
         <p className="text-xs text-secondary-text">{t('fundReviews.runHint')}</p>
+        <p className="text-xs text-secondary-text">{t('fundReviews.basis.note')}</p>
 
         {runError ? <ApiErrorAlert error={runError} onDismiss={() => setRunError(null)} /> : null}
         {runResult ? (
@@ -227,20 +281,20 @@ export function FundNavReviewPanel() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard
                 label={t('fundReviews.stats.evaluated')}
-                value={stats.evaluated}
+                value={statsEvaluated}
                 hint={t('fundReviews.stats.pendingHint', { count: stats.pending })}
               />
               <StatCard
                 label={t('fundReviews.stats.positiveRate')}
-                value={formatPct(stats.positiveRatePct)}
+                value={formatPct(statsPositiveRate)}
               />
               <StatCard
                 label={t('fundReviews.stats.avgReturn')}
-                value={formatSignedPct(stats.avgNavReturnPct)}
+                value={formatSignedPct(statsReturn)}
               />
               <StatCard
                 label={t('fundReviews.stats.avgDrawdown')}
-                value={formatSignedPct(stats.avgMaxDrawdownPct)}
+                value={formatSignedPct(statsDrawdown)}
               />
             </div>
 
@@ -265,9 +319,15 @@ export function FundNavReviewPanel() {
                           <td className="py-2 pr-2 whitespace-nowrap text-foreground">{bucket.value}</td>
                           <td className="py-2 pr-2 text-right tabular-nums text-secondary-text">{bucket.total}</td>
                           <td className="py-2 pr-2 text-right tabular-nums text-secondary-text">{bucket.anchorCount}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums text-secondary-text">{formatPct(bucket.positiveRatePct)}</td>
-                          <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(bucket.avgNavReturnPct))}>{formatSignedPct(bucket.avgNavReturnPct)}</td>
-                          <td className={cn('py-2 text-right tabular-nums', returnClass(bucket.avgMaxDrawdownPct))}>{formatSignedPct(bucket.avgMaxDrawdownPct)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums text-secondary-text">
+                            {formatPct(basis === 'restored' ? bucket.restoredPositiveRatePct : bucket.positiveRatePct)}
+                          </td>
+                          <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(basis === 'restored' ? bucket.avgRestoredReturnPct : bucket.avgNavReturnPct))}>
+                            {formatSignedPct(basis === 'restored' ? bucket.avgRestoredReturnPct : bucket.avgNavReturnPct)}
+                          </td>
+                          <td className={cn('py-2 text-right tabular-nums', returnClass(basis === 'restored' ? bucket.avgRestoredMaxDrawdownPct : bucket.avgMaxDrawdownPct))}>
+                            {formatSignedPct(basis === 'restored' ? bucket.avgRestoredMaxDrawdownPct : bucket.avgMaxDrawdownPct)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -278,6 +338,14 @@ export function FundNavReviewPanel() {
           </>
         ) : null}
 
+        {selectedFundCode ? (
+          <FundNavTrendChart
+            fundCode={selectedFundCode}
+            startDate={trend.startDate}
+            endDate={trend.endDate}
+          />
+        ) : null}
+
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h4 className="text-sm font-semibold text-foreground">{t('fundReviews.ledger.title')}</h4>
@@ -285,6 +353,7 @@ export function FundNavReviewPanel() {
               {t('fundReviews.ledger.count', { count: total })}
             </span>
           </div>
+          <p className="mb-2 text-xs text-secondary-text">{t('fundReviews.trend.pickHint')}</p>
 
           {listError ? (
             <ApiErrorAlert error={listError} actionLabel={t('common.retry')} onAction={handleRefresh} />
@@ -309,6 +378,7 @@ export function FundNavReviewPanel() {
                     <th className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">{t('fundReviews.ledger.evalNav')}</th>
                     <th className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">{t('fundReviews.ledger.return')}</th>
                     <th className="py-2 pr-2 text-right tabular-nums whitespace-nowrap">{t('fundReviews.ledger.drawdown')}</th>
+                    <th className="py-2 pr-2 text-left whitespace-nowrap">{t('fundReviews.ledger.basis')}</th>
                     <th className="py-2 text-left whitespace-nowrap">{t('fundReviews.ledger.status')}</th>
                   </tr>
                 </thead>
@@ -317,7 +387,19 @@ export function FundNavReviewPanel() {
                     <tr key={item.id} className="border-b border-border/40 last:border-0">
                       <td className="py-2 pr-2 whitespace-nowrap tabular-nums text-secondary-text">{item.anchorDate}</td>
                       <td className="py-2 pr-2 whitespace-nowrap text-foreground">
-                        <span className="tabular-nums">{item.fundCode}</span>
+                        <button
+                          type="button"
+                          aria-pressed={selectedFundCode === item.fundCode}
+                          onClick={() => setSelectedFundCode(item.fundCode)}
+                          className={cn(
+                            'tabular-nums underline-offset-4 hover:underline',
+                            selectedFundCode === item.fundCode
+                              ? 'font-semibold text-primary'
+                              : 'text-foreground',
+                          )}
+                        >
+                          {item.fundCode}
+                        </button>
                         <span className="ml-2 text-secondary-text">{item.fundName}</span>
                       </td>
                       <td className="py-2 pr-2 whitespace-nowrap text-secondary-text">{item.horizon}</td>
@@ -326,11 +408,14 @@ export function FundNavReviewPanel() {
                       <td className="py-2 pr-2 text-right tabular-nums text-secondary-text">
                         {item.evalNav == null ? '--' : item.evalNav.toFixed(4)}
                       </td>
-                      <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(item.navReturnPct))}>
-                        {formatSignedPct(item.navReturnPct)}
+                      <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(itemReturn(item)))}>
+                        {formatSignedPct(itemReturn(item))}
                       </td>
-                      <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(item.maxDrawdownPct))}>
-                        {formatSignedPct(item.maxDrawdownPct)}
+                      <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(itemDrawdown(item)))}>
+                        {formatSignedPct(itemDrawdown(item))}
+                      </td>
+                      <td className="py-2 pr-2 whitespace-nowrap text-secondary-text">
+                        {basisLabel(item.restoredBasis)}
                       </td>
                       <td className="py-2 whitespace-nowrap text-secondary-text">
                         {statusLabel(item.evalStatus)}

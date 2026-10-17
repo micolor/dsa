@@ -21,6 +21,7 @@ class FundNavReviewItem(BaseModel):
     engine_version: str
     anchor_date: date
     anchor_nav: float
+    anchor_acc_nav: Optional[float] = None
     due_date: date
     eval_status: str
     unable_reason: Optional[str] = None
@@ -29,6 +30,15 @@ class FundNavReviewItem(BaseModel):
     nav_return_pct: Optional[float] = None
     max_drawdown_pct: Optional[float] = None
     eval_window_records: Optional[int] = None
+    eval_acc_nav: Optional[float] = None
+    acc_nav_return_pct: Optional[float] = None
+    acc_max_drawdown_pct: Optional[float] = None
+    restored_return_pct: Optional[float] = None
+    restored_max_drawdown_pct: Optional[float] = None
+    restored_basis: Optional[str] = None
+    restored_reason: Optional[str] = None
+    restored_events: Optional[int] = None
+    restored_checked_at: Optional[datetime] = None
     analysis_history_id: Optional[int] = None
     anchor_source: str
     attempts: int
@@ -85,6 +95,45 @@ class FundNavReviewBackfillResponse(BaseModel):
     engine_version: str
 
 
+class FundNavRestoreBackfillRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fund_code: Optional[str] = Field(None, max_length=16)
+    anchor_from: Optional[date] = None
+    anchor_to: Optional[date] = None
+    limit: int = Field(200, ge=1, le=400)
+    dry_run: bool = True
+    force: bool = False
+
+
+class FundNavRestoreBackfillResponse(BaseModel):
+    scanned: int
+    updated: int
+    unavailable: int
+    skipped: int
+    funds: int
+    dry_run: bool
+    engine_version: str
+
+
+class FundNavRangeItem(BaseModel):
+    date: str
+    unit_nav: float
+    acc_nav: float
+    adjusted_nav: Optional[float] = None
+    change_pct: float
+
+
+class FundNavRangeResponse(BaseModel):
+    fund_code: str
+    start_date: date
+    end_date: date
+    adjustment_status: Literal["available", "unavailable"]
+    truncated: bool
+    events: Dict[str, int] = Field(default_factory=dict)
+    items: List[FundNavRangeItem] = Field(default_factory=list)
+
+
 class FundNavReviewStatsBucket(BaseModel):
     dimension: str
     value: str
@@ -97,6 +146,11 @@ class FundNavReviewStatsBucket(BaseModel):
     avg_nav_return_pct: Optional[float] = None
     avg_max_drawdown_pct: Optional[float] = None
     unable_reasons: Dict[str, int] = Field(default_factory=dict)
+    restored_evaluated: int = 0
+    restored_positive_rate_pct: Optional[float] = None
+    avg_restored_return_pct: Optional[float] = None
+    avg_restored_max_drawdown_pct: Optional[float] = None
+    restored_bases: Dict[str, int] = Field(default_factory=dict)
 
 
 class FundNavReviewStatsResponse(BaseModel):
@@ -111,4 +165,9 @@ class FundNavReviewStatsResponse(BaseModel):
     avg_nav_return_pct: Optional[float] = None
     avg_max_drawdown_pct: Optional[float] = None
     unable_reasons: Dict[str, int] = Field(default_factory=dict)
+    restored_evaluated: int = 0
+    restored_positive_rate_pct: Optional[float] = None
+    avg_restored_return_pct: Optional[float] = None
+    avg_restored_max_drawdown_pct: Optional[float] = None
+    restored_bases: Dict[str, int] = Field(default_factory=dict)
     breakdowns: Dict[str, List[FundNavReviewStatsBucket]] = Field(default_factory=dict)

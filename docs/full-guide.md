@@ -1506,7 +1506,7 @@ P5 在 Web `/decision-signals` 页面筛选区下方展示当前 outcome engine 
 
 outcome 追加基准超额收益与复盘台账：`cn/hk/us` 分别使用 `510300` / `hk02800` / `SPY` 作为 ETF 代理，`jp/kr/tw` 标记 `unsupported`；基准收益取 anchor 日与股票窗口结束日的基准 close，`excess_return_pct = stock_return_pct - benchmark_return_pct`。基准缺失由独立回填阶段处理（6 小时冷却、每轮最多 200 行、不更新 `updated_at`），调度器自动开启，`POST /outcomes/run` 由 `fetch_benchmark` 控制且默认关闭。`GET /outcomes` 新增 `market/action/anchor_from/anchor_to` 过滤并返回股票与基准字段；`GET /outcomes/stats` 新增 `month` breakdown 与基准覆盖率、平均基准/超额收益。Web 统计区展开后新增“复盘台账”卡片，提供月度表与分页逐条台账；统计区收起时不请求。完整口径见 [DecisionSignal 决策信号专题](decision-signals.md)。
 
-场外基金净值复盘是独立于 `decision_signals` 的 `fund_nav_reviews` 台账：每次 `fund:<6位代码>` 体检把最新单位净值写成 1m/3m/6m/1y 锚点，到期后按锚点之后第 22/66/126/252 条净值评估区间收益与最大回撤。`FUND_NAV_REVIEW_AUTO_EVAL_ENABLED` 默认 `true`，由调度器每 6 小时评估到期锚点；关闭后仍可调用 `POST /api/v1/fund-nav-reviews/run`。历史报告补录默认 dry-run 且不联网。组合页提供默认折叠的复盘面板。完整口径见 [场外基金净值复盘](fund-nav-review.md)。
+场外基金净值复盘是独立于 `decision_signals` 的 `fund_nav_reviews` 台账：每次 `fund:<6位代码>` 体检把最新单位净值写成 1m/3m/6m/1y 锚点，到期后按锚点之后第 22/66/126/252 条净值评估区间收益与最大回撤。`FUND_NAV_REVIEW_AUTO_EVAL_ENABLED` 默认 `true`，由调度器每 6 小时评估到期锚点；关闭后仍可调用 `POST /api/v1/fund-nav-reviews/run`。评估同时保留单位净值与复权口径（分红再投资 → 累计净值 → 单位净值回退）。`FUND_NAV_REVIEW_AUTO_RESTORE_ENABLED` 默认 `false`，开启后每天为已评估行回填复权指标；也可调用 `POST /api/v1/fund-nav-reviews/backfill/restore-metrics` 手动回填。历史报告补录默认 dry-run 且不联网。组合页提供默认折叠的复盘面板。完整口径见 [场外基金净值复盘](fund-nav-review.md)。
 
 持仓页会把 AI 建议作为非阻断增强异步加载：组合快照和风险模块先按原逻辑渲染，随后按当前快照中的唯一持仓调用 `GET /api/v1/decision-signals/latest/{stock_code}?market=<market>&limit=1` 查询 latest active 信号；不再通过 `holding_only=true` 通用列表分页扫描，也不存在固定页数截断。单个持仓 latest 查询失败时，页面保留其他已加载信号并显示可见降级提示；无匹配信号时持仓行显示空占位。匹配逻辑复用 Web 端股票代码等价规则，覆盖 A 股 `600519/SH600519/600519.SH`、港股 `00700/HK00700/00700.HK` 和美股大小写 ticker。
 

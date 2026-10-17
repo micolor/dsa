@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from data_provider.fund_fetcher import (
+    FundDistributionEvents,
     FundFetcher,
     FundProfile,
     NavRecord,
@@ -29,6 +30,10 @@ from data_provider.fund_fetcher import (
     strip_fund_prefix,
 )
 from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+from src.services.fund_nav_restore import (
+    compute_adjusted_series,
+    compute_restored_metrics,
+)
 from src.storage import DatabaseManager, FundNavReviewRecord, utc_naive_now
 
 logger = logging.getLogger(__name__)
@@ -46,6 +51,8 @@ MAX_FUNDS_PER_RUN = 50
 MAX_ROWS_PER_RUN = 400
 MAX_BACKFILL_FUNDS = 50
 BACKFILL_NAV_TOLERANCE = 0.00005
+MAX_NAV_RANGE_DAYS = 1100
+MAX_NAV_RANGE_RECORDS = 1000
 
 _FUND_CODE_RE = re.compile(r"^\d{6}$")
 
@@ -108,6 +115,7 @@ class FundNavReviewService:
         anchor_nav = float(latest.unit_nav or 0)
         if anchor_date is None or anchor_nav <= 0:
             return result
+        anchor_acc_nav = float(latest.acc_nav or 0) or None
 
         result["anchor_date"] = anchor_date
         existing = set(
@@ -122,6 +130,7 @@ class FundNavReviewService:
             fund_name=profile.name or code,
             anchor_date=anchor_date,
             anchor_nav=anchor_nav,
+            anchor_acc_nav=anchor_acc_nav,
             analysis_history_id=analysis_history_id,
             source=source,
             horizons=[h for h in FUND_NAV_REVIEW_HORIZON_ORDER if h not in existing],
@@ -141,6 +150,7 @@ class FundNavReviewService:
         analysis_history_id: Optional[int],
         source: str,
         horizons: List[str],
+        anchor_acc_nav: Optional[float] = None,
         now: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         created_at = now or utc_naive_now()
@@ -152,6 +162,7 @@ class FundNavReviewService:
                 "engine_version": FUND_NAV_REVIEW_ENGINE_VERSION,
                 "anchor_date": anchor_date,
                 "anchor_nav": float(anchor_nav),
+                "anchor_acc_nav": anchor_acc_nav,
                 "due_date": anchor_date + timedelta(days=FUND_NAV_REVIEW_DUE_DAYS[horizon]),
                 "eval_status": "pending",
                 "analysis_history_id": analysis_history_id,
@@ -216,6 +227,15 @@ class FundNavReviewService:
                     counts["skipped"] += 1
                 continue
 
+            events: Optional[FundDistributionEvents] = None
+            events_error: Optional[str] = None
+            if navs:
+                try:
+                    events = self.fetcher.get_distribution_events(code)
+                except Exception as exc:
+                    logger.warning("[%s] 基金分红送配抓取失败: %s", code, exc)
+                    events_error = "distribution_fetch_error"
+
             for row in fund_rows:
                 status = self._evaluate_row(
                     row,
@@ -223,6 +243,8 @@ class FundNavReviewService:
                     as_of=as_of,
                     now=now,
                     force=force,
+                    events=events,
+                    events_error=events_error,
                 )
                 counts[status] = counts.get(status, 0) + 1
                 items.append(self._to_item(row))
@@ -244,6 +266,8 @@ class FundNavReviewService:
         as_of: date,
         now: datetime,
         force: bool,
+        events: Optional[FundDistributionEvents] = None,
+        events_error: Optional[str] = None,
     ) -> str:
         if row.anchor_nav is None or float(row.anchor_nav) <= 0:
             self._mark_unable(row, "invalid_anchor_nav", now)
@@ -303,6 +327,13 @@ class FundNavReviewService:
             peak = max(peak, value)
             mdd = min(mdd, value / peak - 1.0)
 
+        restored = compute_restored_metrics(
+            navs,
+            anchor_idx,
+            target_idx,
+            events,
+            events_error=events_error,
+        )
         self._update_row(
             row,
             {
@@ -316,9 +347,121 @@ class FundNavReviewService:
                 "max_drawdown_pct": round(mdd * 100.0, 4),
                 "eval_window_records": horizon_records,
                 "evaluated_at": now,
+                "anchor_acc_nav": restored["anchor_acc_nav"],
+                "eval_acc_nav": restored["eval_acc_nav"],
+                "acc_nav_return_pct": restored["acc_nav_return_pct"],
+                "acc_max_drawdown_pct": restored["acc_max_drawdown_pct"],
+                "restored_return_pct": restored["restored_return_pct"],
+                "restored_max_drawdown_pct": restored["restored_max_drawdown_pct"],
+                "restored_basis": restored["restored_basis"],
+                "restored_reason": restored["restored_reason"],
+                "restored_events": restored["restored_events"],
+                "restored_checked_at": now,
             },
         )
         return "evaluated"
+
+    # ------------------------------------------------------------------
+    # Restore backfill
+    # ------------------------------------------------------------------
+    def backfill_restored_metrics(
+        self,
+        *,
+        fund_code: Optional[str] = None,
+        anchor_from: Optional[date] = None,
+        anchor_to: Optional[date] = None,
+        limit: int = 200,
+        dry_run: bool = True,
+        force: bool = False,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Recompute restoration metrics for already-evaluated rows.
+
+        The v1 evaluation stored only unit-NAV outcomes. This backfill attaches
+        the cumulative-NAV and dividend-reinvested metrics without touching the
+        original evaluation fields. ``dry_run`` counts what would change but
+        writes nothing, including ``restored_checked_at``.
+        """
+        now = now or utc_naive_now()
+        normalized_code = _normalize_fund_code(fund_code) if fund_code else None
+        if fund_code and not normalized_code:
+            raise ValueError("fund_code must be a 6-digit fund code")
+
+        rows = self.repo.list_restore_backlog(
+            engine_version=FUND_NAV_REVIEW_ENGINE_VERSION,
+            fund_code=normalized_code,
+            anchor_from=anchor_from,
+            anchor_to=anchor_to,
+            force=force,
+            limit=min(max(int(limit), 1), MAX_ROWS_PER_RUN),
+        )
+        counts = {"scanned": len(rows), "updated": 0, "unavailable": 0, "skipped": 0, "funds": 0}
+        for code, fund_rows in self._group_rows_by_fund(rows):
+            counts["funds"] += 1
+            end_date = max(
+                row.eval_date
+                or row.anchor_date + timedelta(days=FUND_NAV_REVIEW_DUE_DAYS[row.horizon])
+                for row in fund_rows
+            )
+            navs = self.fetcher.get_nav_range(
+                code,
+                min(row.anchor_date for row in fund_rows),
+                end_date,
+            )
+            try:
+                events: Optional[FundDistributionEvents] = self.fetcher.get_distribution_events(code)
+                events_error = None
+            except Exception as exc:
+                logger.warning("[%s] 基金分红送配抓取失败: %s", code, exc)
+                events, events_error = None, "distribution_fetch_error"
+
+            dates = [(record.date or "")[:10] for record in navs]
+            for row in fund_rows:
+                anchor_key = row.anchor_date.isoformat()
+                anchor_idx = bisect.bisect_left(dates, anchor_key)
+                if anchor_idx >= len(navs) or dates[anchor_idx] != anchor_key:
+                    counts["skipped"] += 1
+                    continue
+                target_idx = anchor_idx + FUND_NAV_REVIEW_HORIZONS[row.horizon]
+                if (
+                    target_idx >= len(navs)
+                    or _parse_date(navs[target_idx].date) != row.eval_date
+                ):
+                    counts["skipped"] += 1
+                    continue
+                restored = compute_restored_metrics(
+                    navs,
+                    anchor_idx,
+                    target_idx,
+                    events,
+                    events_error=events_error,
+                )
+                if not restored["restored_basis"]:
+                    counts["unavailable"] += 1
+                    continue
+                counts["updated"] += 1
+                if dry_run:
+                    continue
+                self.repo.update_review(
+                    review_id=row.id,
+                    fields={
+                        "anchor_acc_nav": restored["anchor_acc_nav"],
+                        "eval_acc_nav": restored["eval_acc_nav"],
+                        "acc_nav_return_pct": restored["acc_nav_return_pct"],
+                        "acc_max_drawdown_pct": restored["acc_max_drawdown_pct"],
+                        "restored_return_pct": restored["restored_return_pct"],
+                        "restored_max_drawdown_pct": restored["restored_max_drawdown_pct"],
+                        "restored_basis": restored["restored_basis"],
+                        "restored_reason": restored["restored_reason"],
+                        "restored_events": restored["restored_events"],
+                        "restored_checked_at": now,
+                    },
+                )
+        return {
+            **counts,
+            "dry_run": bool(dry_run),
+            "engine_version": FUND_NAV_REVIEW_ENGINE_VERSION,
+        }
 
     def _mark_unable(self, row: FundNavReviewRecord, reason: str, now: datetime) -> None:
         self._update_row(
@@ -349,6 +492,79 @@ class FundNavReviewService:
             groups[row.fund_code].append(row)
         for code in list(groups)[:MAX_FUNDS_PER_RUN]:
             yield code, groups[code]
+
+    # ------------------------------------------------------------------
+    # NAV range
+    # ------------------------------------------------------------------
+    def get_nav_range(
+        self,
+        *,
+        fund_code: str,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, Any]:
+        """Return the NAV series for a fund within ``[start_date, end_date]``.
+
+        This is a read-only query for charting: it never writes the ledger and
+        never triggers evaluation. ``adjusted_nav`` uses the same
+        dividend-reinvestment factor as the review ledger, rebased to 1.0 at the
+        first record in the requested window. When distribution events cannot be
+        fetched the adjusted series is ``None`` and the caller falls back to the
+        unit/cumulative NAV lines.
+        """
+        code = _normalize_fund_code(fund_code)
+        if not code:
+            raise ValueError("fund_code must be a 6-digit fund code")
+        if start_date > end_date:
+            raise ValueError("start_date must not be after end_date")
+        if (end_date - start_date).days > MAX_NAV_RANGE_DAYS:
+            raise ValueError(
+                f"date range must not exceed {MAX_NAV_RANGE_DAYS} days"
+            )
+
+        navs = sorted(
+            self.fetcher.get_nav_range(code, start_date, end_date),
+            key=lambda record: (record.date or "")[:10],
+        )
+        truncated = len(navs) > MAX_NAV_RANGE_RECORDS
+        if truncated:
+            navs = navs[:MAX_NAV_RANGE_RECORDS]
+
+        adjusted: Optional[List[float]] = None
+        event_counts = {"dividends": 0, "splits": 0}
+        adjustment_status = "available"
+        if navs:
+            try:
+                events = self.fetcher.get_distribution_events(code)
+                event_counts = {
+                    "dividends": len(events.dividends),
+                    "splits": len(events.splits),
+                }
+                adjusted = compute_adjusted_series(navs, 0, events)
+            except Exception as exc:
+                logger.warning("[%s] 基金分红送配抓取失败: %s", code, exc)
+            if adjusted is None:
+                adjustment_status = "unavailable"
+
+        items = [
+            {
+                "date": record.date,
+                "unit_nav": float(record.unit_nav or 0),
+                "acc_nav": float(record.acc_nav or 0),
+                "adjusted_nav": adjusted[index] if adjusted else None,
+                "change_pct": float(record.change_pct or 0),
+            }
+            for index, record in enumerate(navs)
+        ]
+        return {
+            "fund_code": code,
+            "start_date": start_date,
+            "end_date": end_date,
+            "adjustment_status": adjustment_status,
+            "truncated": truncated,
+            "events": event_counts,
+            "items": items,
+        }
 
     # ------------------------------------------------------------------
     # Queries
@@ -413,6 +629,11 @@ class FundNavReviewService:
     def _aggregate(self, rows: List[FundNavReviewRecord]) -> Dict[str, Any]:
         evaluated = [row for row in rows if row.eval_status == "evaluated"]
         returns = [row.nav_return_pct for row in evaluated if row.nav_return_pct is not None]
+        restored = [
+            row.restored_return_pct
+            for row in evaluated
+            if row.restored_return_pct is not None
+        ]
         return {
             "total": len(rows),
             "anchor_count": len({(row.fund_code, row.anchor_date) for row in rows}),
@@ -429,6 +650,20 @@ class FundNavReviewService:
             ),
             "unable_reasons": dict(
                 Counter(row.unable_reason for row in rows if row.eval_status == "unable")
+            ),
+            "restored_evaluated": len(restored),
+            "restored_positive_rate_pct": (
+                round(sum(1 for value in restored if value > 0) / len(restored) * 100.0, 4)
+                if restored else None
+            ),
+            "avg_restored_return_pct": _mean(restored),
+            "avg_restored_max_drawdown_pct": _mean(
+                row.restored_max_drawdown_pct
+                for row in evaluated
+                if row.restored_max_drawdown_pct is not None
+            ),
+            "restored_bases": dict(
+                Counter(row.restored_basis for row in evaluated if row.restored_basis)
             ),
         }
 

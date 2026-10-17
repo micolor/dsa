@@ -13,8 +13,11 @@ from fastapi.security import APIKeyCookie
 from api.v1.errors import api_error
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.fund_nav_reviews import (
+    FundNavRestoreBackfillRequest,
+    FundNavRestoreBackfillResponse,
     FundNavReviewBackfillRequest,
     FundNavReviewBackfillResponse,
+    FundNavRangeResponse,
     FundNavReviewHorizon,
     FundNavReviewItem,
     FundNavReviewListResponse,
@@ -109,6 +112,42 @@ def get_fund_nav_review_stats(
         raise api_error(500, "internal_error", "Get fund nav review stats failed")
 
 
+@router.get(
+    "/nav-range",
+    response_model=FundNavRangeResponse,
+    responses={
+        **AUTH_RESPONSE,
+        400: {"model": ErrorResponse, "description": "查询参数非法"},
+        422: {"model": ErrorResponse, "description": "查询参数校验失败"},
+        500: {"model": ErrorResponse, "description": "查询失败"},
+    },
+    summary="查询基金区间净值走势",
+    description=(
+        "只读返回指定区间的单位净值、累计净值与分红再投资复权净值；"
+        "区间最长 1100 天，超过 1000 条记录时截断。"
+    ),
+    operation_id="getFundNavRange",
+)
+def get_fund_nav_range(
+    fund_code: str = Query(..., max_length=16),
+    start_date: date = Query(..., description="Start date (inclusive)"),
+    end_date: date = Query(..., description="End date (inclusive)"),
+) -> FundNavRangeResponse:
+    try:
+        return FundNavRangeResponse(
+            **FundNavReviewService().get_nav_range(
+                fund_code=fund_code,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        )
+    except ValueError as exc:
+        raise api_error(400, "validation_error", str(exc))
+    except Exception as exc:
+        logger.error("Get fund nav range failed: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "Get fund nav range failed")
+
+
 @router.post(
     "/run",
     response_model=FundNavReviewRunResponse,
@@ -176,3 +215,39 @@ def backfill_fund_nav_reviews(
     except Exception as exc:
         logger.error("Backfill fund nav reviews failed: %s", exc, exc_info=True)
         raise api_error(500, "internal_error", "Backfill fund nav reviews failed")
+
+
+@router.post(
+    "/backfill/restore-metrics",
+    response_model=FundNavRestoreBackfillResponse,
+    responses={
+        **AUTH_RESPONSE,
+        400: {"model": ErrorResponse, "description": "请求字段非法"},
+        422: {"model": ErrorResponse, "description": "请求体校验失败"},
+        500: {"model": ErrorResponse, "description": "回填失败"},
+    },
+    summary="回填基金净值复权指标",
+    description=(
+        "为已评估且尚未计算复权指标的复盘行补算累计净值与分红再投资口径；"
+        "默认 dry_run=true，不写库。"
+    ),
+    operation_id="backfillFundNavRestoreMetrics",
+)
+def backfill_fund_nav_restore_metrics(
+    payload: FundNavRestoreBackfillRequest,
+) -> FundNavRestoreBackfillResponse:
+    try:
+        result = FundNavReviewService().backfill_restored_metrics(
+            fund_code=payload.fund_code,
+            anchor_from=payload.anchor_from,
+            anchor_to=payload.anchor_to,
+            limit=payload.limit,
+            dry_run=payload.dry_run,
+            force=payload.force,
+        )
+        return FundNavRestoreBackfillResponse(**result)
+    except ValueError as exc:
+        raise api_error(400, "validation_error", str(exc))
+    except Exception as exc:
+        logger.error("Backfill fund nav restore metrics failed: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "Backfill fund nav restore metrics failed")

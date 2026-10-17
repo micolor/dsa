@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FundNavReviewPanel } from '../FundNavReviewPanel';
 
-const { list, getStats, run } = vi.hoisted(() => ({
+const { list, getStats, run, getNavRange } = vi.hoisted(() => ({
   list: vi.fn(),
   getStats: vi.fn(),
   run: vi.fn(),
+  getNavRange: vi.fn(),
 }));
 
 vi.mock('../../../api/fundNavReviews', () => ({
@@ -13,6 +14,7 @@ vi.mock('../../../api/fundNavReviews', () => ({
     list,
     getStats,
     run,
+    getNavRange,
   },
 }));
 
@@ -32,6 +34,9 @@ function makeItem(overrides: Record<string, unknown> = {}) {
     evalNav: 1.2654,
     navReturnPct: 2.5,
     maxDrawdownPct: -1.2,
+    restoredReturnPct: 2.5,
+    restoredMaxDrawdownPct: -1.2,
+    restoredBasis: 'dividend_reinvested',
     evalWindowRecords: 22,
     anchorSource: 'pipeline',
     attempts: 1,
@@ -52,6 +57,11 @@ function makeStats(overrides: Record<string, unknown> = {}) {
     avgNavReturnPct: 1.25,
     avgMaxDrawdownPct: -2.5,
     unableReasons: {},
+    restoredEvaluated: 2,
+    restoredPositiveRatePct: 50,
+    avgRestoredReturnPct: 1.25,
+    avgRestoredMaxDrawdownPct: -2.5,
+    restoredBases: { dividend_reinvested: 2 },
     breakdowns: {
       horizon: [],
       month: [
@@ -67,6 +77,11 @@ function makeStats(overrides: Record<string, unknown> = {}) {
           avgNavReturnPct: 1.25,
           avgMaxDrawdownPct: -2.5,
           unableReasons: {},
+          restoredEvaluated: 2,
+          restoredPositiveRatePct: 50,
+          avgRestoredReturnPct: 1.25,
+          avgRestoredMaxDrawdownPct: -2.5,
+          restoredBases: { dividend_reinvested: 2 },
         },
       ],
     },
@@ -91,6 +106,18 @@ describe('FundNavReviewPanel', () => {
     list.mockReset();
     getStats.mockReset();
     run.mockReset();
+    getNavRange.mockReset();
+    getNavRange.mockResolvedValue({
+      fundCode: '003095',
+      startDate: '2025-01-01',
+      endDate: '2025-12-31',
+      adjustmentStatus: 'available',
+      truncated: false,
+      events: { dividends: 0, splits: 0 },
+      items: [
+        { date: '2025-01-02', unitNav: 1, accNav: 1.1, adjustedNav: 1, changePct: 0 },
+      ],
+    });
     list.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
     getStats.mockResolvedValue(makeStats());
   });
@@ -210,6 +237,63 @@ describe('FundNavReviewPanel', () => {
     }));
   });
 
+  it('defaults to restored basis and switches to unit values', async () => {
+    list.mockResolvedValue({
+      items: [
+        makeItem({
+          navReturnPct: -1,
+          maxDrawdownPct: -2,
+          restoredReturnPct: 10,
+          restoredMaxDrawdownPct: -1,
+        }),
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+    getStats.mockResolvedValue(
+      makeStats({
+        positiveRatePct: 25,
+        avgNavReturnPct: -1,
+        avgMaxDrawdownPct: -2,
+        restoredPositiveRatePct: 75,
+        avgRestoredReturnPct: 10,
+        avgRestoredMaxDrawdownPct: -1,
+      }),
+    );
+
+    render(<FundNavReviewPanel />);
+    expand();
+
+    const restoredButton = await screen.findByRole('button', { name: '复权' });
+    expect(restoredButton).toHaveAttribute('aria-pressed', 'true');
+
+    await waitFor(() => expect(screen.getAllByText('+10.00%').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('75.00%').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '单位' }));
+
+    expect(screen.getByRole('button', { name: '单位' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByText('-1.00%').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('-2.00%').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('25.00%').length).toBeGreaterThan(0);
+    expect(screen.queryByText('+10.00%')).not.toBeInTheDocument();
+  });
+
+  it('shows the actual basis badge per row', async () => {
+    list.mockResolvedValue({
+      items: [makeItem({ restoredBasis: 'acc_nav' })],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+
+    render(<FundNavReviewPanel />);
+    expand();
+
+    expect(await screen.findByText('累计')).toBeInTheDocument();
+  });
+
   it('drops a stale response that resolves after a newer request', async () => {
     const first = deferred<{ items: ReturnType<typeof makeItem>[]; total: number; page: number; pageSize: number }>();
     list.mockReturnValueOnce(first.promise);
@@ -239,5 +323,34 @@ describe('FundNavReviewPanel', () => {
     first.resolve({ items: [makeItem({ id: 3, fundCode: '999999' })], total: 1, page: 1, pageSize: 10 });
     await waitFor(() => expect(screen.queryByText('999999')).not.toBeInTheDocument());
     expect(screen.getByText('000001')).toBeInTheDocument();
+  });
+
+  it('mounts the trend chart only after selecting a fund', async () => {
+    list.mockResolvedValue({
+      items: [makeItem(), makeItem({ id: 2, fundCode: '000001', fundName: '华夏成长' })],
+      total: 2,
+      page: 1,
+      pageSize: 10,
+    });
+
+    render(<FundNavReviewPanel />);
+    expand();
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByLabelText('净值走势')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '003095' }));
+
+    expect(await screen.findByLabelText('净值走势')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getNavRange).toHaveBeenCalledWith(expect.objectContaining({ fund_code: '003095' })),
+    );
+    expect(screen.getByRole('button', { name: '003095' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '000001' }));
+
+    await waitFor(() =>
+      expect(getNavRange).toHaveBeenLastCalledWith(expect.objectContaining({ fund_code: '000001' })),
+    );
   });
 });

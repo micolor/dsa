@@ -4,6 +4,8 @@ export type FundNavReviewStatus = 'pending' | 'evaluated' | 'unable';
 
 export type FundNavReviewAnchorSource = 'pipeline' | 'backfill';
 
+export type FundNavReviewRestoredBasis = 'dividend_reinvested' | 'acc_nav' | 'unit_nav';
+
 export interface FundNavReviewItem {
   id: number;
   fundCode: string;
@@ -12,6 +14,7 @@ export interface FundNavReviewItem {
   engineVersion: string;
   anchorDate: string;
   anchorNav: number;
+  anchorAccNav?: number | null;
   dueDate: string;
   evalStatus: string;
   unableReason?: string | null;
@@ -20,6 +23,15 @@ export interface FundNavReviewItem {
   navReturnPct?: number | null;
   maxDrawdownPct?: number | null;
   evalWindowRecords?: number | null;
+  evalAccNav?: number | null;
+  accNavReturnPct?: number | null;
+  accMaxDrawdownPct?: number | null;
+  restoredReturnPct?: number | null;
+  restoredMaxDrawdownPct?: number | null;
+  restoredBasis?: FundNavReviewRestoredBasis | null;
+  restoredReason?: string | null;
+  restoredEvents?: number | null;
+  restoredCheckedAt?: string | null;
   analysisHistoryId?: number | null;
   anchorSource: string;
   attempts: number;
@@ -82,6 +94,30 @@ export interface FundNavReviewBackfillResponse {
   engineVersion: string;
 }
 
+export interface FundNavRangeParams {
+  fund_code: string;
+  start_date: string;
+  end_date: string;
+}
+
+export interface FundNavRangeItem {
+  date: string;
+  unitNav: number;
+  accNav: number;
+  adjustedNav: number | null;
+  changePct: number;
+}
+
+export interface FundNavRangeResponse {
+  fundCode: string;
+  startDate: string;
+  endDate: string;
+  adjustmentStatus: 'available' | 'unavailable';
+  truncated: boolean;
+  events: { dividends: number; splits: number };
+  items: FundNavRangeItem[];
+}
+
 export interface FundNavReviewStatsBucket {
   dimension: string;
   value: string;
@@ -94,6 +130,11 @@ export interface FundNavReviewStatsBucket {
   avgNavReturnPct?: number | null;
   avgMaxDrawdownPct?: number | null;
   unableReasons: Record<string, number>;
+  restoredEvaluated: number;
+  restoredPositiveRatePct?: number | null;
+  avgRestoredReturnPct?: number | null;
+  avgRestoredMaxDrawdownPct?: number | null;
+  restoredBases: Record<string, number>;
 }
 
 export interface FundNavReviewStatsResponse {
@@ -108,6 +149,11 @@ export interface FundNavReviewStatsResponse {
   avgNavReturnPct?: number | null;
   avgMaxDrawdownPct?: number | null;
   unableReasons: Record<string, number>;
+  restoredEvaluated: number;
+  restoredPositiveRatePct?: number | null;
+  avgRestoredReturnPct?: number | null;
+  avgRestoredMaxDrawdownPct?: number | null;
+  restoredBases: Record<string, number>;
   breakdowns: {
     horizon: FundNavReviewStatsBucket[];
     month: FundNavReviewStatsBucket[];

@@ -8,7 +8,12 @@ from datetime import date, timedelta
 
 import pytest
 
-from data_provider.fund_fetcher import FundProfile, NavRecord
+from data_provider.fund_fetcher import (
+    FundDistributionEvents,
+    FundDividendEvent,
+    FundProfile,
+    NavRecord,
+)
 from src.config import Config
 from src.services.fund_nav_review_service import FundNavReviewService
 from src.storage import DatabaseManager, FundNavReviewRecord
@@ -35,16 +40,25 @@ def isolated_db(tmp_path):
 
 
 class FakeFetcher:
-    def __init__(self, navs=None, error=None):
+    def __init__(self, navs=None, error=None, events=None, events_error=None):
         self.navs = navs or []
         self.error = error
+        self.events = events if events is not None else FundDistributionEvents()
+        self.events_error = events_error
         self.calls = []
+        self.event_calls = []
 
     def get_nav_range(self, code, start_date, end_date):
         self.calls.append((code, start_date, end_date))
         if self.error is not None:
             raise self.error
         return list(self.navs)
+
+    def get_distribution_events(self, code):
+        self.event_calls.append(code)
+        if self.events_error is not None:
+            raise self.events_error
+        return self.events
 
 
 def _navs(count=300, start=ANCHOR_DAY, base=1.0, step=0.01):
@@ -242,3 +256,145 @@ def test_list_reviews_filters_and_paginates(isolated_db):
     assert service.list_reviews(eval_status="evaluated")["total"] == 0
     with pytest.raises(ValueError):
         service.list_reviews(fund_code="abc123")
+
+
+def _dividend_navs():
+    rows = [
+        NavRecord(date=ANCHOR_DAY.isoformat(), unit_nav=1.00, acc_nav=1.10, change_pct=0.0),
+        NavRecord(
+            date=(ANCHOR_DAY + timedelta(days=1)).isoformat(),
+            unit_nav=0.90,
+            acc_nav=1.10,
+            change_pct=0.0,
+        ),
+    ]
+    for index in range(2, 30):
+        rows.append(
+            NavRecord(
+                date=(ANCHOR_DAY + timedelta(days=index)).isoformat(),
+                unit_nav=0.99,
+                acc_nav=1.10,
+                change_pct=0.0,
+            )
+        )
+    return rows
+
+
+def test_evaluate_row_writes_dividend_reinvested_metrics(isolated_db):
+    navs = _dividend_navs()
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    fetcher = FakeFetcher(
+        navs,
+        events=FundDistributionEvents(
+            dividends=[FundDividendEvent((ANCHOR_DAY + timedelta(days=1)).isoformat(), 0.10)]
+        ),
+    )
+
+    result = FundNavReviewService(fetcher=fetcher).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=40),
+    )
+
+    item = result["items"][0]
+    assert item["restored_basis"] == "dividend_reinvested"
+    assert item["restored_return_pct"] == pytest.approx(10.0)
+    assert item["nav_return_pct"] == pytest.approx(-1.0)
+    assert item["restored_events"] == 1
+    assert item["anchor_acc_nav"] == pytest.approx(1.10)
+    assert item["eval_acc_nav"] == pytest.approx(1.10)
+    assert item["acc_nav_return_pct"] == pytest.approx(0.0)
+    assert fetcher.event_calls == ["003095"]
+
+
+def test_event_fetch_failure_does_not_block_evaluation(isolated_db):
+    navs = _dividend_navs()
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    fetcher = FakeFetcher(navs, events_error=RuntimeError("boom"))
+
+    result = FundNavReviewService(fetcher=fetcher).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=40),
+    )
+
+    items = {item["horizon"]: item for item in result["items"]}
+    assert result["evaluated"] == 1
+    assert result["pending"] == 3
+    item = items["1m"]
+    assert item["eval_status"] == "evaluated"
+    assert item["restored_basis"] == "acc_nav"
+    assert item["restored_reason"] == "distribution_fetch_error"
+    assert item["restored_return_pct"] == pytest.approx(0.0)
+
+
+def test_event_fetch_failure_falls_back_to_unit_nav_without_acc_nav(isolated_db):
+    navs = [
+        NavRecord(date=record.date, unit_nav=record.unit_nav, acc_nav=0.0, change_pct=0.0)
+        for record in _navs()
+    ]
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    fetcher = FakeFetcher(navs, events_error=RuntimeError("boom"))
+
+    result = FundNavReviewService(fetcher=fetcher).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=400),
+    )
+
+    item = next(item for item in result["items"] if item["horizon"] == "1m")
+    assert item["restored_basis"] == "unit_nav"
+    assert item["restored_reason"] == "distribution_fetch_error"
+    assert item["restored_return_pct"] == pytest.approx(item["nav_return_pct"])
+
+
+def test_record_anchor_stores_anchor_acc_nav(isolated_db):
+    navs = _dividend_navs()
+    _record(navs)
+
+    row = _rows(isolated_db)[0]
+    assert row.anchor_acc_nav == pytest.approx(1.10)
+
+
+def test_stats_expose_restored_metrics_alongside_unit_metrics(isolated_db):
+    navs = _dividend_navs()
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    fetcher = FakeFetcher(
+        navs,
+        events=FundDistributionEvents(
+            dividends=[FundDividendEvent((ANCHOR_DAY + timedelta(days=1)).isoformat(), 0.10)]
+        ),
+    )
+    FundNavReviewService(fetcher=fetcher).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=40),
+    )
+
+    stats = FundNavReviewService().get_stats()
+
+    assert stats["restored_evaluated"] == 1
+    assert stats["avg_restored_return_pct"] == pytest.approx(10.0)
+    assert stats["restored_positive_rate_pct"] == pytest.approx(100.0)
+    assert stats["restored_bases"] == {"dividend_reinvested": 1}
+    # Unit basis and restored basis stay separate.
+    assert stats["avg_nav_return_pct"] == pytest.approx(-1.0)
+
+
+def test_stats_restored_fields_are_null_when_restore_never_ran(isolated_db):
+    navs = _navs()
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    FundNavReviewService(fetcher=FakeFetcher(navs)).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=400),
+    )
+    # Simulate legacy rows: evaluated before restoration columns existed.
+    with isolated_db.get_session() as session:
+        for row in session.query(FundNavReviewRecord).all():
+            row.restored_return_pct = None
+            row.restored_max_drawdown_pct = None
+            row.restored_basis = None
+        session.commit()
+
+    stats = FundNavReviewService().get_stats()
+
+    assert stats["restored_evaluated"] == 0
+    assert stats["restored_positive_rate_pct"] is None
+    assert stats["avg_restored_return_pct"] is None
+    assert stats["restored_bases"] == {}

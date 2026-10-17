@@ -35,6 +35,31 @@ class FundAssetAllocation:
     net_asset: float        # 净资产（亿元）
 
 @dataclass
+class FundDividendEvent:
+    """基金分红：除息日与每份现金分红。"""
+
+    date: str
+    cash_per_share: float
+
+
+@dataclass
+class FundSplitEvent:
+    """基金拆分/份额折算：折算日与份额乘数。"""
+
+    date: str
+    ratio: float
+
+
+@dataclass
+class FundDistributionEvents:
+    """基金分红送配明细；``skipped_rows`` 记录无法解析的行数。"""
+
+    dividends: List[FundDividendEvent] = field(default_factory=list)
+    splits: List[FundSplitEvent] = field(default_factory=list)
+    skipped_rows: int = 0
+
+
+@dataclass
 class FundProfile:
     code: str
     name: str
@@ -173,6 +198,59 @@ def parse_asset_allocation(raw: str) -> Optional[FundAssetAllocation]:
             continue
     return None
 
+def _extract_table_html(raw: str, class_name: str) -> str:
+    match = re.search(
+        rf"<table[^>]*class=['\"][^'\"]*{re.escape(class_name)}[^'\"]*['\"][^>]*>(.*?)</table>",
+        raw or "",
+        re.S | re.I,
+    )
+    return match.group(1) if match else ""
+
+
+def parse_fhsp(raw: str) -> FundDistributionEvents:
+    """解析东财 F10 分红送配页（fhsp）。
+
+    - ``cfxq`` 表：年份 / 权益登记日 / 除息日 / 每10份分红 / 分红发放日；
+      分红金额换算为每份现金（除以 10），日期优先取除息日。
+    - ``fhxq`` 表：年份 / 拆分折算日 / 拆分类型 / 拆分折算比例；
+      ``1:1.4982`` 的右值作为份额乘数。
+
+    空表或「暂无…信息!」返回空列表；无法解析的数据行计入 ``skipped_rows``，
+    不做推断，避免把错误口径带进复盘指标。
+    """
+    events = FundDistributionEvents()
+    for cells in _parse_table_rows(_extract_table_html(raw, "cfxq")):
+        if len(cells) < 4:
+            continue
+        event_date = cells[2] or cells[1]
+        amount = _DIVIDEND_AMOUNT_RE.search(cells[3])
+        try:
+            if not event_date or amount is None:
+                raise ValueError("invalid dividend row")
+            cash = float(amount.group(1)) / 10.0
+            if cash <= 0:
+                raise ValueError("non-positive dividend")
+            events.dividends.append(FundDividendEvent(event_date, round(cash, 8)))
+        except (TypeError, ValueError):
+            events.skipped_rows += 1
+    for cells in _parse_table_rows(_extract_table_html(raw, "fhxq")):
+        if len(cells) < 4:
+            continue
+        ratio_match = _SPLIT_RATIO_RE.match(cells[3] or "")
+        try:
+            if not cells[1] or ratio_match is None:
+                raise ValueError("invalid split row")
+            ratio = float(ratio_match.group(1))
+            if ratio <= 0:
+                raise ValueError("non-positive split ratio")
+            events.splits.append(FundSplitEvent(cells[1], ratio))
+        except (TypeError, ValueError):
+            events.skipped_rows += 1
+    events.dividends.sort(key=lambda item: item.date)
+    events.splits.sort(key=lambda item: item.date)
+    return events
+
+
 def compute_metrics(history: List[NavRecord], risk_free: float = 0.02) -> dict:
     if not history:
         return {}
@@ -211,6 +289,10 @@ _FUND_NAV_URL = "https://api.fund.eastmoney.com/f10/lsjz"
 _FUND_INFO_URL = "https://fund.eastmoney.com/pingzhongdata/{code}.js"
 _FUND_HOLDING_URL = "http://fundf10.eastmoney.com/FundArchivesDatas.aspx"
 _FUND_ASSET_ALLOC_URL = "http://fundf10.eastmoney.com/zcpz_{code}.html"
+_FUND_FHSP_URL = "https://fundf10.eastmoney.com/fhsp_{code}.html"
+
+_DIVIDEND_AMOUNT_RE = re.compile(r"每10份.*?([\d.]+)元")
+_SPLIT_RATIO_RE = re.compile(r"^\s*1\s*:\s*([\d.]+)\s*$")
 
 # 定期报告按季度披露；jjcc 需显式季度参数且当前季度存在发布滞后，故从最近结束的季度扫描。
 _QUARTER_END_MONTHS = (3, 6, 9, 12)
@@ -351,6 +433,13 @@ class FundFetcher:
                     by_date[day] = record
             page += 1
         return [by_date[day] for day in sorted(by_date)]
+
+    def get_distribution_events(self, code: str) -> FundDistributionEvents:
+        """取基金分红送配明细；网络或页面异常向上抛，由调用方降级。"""
+        base = strip_fund_prefix(code)
+        r = requests.get(_FUND_FHSP_URL.format(code=base), headers=_HEADERS, timeout=20)
+        r.raise_for_status()
+        return parse_fhsp(r.text)
 
     def _request_nav_page(
         self,

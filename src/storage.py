@@ -1287,6 +1287,18 @@ class FundNavReviewRecord(Base):
     checked_at = Column(DateTime, index=True)
     evaluated_at = Column(DateTime)
 
+    # Restored metrics (phase 2). Kept nullable so v1 rows remain readable.
+    anchor_acc_nav = Column(Float)
+    eval_acc_nav = Column(Float)
+    acc_nav_return_pct = Column(Float)
+    acc_max_drawdown_pct = Column(Float)
+    restored_return_pct = Column(Float)
+    restored_max_drawdown_pct = Column(Float)
+    restored_basis = Column(String(24), index=True)
+    restored_reason = Column(String(48))
+    restored_events = Column(Integer)
+    restored_checked_at = Column(DateTime, index=True)
+
     created_at = Column(DateTime, default=utc_naive_now, index=True)
     updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, index=True)
 
@@ -1310,6 +1322,10 @@ class FundNavReviewRecord(Base):
         Index(
             'ix_fund_nav_review_stats',
             'engine_version', 'horizon', 'eval_status',
+        ),
+        Index(
+            'ix_fund_nav_review_restore_backlog',
+            'engine_version', 'eval_status', 'restored_checked_at',
         ),
     )
 
@@ -1533,6 +1549,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_llm_usage_telemetry_columns()
             self._ensure_paper_trade_fee_column()
             self._ensure_decision_signal_outcome_benchmark_columns()
+            self._ensure_fund_nav_review_restore_columns()
             self._ensure_decision_signal_profile_schema()
             self._ensure_intelligence_item_scope_values()
             self._ensure_schema_migration_record()
@@ -1987,6 +2004,82 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "CREATE INDEX IF NOT EXISTS ix_decision_signal_outcome_benchmark_backlog "
                 "ON decision_signal_outcomes "
                 "(engine_version, benchmark_status, benchmark_checked_at)"
+            )
+
+    def _ensure_fund_nav_review_restore_columns(self) -> None:
+        """Add nullable restoration columns to existing SQLite fund review tables.
+
+        `create_all` only creates missing tables, so databases created before
+        dividend restoration keep a `fund_nav_reviews` table without these
+        columns. Existing rows stay NULL until the restore backfill evaluates
+        them; nothing is recomputed here.
+        """
+        if not self._is_sqlite_engine:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns(
+                    FundNavReviewRecord.__tablename__
+                )
+            }
+        except Exception as exc:
+            logger.warning(
+                "[fund nav review] failed to inspect restore columns; "
+                "skipping best-effort SQLite restore column backfill: %s",
+                exc,
+            )
+            return
+
+        column_sql = {
+            "anchor_acc_nav": "FLOAT",
+            "eval_acc_nav": "FLOAT",
+            "acc_nav_return_pct": "FLOAT",
+            "acc_max_drawdown_pct": "FLOAT",
+            "restored_return_pct": "FLOAT",
+            "restored_max_drawdown_pct": "FLOAT",
+            "restored_basis": "VARCHAR(24)",
+            "restored_reason": "VARCHAR(48)",
+            "restored_events": "INTEGER",
+            "restored_checked_at": "DATETIME",
+        }
+        max_retries = self._sqlite_write_retry_max
+        for column, column_type in column_sql.items():
+            if column in existing:
+                continue
+            for attempt in range(max_retries + 1):
+                try:
+                    with self._engine.begin() as connection:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE {FundNavReviewRecord.__tablename__} "
+                            f"ADD COLUMN {column} {column_type}"
+                        )
+                    existing.add(column)
+                    break
+                except OperationalError as exc:
+                    if self._is_sqlite_duplicate_column_error(exc, column):
+                        existing.add(column)
+                        break
+                    if self._is_sqlite_locked_error(exc) and attempt < max_retries:
+                        delay = self._sqlite_write_retry_base_delay * (2 ** attempt)
+                        logger.warning(
+                            "[fund nav review] SQLite restore column backfill "
+                            "locked, retrying: %s (%s/%s, %.2fs)",
+                            column,
+                            attempt + 1,
+                            max_retries,
+                            delay,
+                        )
+                        if delay > 0:
+                            time.sleep(delay)
+                        continue
+                    raise
+
+        with self._engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_fund_nav_review_restore_backlog "
+                "ON fund_nav_reviews "
+                "(engine_version, eval_status, restored_checked_at)"
             )
 
     def _ensure_llm_usage_telemetry_columns(self) -> None:

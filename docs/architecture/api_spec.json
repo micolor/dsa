@@ -8937,6 +8937,109 @@
         }
       }
     },
+    "/api/v1/fund-nav-reviews/nav-range": {
+      "get": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "查询基金区间净值走势",
+        "description": "只读返回指定区间的单位净值、累计净值与分红再投资复权净值；区间最长 1100 天，超过 1000 条记录时截断。",
+        "operationId": "getFundNavRange",
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fund_code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 16,
+              "title": "Fund Code"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Start date (inclusive)",
+              "title": "Start Date"
+            },
+            "description": "Start date (inclusive)"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "End date (inclusive)",
+              "title": "End Date"
+            },
+            "description": "End date (inclusive)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavRangeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "查询参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "查询参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "查询失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/fund-nav-reviews/run": {
       "post": {
         "tags": [
@@ -9075,6 +9178,83 @@
           },
           "500": {
             "description": "补录失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/fund-nav-reviews/backfill/restore-metrics": {
+      "post": {
+        "tags": [
+          "FundNavReviews"
+        ],
+        "summary": "回填基金净值复权指标",
+        "description": "为已评估且尚未计算复权指标的复盘行补算累计净值与分红再投资口径；默认 dry_run=true，不写库。",
+        "operationId": "backfillFundNavRestoreMetrics",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundNavRestoreBackfillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundNavRestoreBackfillResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求字段非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "回填失败",
             "content": {
               "application/json": {
                 "schema": {
@@ -16123,6 +16303,201 @@
         "title": "ExtractItem",
         "description": "单条提取结果（代码、名称、置信度）"
       },
+      "FundNavRangeItem": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "unit_nav": {
+            "type": "number",
+            "title": "Unit Nav"
+          },
+          "acc_nav": {
+            "type": "number",
+            "title": "Acc Nav"
+          },
+          "adjusted_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjusted Nav"
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "unit_nav",
+          "acc_nav",
+          "change_pct"
+        ],
+        "title": "FundNavRangeItem"
+      },
+      "FundNavRangeResponse": {
+        "properties": {
+          "fund_code": {
+            "type": "string",
+            "title": "Fund Code"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "adjustment_status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Adjustment Status"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "events": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Events"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FundNavRangeItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fund_code",
+          "start_date",
+          "end_date",
+          "adjustment_status",
+          "truncated"
+        ],
+        "title": "FundNavRangeResponse"
+      },
+      "FundNavRestoreBackfillRequest": {
+        "properties": {
+          "fund_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Code"
+          },
+          "anchor_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor From"
+          },
+          "anchor_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor To"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 400.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 200
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": true
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundNavRestoreBackfillRequest"
+      },
+      "FundNavRestoreBackfillResponse": {
+        "properties": {
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "unavailable": {
+            "type": "integer",
+            "title": "Unavailable"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "funds": {
+            "type": "integer",
+            "title": "Funds"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanned",
+          "updated",
+          "unavailable",
+          "skipped",
+          "funds",
+          "dry_run",
+          "engine_version"
+        ],
+        "title": "FundNavRestoreBackfillResponse"
+      },
       "FundNavReviewBackfillRequest": {
         "properties": {
           "fund_code": {
@@ -16257,6 +16632,17 @@
             "type": "number",
             "title": "Anchor Nav"
           },
+          "anchor_acc_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Acc Nav"
+          },
           "due_date": {
             "type": "string",
             "format": "date",
@@ -16332,6 +16718,106 @@
               }
             ],
             "title": "Eval Window Records"
+          },
+          "eval_acc_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Acc Nav"
+          },
+          "acc_nav_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acc Nav Return Pct"
+          },
+          "acc_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acc Max Drawdown Pct"
+          },
+          "restored_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Return Pct"
+          },
+          "restored_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Max Drawdown Pct"
+          },
+          "restored_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Basis"
+          },
+          "restored_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Reason"
+          },
+          "restored_events": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Events"
+          },
+          "restored_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Checked At"
           },
           "analysis_history_id": {
             "anyOf": [
@@ -16618,6 +17104,51 @@
             },
             "type": "object",
             "title": "Unable Reasons"
+          },
+          "restored_evaluated": {
+            "type": "integer",
+            "title": "Restored Evaluated",
+            "default": 0
+          },
+          "restored_positive_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Positive Rate Pct"
+          },
+          "avg_restored_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Restored Return Pct"
+          },
+          "avg_restored_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Restored Max Drawdown Pct"
+          },
+          "restored_bases": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Restored Bases"
           }
         },
         "type": "object",
@@ -16704,6 +17235,51 @@
             },
             "type": "object",
             "title": "Unable Reasons"
+          },
+          "restored_evaluated": {
+            "type": "integer",
+            "title": "Restored Evaluated",
+            "default": 0
+          },
+          "restored_positive_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored Positive Rate Pct"
+          },
+          "avg_restored_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Restored Return Pct"
+          },
+          "avg_restored_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Restored Max Drawdown Pct"
+          },
+          "restored_bases": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Restored Bases"
           },
           "breakdowns": {
             "additionalProperties": {

@@ -10,6 +10,7 @@ from data_provider.fund_fetcher import (
     FundFetcher,
     parse_lsjz, compute_metrics, parse_pingzhongdata,
     is_fund_code, strip_fund_prefix, NavRecord,
+    parse_fhsp,
 )
 
 
@@ -235,6 +236,44 @@ def test_get_nav_range_rejects_reversed_bounds_without_network():
         recs = FundFetcher().get_nav_range("003095", date(2025, 2, 1), date(2025, 1, 1))
     assert recs == []
     get.assert_not_called()
+
+
+FHSP_HTML = """
+<table class='w782 comm cfxq'><thead><tr><th>年份</th><th>权益登记日</th><th>除息日</th><th>每10份分红</th><th>分红发放日</th></tr></thead>
+<tbody>
+<tr><td>2021年</td><td>2021-08-10</td><td>2021-08-10</td><td>每10份派现金1.2739元</td><td>2021-08-12</td></tr>
+<tr><td>坏行</td><td></td><td></td><td>暂无</td><td></td></tr>
+</tbody></table>
+<table class='w782 comm fhxq'><thead><tr><th>年份</th><th>拆分折算日</th><th>拆分类型</th><th>拆分折算比例</th></tr></thead>
+<tbody><tr><td>2020年</td><td>2020-08-26</td><td>份额折算</td><td>1:1.4982</td></tr></tbody></table>
+"""
+
+
+def test_parse_fhsp_extracts_dividends_and_splits():
+    events = parse_fhsp(FHSP_HTML)
+    assert [(e.date, e.cash_per_share) for e in events.dividends] == [("2021-08-10", 0.12739)]
+    assert [(e.date, e.ratio) for e in events.splits] == [("2020-08-26", 1.4982)]
+    assert events.skipped_rows == 1
+
+
+def test_parse_fhsp_empty_tables_return_empty_events():
+    raw = (
+        "<table class='w782 comm cfxq'><tbody><tr><td colspan='5'>暂无分红信息!</td></tr></tbody></table>"
+        "<table class='w782 comm fhxq'><tbody><tr><td colspan='4'>暂无拆分信息!</td></tr></tbody></table>"
+    )
+    events = parse_fhsp(raw)
+    assert events.dividends == []
+    assert events.splits == []
+    assert events.skipped_rows == 0
+
+
+def test_get_distribution_events_propagates_http_errors():
+    with patch(
+        "data_provider.fund_fetcher.requests.get",
+        side_effect=RuntimeError("boom"),
+    ):
+        with pytest.raises(RuntimeError):
+            FundFetcher().get_distribution_events("fund:003095")
 
 
 def test_default_history_window_can_compute_one_year_return():

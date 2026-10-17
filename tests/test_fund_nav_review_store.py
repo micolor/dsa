@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -100,3 +100,139 @@ def test_anchor_does_not_touch_other_tables(isolated_db):
     FundNavReviewService().record_anchor(_profile())
     with isolated_db.get_session() as session:
         assert session.query(AnalysisHistory).count() == 0
+
+
+def test_restore_columns_default_to_null(isolated_db):
+    FundNavReviewService().record_anchor(_profile())
+
+    for row in _rows(isolated_db):
+        assert row.anchor_acc_nav == pytest.approx(1.2345)
+        assert row.eval_acc_nav is None
+        assert row.acc_nav_return_pct is None
+        assert row.acc_max_drawdown_pct is None
+        assert row.restored_return_pct is None
+        assert row.restored_max_drawdown_pct is None
+        assert row.restored_basis is None
+        assert row.restored_reason is None
+        assert row.restored_events is None
+        assert row.restored_checked_at is None
+
+
+def test_update_review_persists_restore_fields(isolated_db):
+    from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+
+    FundNavReviewService().record_anchor(_profile())
+    row = _rows(isolated_db)[0]
+    checked_at = datetime(2026, 10, 17, 8, 30)
+
+    updated = FundNavReviewRepository(isolated_db).update_review(
+        review_id=row.id,
+        fields={
+            "anchor_acc_nav": 1.5,
+            "eval_acc_nav": 1.65,
+            "acc_nav_return_pct": 10.0,
+            "acc_max_drawdown_pct": -3.2,
+            "restored_return_pct": 12.5,
+            "restored_max_drawdown_pct": -2.8,
+            "restored_basis": "dividend_reinvested",
+            "restored_reason": None,
+            "restored_events": 2,
+            "restored_checked_at": checked_at,
+        },
+    )
+
+    refreshed = _rows(isolated_db)[0]
+    assert updated is True
+    assert refreshed.anchor_acc_nav == pytest.approx(1.5)
+    assert refreshed.eval_acc_nav == pytest.approx(1.65)
+    assert refreshed.acc_nav_return_pct == pytest.approx(10.0)
+    assert refreshed.acc_max_drawdown_pct == pytest.approx(-3.2)
+    assert refreshed.restored_return_pct == pytest.approx(12.5)
+    assert refreshed.restored_max_drawdown_pct == pytest.approx(-2.8)
+    assert refreshed.restored_basis == "dividend_reinvested"
+    assert refreshed.restored_reason is None
+    assert refreshed.restored_events == 2
+    assert refreshed.restored_checked_at == checked_at
+
+
+def _mark_evaluated(db, *, checked_at=None):
+    from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+
+    repo = FundNavReviewRepository(db)
+    for row in _rows(db):
+        repo.update_review(
+            review_id=row.id,
+            fields={
+                "eval_status": "evaluated",
+                "eval_date": row.anchor_date,
+                "eval_nav": row.anchor_nav,
+                "checked_at": checked_at,
+            },
+        )
+
+
+def test_list_restore_backlog_selects_only_unchecked_evaluated_rows(isolated_db):
+    from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+
+    service = FundNavReviewService()
+    service.record_anchor(_profile(day="2024-01-02"))
+    service.record_anchor(_profile(code="006229", day="2024-02-02"))
+    _mark_evaluated(isolated_db)
+
+    repo = FundNavReviewRepository(isolated_db)
+    backlog = repo.list_restore_backlog(engine_version=FUND_NAV_REVIEW_ENGINE_VERSION)
+    assert len(backlog) == 8
+    assert all(row.eval_status == "evaluated" for row in backlog)
+    assert all(row.restored_checked_at is None for row in backlog)
+
+    repo.update_review(
+        review_id=backlog[0].id,
+        fields={"restored_checked_at": datetime(2026, 10, 17, 9, 0)},
+    )
+    remaining = repo.list_restore_backlog(engine_version=FUND_NAV_REVIEW_ENGINE_VERSION)
+    assert len(remaining) == 7
+    assert backlog[0].id not in {row.id for row in remaining}
+
+    refreshed = repo.list_restore_backlog(
+        engine_version=FUND_NAV_REVIEW_ENGINE_VERSION, force=True
+    )
+    assert len(refreshed) == 8
+
+
+def test_list_restore_backlog_filters_by_fund_and_anchor_range(isolated_db):
+    from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+
+    service = FundNavReviewService()
+    service.record_anchor(_profile(day="2024-01-02"))
+    service.record_anchor(_profile(code="006229", day="2024-02-02"))
+    _mark_evaluated(isolated_db)
+
+    repo = FundNavReviewRepository(isolated_db)
+    by_fund = repo.list_restore_backlog(
+        engine_version=FUND_NAV_REVIEW_ENGINE_VERSION, fund_code="006229"
+    )
+    assert len(by_fund) == 4
+    assert {row.fund_code for row in by_fund} == {"006229"}
+
+    by_range = repo.list_restore_backlog(
+        engine_version=FUND_NAV_REVIEW_ENGINE_VERSION,
+        anchor_from=date(2024, 2, 1),
+    )
+    assert len(by_range) == 4
+    assert {row.anchor_date for row in by_range} == {date(2024, 2, 2)}
+
+    by_horizon = repo.list_restore_backlog(
+        engine_version=FUND_NAV_REVIEW_ENGINE_VERSION, horizon="1m"
+    )
+    assert len(by_horizon) == 2
+    assert {row.horizon for row in by_horizon} == {"1m"}
+
+
+def test_list_restore_backlog_skips_pending_rows(isolated_db):
+    from src.repositories.fund_nav_review_repo import FundNavReviewRepository
+
+    FundNavReviewService().record_anchor(_profile())
+    backlog = FundNavReviewRepository(isolated_db).list_restore_backlog(
+        engine_version=FUND_NAV_REVIEW_ENGINE_VERSION
+    )
+    assert backlog == []

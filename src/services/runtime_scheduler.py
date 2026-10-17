@@ -452,6 +452,7 @@ class RuntimeSchedulerService:
         tasks.extend(self._current_paper_valuation_background_tasks(config))
         tasks.extend(self._current_signal_outcome_background_tasks(config))
         tasks.extend(self._current_fund_nav_review_background_tasks(config))
+        tasks.extend(self._current_fund_nav_restore_background_tasks(config))
         return tasks
 
     def _current_paper_valuation_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
@@ -556,6 +557,43 @@ class RuntimeSchedulerService:
                     logger.warning("fund nav review evaluation failed: %s", exc)
 
             cached = {"task": fund_nav_review_task, "interval_seconds": interval_seconds}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_fund_nav_restore_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "fund_nav_review_restore_backfill"
+        if not getattr(config, "fund_nav_review_auto_restore_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            interval_seconds = 86400  # daily; each run is idempotent and bounded
+
+            def fund_nav_restore_task() -> None:
+                from src.services.fund_nav_review_service import (
+                    MAX_ROWS_PER_RUN,
+                    FundNavReviewService,
+                )
+
+                try:
+                    FundNavReviewService().backfill_restored_metrics(
+                        dry_run=False,
+                        limit=MAX_ROWS_PER_RUN,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("fund nav review restore backfill failed: %s", exc)
+
+            cached = {"task": fund_nav_restore_task, "interval_seconds": interval_seconds}
             self._background_task_cache[name] = cached
 
         run_immediately = name not in self._background_task_registered_names
