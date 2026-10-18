@@ -51,6 +51,7 @@ class DecisionSignalOutcomeRepository:
         action: Optional[str] = None,
         source_type: Optional[str] = None,
         statuses: Optional[List[str]] = None,
+        exclude_ids: Optional[List[int]] = None,
         offset: int = 0,
         limit: int = 100,
     ) -> List[DecisionSignalRecord]:
@@ -59,6 +60,8 @@ class DecisionSignalOutcomeRepository:
         conditions = []
         if signal_id is not None:
             conditions.append(DecisionSignalRecord.id == signal_id)
+        if exclude_ids:
+            conditions.append(DecisionSignalRecord.id.not_in(list(exclude_ids)))
         if stock_codes:
             conditions.append(DecisionSignalRecord.stock_code.in_(stock_codes))
         if market:

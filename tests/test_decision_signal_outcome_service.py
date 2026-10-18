@@ -975,3 +975,19 @@ def test_legacy_outcome_table_gains_benchmark_columns(tmp_path) -> None:
     } <= columns
     assert benchmark_status is None
     assert "ix_decision_signal_outcome_benchmark_backlog" in indexes
+
+
+def test_run_outcomes_excludes_processed_signals_and_reports_selected_ids(isolated_db) -> None:
+    first = _add_signal(isolated_db, code="600519")
+    second = _add_signal(isolated_db, code="000001")
+    third = _add_signal(isolated_db, code="000002")
+    service = DecisionSignalOutcomeService(db_manager=isolated_db)
+
+    result = service.run_outcomes(
+        force=True,
+        horizons=["1d"],
+        exclude_signal_ids=[first],
+    )
+
+    assert set(result["processed_signal_ids"]) == {second, third}
+    assert {item["signal_id"] for item in result["items"]} == {second, third}

@@ -510,6 +510,59 @@ class IntelligenceServiceTestCase(unittest.TestCase):
         self.assertIn(("market", INTELLIGENCE_ITEM_NULL_SCOPE_VALUE), scope_pairs)
         self.assertIn(("symbol", "600519"), scope_pairs)
 
+    def test_list_items_filters_by_source_id(self) -> None:
+        first = self.service.create_source({
+            "name": "first-feed",
+            "url": "https://feeds.example.com/first.xml",
+            "scope_type": "market",
+            "market": "cn",
+        })
+        second = self.service.create_source({
+            "name": "second-feed",
+            "url": "https://feeds.example.com/second.xml",
+            "scope_type": "market",
+            "market": "us",
+        })
+        repo = IntelligenceRepository()
+        saved = repo.upsert_items([
+            {
+                "source_id": first["id"],
+                "source_name": "first-feed",
+                "source_type": "rss",
+                "title": "First item",
+                "url": "https://news.example.com/first",
+                "scope_type": "market",
+                "market": "cn",
+                "fetched_at": datetime.now(),
+            },
+            {
+                "source_id": second["id"],
+                "source_name": "second-feed",
+                "source_type": "rss",
+                "title": "Second item",
+                "url": "https://news.example.com/second",
+                "scope_type": "market",
+                "market": "us",
+                "fetched_at": datetime.now(),
+            },
+        ])
+        self.assertEqual(saved, 2)
+
+        hit_rows, hit_total = repo.list_items(source_id=first["id"])
+        self.assertEqual(hit_total, 1)
+        self.assertEqual([row.title for row in hit_rows], ["First item"])
+
+        miss_rows, miss_total = repo.list_items(source_id=999)
+        self.assertEqual((miss_rows, miss_total), ([], 0))
+
+        combined_rows, combined_total = repo.list_items(source_id=first["id"], market="us")
+        self.assertEqual((combined_rows, combined_total), ([], 0))
+
+        # Existing callers that do not pass the new filter are unaffected.
+        all_rows, all_total = repo.list_items()
+        self.assertEqual(all_total, 2)
+        self.assertEqual({row.source_id for row in all_rows}, {first["id"], second["id"]})
+
     def test_redirect_to_private_network_is_blocked(self) -> None:
         source = self.service.create_source({
             "name": "redirected-feed",

@@ -190,6 +190,12 @@ def _should_use_legacy_default_prompt(
     return getattr(bull_trend_skill, "source", None) == "builtin"
 
 
+def _site_operations_enabled() -> bool:
+    from src.config import get_config
+
+    return bool(getattr(get_config(), "agent_chat_site_operations_enabled", True))
+
+
 def get_tool_registry():
     """Return a cached ToolRegistry (built once, shared across requests)."""
     global _TOOL_REGISTRY
@@ -205,20 +211,41 @@ def get_tool_registry():
     from src.agent.tools.alert_tools import ALL_ALERT_TOOLS
     from src.agent.tools.action_tools import ALL_ACTION_TOOLS
 
+    tool_modules = [
+        ALL_DATA_TOOLS,
+        ALL_ANALYSIS_TOOLS,
+        ALL_SEARCH_TOOLS,
+        ALL_MARKET_TOOLS,
+        ALL_BACKTEST_TOOLS,
+        ALL_ALERT_TOOLS,
+        ALL_ACTION_TOOLS,
+    ]
+    if _site_operations_enabled():
+        from src.agent.tools.site_read_tools import ALL_SITE_READ_TOOLS
+        from src.agent.tools.site_action_tools import ALL_SITE_ACTION_TOOLS
+        from src.agent.tools.site_task_tools import ALL_SITE_TASK_TOOLS
+
+        tool_modules.append(ALL_SITE_READ_TOOLS)
+        tool_modules.append(ALL_SITE_ACTION_TOOLS)
+        tool_modules.append(ALL_SITE_TASK_TOOLS)
+
     registry = ToolRegistry()
-    for tool_fn in (
-        ALL_DATA_TOOLS
-        + ALL_ANALYSIS_TOOLS
-        + ALL_SEARCH_TOOLS
-        + ALL_MARKET_TOOLS
-        + ALL_BACKTEST_TOOLS
-        + ALL_ALERT_TOOLS
-        + ALL_ACTION_TOOLS
-    ):
+    for tool_fn in [tool for group in tool_modules for tool in group]:
         registry.register(tool_fn)
+    if not _site_operations_enabled():
+        from src.agent.action_contract import SITE_OPERATION_PROPOSAL_TOOL_NAMES
+
+        # 总开关关闭时移除本功能新增的提案工具。propose_alert_rule_change 是原
+        # propose_alert 的改名替代，propose_portfolio_trade 是原有提案工具，
+        # 两者都属于功能上线前的行为，必须保留。
+        for name in SITE_OPERATION_PROPOSAL_TOOL_NAMES - {"propose_alert_rule_change"}:
+            registry.unregister(name)
+    issues = registry.validate_tool_policies(strict=True)
+    if issues:
+        raise ValueError(f"invalid agent tool policies: {issues}")
 
     _TOOL_REGISTRY = registry
-    logger.info("[AgentFactory] ToolRegistry cached (%d tools)", len(registry._tools) if hasattr(registry, "_tools") else -1)
+    logger.info("[AgentFactory] ToolRegistry cached (%d tools)", len(registry))
     return _TOOL_REGISTRY
 
 

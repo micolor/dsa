@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 SUPPORTED_TOOL_SURFACE_SCOPE_DIMENSIONS = frozenset({"stock"})
+EXECUTION_MODES = frozenset({"none", "direct", "proposal", "task"})
+RISK_LEVELS = frozenset({"read", "low", "high"})
 
 
 # ============================================================
@@ -44,6 +46,9 @@ class ToolPolicy:
     policy_status: str = "unknown"
     scope_dimensions: List[str] = field(default_factory=list)
     cancellation_safe: bool = False
+    execution_mode: str = "none"
+    risk_level: str = "read"
+    undo_hint: Optional[str] = None
 
     @classmethod
     def unknown(cls) -> "ToolPolicy":
@@ -58,6 +63,9 @@ class ToolPolicy:
         permissions: Optional[List[str]] = None,
         scope_dimensions: Optional[List[str]] = None,
         cancellation_safe: bool = False,
+        execution_mode: str = "none",
+        risk_level: str = "read",
+        undo_hint: Optional[str] = None,
     ) -> "ToolPolicy":
         return cls(
             read_only=read_only,
@@ -66,6 +74,9 @@ class ToolPolicy:
             policy_status="declared",
             scope_dimensions=list(scope_dimensions or []),
             cancellation_safe=bool(cancellation_safe),
+            execution_mode=execution_mode,
+            risk_level=risk_level,
+            undo_hint=undo_hint,
         )
 
     def to_public_dict(self) -> Dict[str, Any]:
@@ -75,6 +86,9 @@ class ToolPolicy:
             "permissions": list(self.permissions),
             "policy_status": self.policy_status,
             "cancellation_safe": self.cancellation_safe,
+            "execution_mode": self.execution_mode,
+            "risk_level": self.risk_level,
+            "undo_hint": self.undo_hint,
         }
 
 
@@ -148,6 +162,34 @@ class ToolDefinition:
                 "requires_stock_scope": "stock" in self.policy.scope_dimensions,
             },
         }
+
+    def validate_action_policy(self) -> None:
+        """Reject tools whose execution metadata cannot be safely dispatched."""
+        policy = self.policy
+        if policy.policy_status != "declared":
+            raise ValueError(f"{self.name}: tool policy is not declared")
+        if policy.execution_mode not in EXECUTION_MODES:
+            raise ValueError(
+                f"{self.name}: invalid execution_mode {policy.execution_mode!r}"
+            )
+        if policy.risk_level not in RISK_LEVELS:
+            raise ValueError(f"{self.name}: invalid risk_level {policy.risk_level!r}")
+        if policy.execution_mode == "none":
+            if policy.read_only is not True:
+                raise ValueError(f"{self.name}: execution_mode=none requires read_only=True")
+            if policy.risk_level != "read":
+                raise ValueError(f"{self.name}: execution_mode=none requires risk_level=read")
+            return
+        if policy.read_only is not False:
+            raise ValueError(
+                f"{self.name}: execution_mode={policy.execution_mode} requires read_only=False"
+            )
+        if policy.cancellation_safe:
+            raise ValueError(
+                f"{self.name}: execution_mode={policy.execution_mode} must not be cancellation_safe"
+            )
+        if policy.execution_mode == "direct" and not (policy.undo_hint or "").strip():
+            raise ValueError(f"{self.name}: execution_mode=direct requires undo_hint")
 
     def to_mcp_descriptor(self) -> dict:
         """Return an MCP-compatible descriptor only; no server/transport implied."""
@@ -246,6 +288,14 @@ class ToolRegistry:
                 })
             if not strict:
                 continue
+            try:
+                tool_def.validate_action_policy()
+            except ValueError as exc:
+                issues.append({
+                    "tool": tool_def.name,
+                    "code": "action_policy_invalid",
+                    "message": str(exc),
+                })
             unsupported_scopes = [
                 dimension
                 for dimension in policy.scope_dimensions
@@ -276,7 +326,7 @@ class ToolRegistry:
 
     # ----- Execution -----
 
-    def execute(self, name: str, **kwargs) -> Any:
+    def execute(self, name: str, /, **kwargs) -> Any:
         """Execute a registered tool by name.
 
         Returns the result as a JSON-serializable value.
@@ -284,6 +334,10 @@ class ToolRegistry:
         Raises the handler's exception on execution failure.
 
         Tool names must match the registry exactly.
+
+        ``name`` is positional-only so tools whose handler takes a ``name``
+        argument (e.g. ``propose_portfolio_account_change``) can be invoked
+        without the keyword colliding with this method's parameter.
         """
         tool_def = self.resolve(name)
         if tool_def is None:

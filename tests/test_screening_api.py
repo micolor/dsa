@@ -2439,8 +2439,8 @@ class ScreeningOpportunitiesApiTestCase(unittest.TestCase):
         )
 
         with (
-            patch("api.v1.endpoints.screening.get_task_queue", return_value=fake_queue),
-            patch("api.v1.endpoints.screening.uuid.uuid4", return_value=SimpleNamespace(hex="screen-task-1")),
+            patch("src.services.site_task_submitter.get_task_queue", return_value=fake_queue),
+            patch("src.services.site_task_submitter.uuid.uuid4", return_value=SimpleNamespace(hex="screen-task-1")),
             patch.object(
                 screening_endpoint.ScreeningService,
                 "screen",

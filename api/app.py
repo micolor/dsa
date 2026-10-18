@@ -177,6 +177,7 @@ from src.services.runtime_scheduler import (
     RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
     RUNTIME_SCHEDULER_SUPPRESS_START_ENV,
     RuntimeSchedulerService,
+    set_runtime_scheduler_service,
 )
 from src.services.stock_index_remote_service import (
     get_remote_stock_index_cache_path,
@@ -281,6 +282,7 @@ async def app_lifespan(app: FastAPI):
         schedule_args_overrides=runtime_scheduler_args,
     )
     app.state.runtime_scheduler_service = runtime_scheduler_service
+    set_runtime_scheduler_service(runtime_scheduler_service)
     if not runtime_suppress_start:
         app.state.runtime_scheduler_service.reconcile_from_config(
             run_immediately=runtime_run_immediately,
@@ -303,6 +305,7 @@ async def app_lifespan(app: FastAPI):
         if runtime_scheduler is not None:
             runtime_scheduler.stop()
             delattr(app.state, "runtime_scheduler_service")
+            set_runtime_scheduler_service(None)
 
 
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:

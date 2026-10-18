@@ -2,14 +2,31 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, memo 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, ChevronDown, Copy, Download, RotateCcw, RotateCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Copy,
+  Download,
+  RotateCcw,
+  RotateCw,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { cn } from '../utils/cn';
+import apiClient from '../api';
 import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { Badge, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip, useToastSync } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
 import { applyActionProposal } from '../utils/actionProposal';
 import type { ActionProposal } from '../types/actionProposal';
+import type { ActionExecuted, ActionTask } from '../types/agentAction';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
 import {
@@ -68,6 +85,15 @@ const QUICK_QUESTIONS: Array<{
   { label: '用箱体震荡分析 A 股中芯国际 688981', skill: 'box_oscillation', stockContext: { stock_code: '688981', stock_name: '中芯国际' } },
   { label: '分析腾讯 hk00700', skill: 'bull_trend', stockContext: { stock_code: 'HK00700', stock_name: '腾讯控股' } },
   { label: '用情绪周期分析东方财富', skill: 'emotion_cycle', stockContext: { stock_code: '300059', stock_name: '东方财富' } },
+];
+
+// 悬浮形态的推荐问法偏向「站内操作」而不是整页的策略分析：面板窄、可选的策略入口
+// 已经收起，用户点一下就应该得到基于当前数据的回答或一张可确认的操作卡片。
+const DOCK_QUICK_QUESTIONS = [
+  '我的持仓情况怎么样？',
+  '现在自选里有哪些股票？',
+  '把 600519 加入自选',
+  '今天有哪些值得关注的资讯？',
 ];
 
 // 单条 AI 消息的 Markdown 正文。包一层 memo：运行中的 SSE progress 事件不会改变
@@ -250,7 +276,25 @@ const restoreActiveStockContextFromMessages = (messages: Message[]): ActiveStock
   return restoredContext;
 };
 
-const ChatPage: React.FC = () => {
+// 后台任务轮询到这些状态后不再请求：任务已结束，状态不会再变。
+const TERMINAL_ACTION_TASK_STATUSES = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'cancel_requested',
+]);
+
+type ChatPageProps = {
+  /**
+   * `dock` 是右下角悬浮助手的紧凑形态：隐藏页面级工具栏与历史侧栏，
+   * 高度由外层容器决定，输入区只保留最必要的控件。两种形态共用同一份
+   * 组件与同一个 store，避免出现两套消息渲染。
+   */
+  variant?: 'page' | 'dock';
+};
+
+const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
+  const isDock = variant === 'dock';
   const { t } = useUiLanguage();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -308,6 +352,14 @@ const ChatPage: React.FC = () => {
   const [actionProposalStatus, setActionProposalStatus] = useState<Record<string, ActionProposalStatus>>({});
   // 提交失败的具体原因（服务端拒绝的原因、网络错误等），按卡片键记；没有解析结果时用通用文案。
   const [actionProposalError, setActionProposalError] = useState<Record<string, string>>({});
+  // 后台任务卡片的最近一次轮询结果，按卡片键记；没有结果时显示「等待中」。
+  const [actionTaskStatus, setActionTaskStatus] = useState<Record<string, string>>({});
+  // 轮询用一个可自增的 tick 驱动，避免把 actionTaskStatus 放进 effect 依赖导致立即重排。
+  const [taskPollTick, setTaskPollTick] = useState(0);
+  // 已到终态的任务不再轮询；用 ref 记录，避免触发重新渲染。
+  const terminalActionTaskKeysRef = useRef<Set<string>>(new Set());
+  // 每个任务最近一次开始轮询的时间，用于按剩余间隔重排 timer；否则短间隔任务会不断重置长间隔任务。
+  const actionTaskLastPolledRef = useRef<Record<string, number>>({});
   const { index: stockIndex } = useStockIndex(
     agentStatus?.backend === 'codex_app_server',
   );
@@ -316,6 +368,7 @@ const ChatPage: React.FC = () => {
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dockAutoFocusedRef = useRef(false);
   const skillPickerContainerRef = useRef<HTMLDivElement>(null);
   const { modalRef: skillPickerLayerRef, isCovered: isSkillPickerCovered } = useEscTopLayer();
   const isMountedRef = useRef(true);
@@ -341,9 +394,11 @@ const ChatPage: React.FC = () => {
   }, []);
 
   // Set page title
+  // 悬浮助手挂在任意路由上都可能同时存在，改标题会覆盖当前页面的标题。
   useEffect(() => {
+    if (isDock) return;
     document.title = t('chat.pageTitle');
-  }, [t]);
+  }, [t, isDock]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -427,12 +482,6 @@ const ChatPage: React.FC = () => {
         if (isMountedRef.current) {
           setActionProposalStatus((s) => ({ ...s, [cardKey]: 'applied' }));
         }
-        // 自选类提案改的是本页顶部那个「加入自选 / 从自选删除」按钮的依据（watchlistCodes），
-        // 它只在挂载与手动切换时更新，不重载的话确认完卡片按钮仍按旧快照渲染成相反的意思。
-        // 只对自选两个 kind 重取：交易/告警不影响这份状态，多打一次配置接口没有理由。
-        if (proposal.kind === 'watchlist_add' || proposal.kind === 'watchlist_remove') {
-          await loadWatchlist();
-        }
       } catch (err) {
         console.error('[action proposal] apply failed', err);
         if (isMountedRef.current) {
@@ -441,7 +490,7 @@ const ChatPage: React.FC = () => {
         }
       }
     },
-    [loadWatchlist],
+    [],
   );
 
   const handleCancelActionProposal = useCallback((cardKey: string) => {
@@ -481,6 +530,49 @@ const ChatPage: React.FC = () => {
     setActiveStockContext(restoredContext);
     setActiveStockCode(restoredContext.stock_code);
   }, [activeStockContext, messages, sessionId]);
+
+  // 后台任务卡片轮询：每个任务按自己的间隔请求状态接口，到终态后停止。
+  // 临时失败（非 2xx / 网络错误）只跳过本轮，仍会按间隔重新排队，避免卡片永远停在「等待中」。
+  useEffect(() => {
+    const now = Date.now();
+    const pending = messages
+      .flatMap((msg) => (msg.actionTasks ?? []).map((task) => ({ key: `${msg.id}#${task.taskId}`, task })))
+      .filter(({ key }) => !terminalActionTaskKeysRef.current.has(key));
+
+    if (pending.length === 0) return undefined;
+
+    const timers = pending.map(({ key, task }) => {
+      // 首次排队以「现在」为基准并记下来，之后 effect 重跑才能按已过去的时间算剩余间隔；
+      // 真正开始请求时会把基准改成请求开始时间。
+      const lastPolledAt = actionTaskLastPolledRef.current[key] ?? now;
+      actionTaskLastPolledRef.current[key] = lastPolledAt;
+      // 只等剩余间隔：其他任务触发 effect 重跑时，不能把长间隔任务的计时整体重置。
+      const delay = Math.max(0, task.pollIntervalMs - (now - lastPolledAt));
+      return window.setTimeout(async () => {
+        actionTaskLastPolledRef.current[key] = Date.now();
+        try {
+          // 走共享 apiClient：继承 VITE_API_URL、withCredentials 与统一 401 处理。
+          const response = await apiClient.get<{ status?: string; message?: string }>(task.statusEndpoint);
+          const payload = response.data ?? {};
+          const status = payload.status ?? '';
+          setActionTaskStatus((current) => ({
+            ...current,
+            [key]: payload.message ? `${status} · ${payload.message}` : status,
+          }));
+          if (TERMINAL_ACTION_TASK_STATUSES.has(status)) {
+            terminalActionTaskKeysRef.current.add(key);
+            return;
+          }
+        } catch {
+          setTaskPollTick((tick) => tick + 1);
+          return;
+        }
+        setTaskPollTick((tick) => tick + 1);
+      }, delay);
+    });
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [messages, taskPollTick]);
 
   const syncScrollState = useCallback(() => {
     const viewport = messagesViewportRef.current;
@@ -760,6 +852,20 @@ const ChatPage: React.FC = () => {
       })
     : null;
 
+  // 悬浮面板从入口展开后直接把光标放进输入框（豆包/Raycast 这类助手浮层的默认行为）。
+  // 只在精确指针设备上做：触屏一打开面板就弹软键盘、把可视区顶上去，而用户可能只是
+  // 想回看刚才的回复。
+  // 依赖 agentAvailable 而不是只依赖 isDock：挂载时状态探测还没回来，输入框还是
+  // disabled，focus() 会被静默忽略且不会自动重试。只聚焦一次，避免流式结束把光标
+  // 从用户刚切过去的位置抢回来。
+  useEffect(() => {
+    if (!isDock || dockAutoFocusedRef.current) return;
+    if (!agentAvailable) return;
+    if (!window.matchMedia?.('(pointer: fine)').matches) return;
+    dockAutoFocusedRef.current = true;
+    inputTextareaRef.current?.focus({ preventScroll: true });
+  }, [isDock, agentAvailable]);
+
   const getSkillNames = useCallback(
     (skillIds: string[]) => skillIds.map((id) => skills.find((s) => s.id === id)?.name || id),
     [skills],
@@ -855,7 +961,10 @@ const ChatPage: React.FC = () => {
   }, [pendingDeleteSession, sessionId, loadSessions, handleStartNewChat]);
 
   // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
+  // 只有整页形态负责消费并清空这些参数；悬浮助手可能挂在任意路由上，
+  // 让它跑这段会把当前页面的查询串（筛选条件、分页等）一并清掉。
   useEffect(() => {
+    if (isDock) return;
     const stock = sanitizeFollowUpStockCode(searchParams.get('stock'));
     const name = sanitizeFollowUpStockName(searchParams.get('name'));
     const recordId = parseFollowUpRecordId(searchParams.get('recordId'));
@@ -894,7 +1003,7 @@ const ChatPage: React.FC = () => {
       }
     });
     setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, isDock]);
 
   const showIntroToast = useCallback(() => {
     if (introToastShownRef.current) return;
@@ -915,7 +1024,9 @@ const ChatPage: React.FC = () => {
       const msgText = (overrideMessage ?? input).trim();
       // 只贴图不打字是受支持的一轮（后端为此把 message 改成可选），所以不能在这里用空文本拦掉。
       if ((!msgText && !pendingImage) || loading || !agentAvailable || !agentStatus) return;
-      showIntroToast();
+      // 悬浮面板已有自己的首屏引导，这条「向 AI 询问个股分析」的整页提示会浮在
+      // 页面右上角、盖在面板外面，第一次发送时看起来像是弹错了地方。
+      if (!isDock) showIntroToast();
       if (overrideMessage !== undefined) {
         setInput(msgText);
       }
@@ -986,7 +1097,7 @@ const ChatPage: React.FC = () => {
         },
       });
     },
-    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, pendingImage, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, showIntroToast, startStream, stockIndex],
+    [activeStockContext, agentAvailable, agentStatus, getSkillNames, input, isDock, loading, normalizeSelectedSkillIds, pendingImage, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, showIntroToast, startStream, stockIndex],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1348,6 +1459,38 @@ const ChatPage: React.FC = () => {
     );
   };
 
+  const renderActionExecutionCard = (msg: Message, execution: ActionExecuted, index: number) => (
+    <div key={`${msg.id}#exec-${index}`} className="mb-3 mt-2">
+      <InlineAlert
+        variant="success"
+        title={t('chat.actionExecutedTitle')}
+        message={(
+          <span className="flex flex-col gap-1">
+            <span className="font-medium">{execution.summary}</span>
+            <span className="text-xs">{t('chat.actionUndoHint', { hint: execution.undoHint })}</span>
+          </span>
+        )}
+      />
+    </div>
+  );
+
+  const renderActionTaskCard = (msg: Message, task: ActionTask, index: number) => (
+    <div key={`${msg.id}#task-${index}`} className="mb-3 mt-2">
+      <InlineAlert
+        variant="info"
+        title={t('chat.actionTaskTitle')}
+        message={(
+          <span className="flex flex-col gap-1">
+            <span className="font-medium">{task.summary}</span>
+            <span className="text-xs">
+              {t('chat.actionTaskStatus', { status: actionTaskStatus[`${msg.id}#${task.taskId}`] ?? t('chat.actionTaskPending') })}
+            </span>
+          </span>
+        )}
+      />
+    </div>
+  );
+
   const sidebarContent = (
     <>
       <div className="border-b border-subtle px-3 py-3">
@@ -1542,9 +1685,15 @@ const ChatPage: React.FC = () => {
     <>
     <div
       data-testid="chat-workspace"
-      className="flex h-[calc(100vh-4rem)] w-full min-w-0 flex-col overflow-hidden px-3 pb-4 sm:h-[calc(100vh-4.5rem)] md:px-4"
+      className={cn(
+        'flex w-full min-w-0 flex-col overflow-hidden',
+        isDock
+          ? 'h-full px-2 pb-2'
+          : 'h-[calc(100vh-4rem)] px-3 pb-4 sm:h-[calc(100vh-4.5rem)] md:px-4',
+      )}
     >
         {/* Top action bar: mobile menu left, external export/send buttons right */}
+        {!isDock && (
         <div className="mb-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setSidebarOpen(true)}
@@ -1661,17 +1810,21 @@ const ChatPage: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Content row: sidebar + main chat */}
-        <div className="flex min-h-0 flex-1 gap-4">
+        <div className={cn('flex min-h-0 flex-1', isDock ? 'gap-0' : 'gap-4')}>
           {/* Desktop sidebar：768–1023px 宽度下常驻侧栏会把正文挤到 ~460px，
-              长回复每行只剩二十来个字；这段宽度改用抽屉，1024px 起才常驻。 */}
+              长回复每行只剩二十来个字；这段宽度改用抽屉，1024px 起才常驻。
+              悬浮助手没有历史侧栏，会话切换走整页。 */}
+          {!isDock && (
           <div className="hidden w-64 flex-shrink-0 flex-col overflow-hidden glass-card lg:flex">
             {sidebarContent}
           </div>
+          )}
 
           {/* Mobile sidebar overlay */}
-          {sidebarOpen && (
+          {!isDock && sidebarOpen && (
             <div
               className="fixed inset-0 z-40 lg:hidden"
               onClick={() => setSidebarOpen(false)}
@@ -1695,13 +1848,45 @@ const ChatPage: React.FC = () => {
             className="relative z-10 flex-1"
             viewportRef={messagesViewportRef}
             onScroll={handleMessagesScroll}
-            viewportClassName="space-y-6 p-4 md:p-6"
+            viewportClassName={cn('space-y-6', isDock ? 'p-3' : 'p-4 md:p-6')}
             testId="chat-message-scroll"
           >
             {messages.length === 0 && !loading ? (
               sessionMessagesLoading ? (
                 <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
                   <div className="h-5 w-5 animate-spin rounded-full border-2 border-cyan/20 border-t-cyan" />
+                </div>
+              ) : isDock ? (
+                // 悬浮面板的空态：整页那套 dashed 卡片在 460px 里会显得空荡，
+                // 推荐问题也会散成不齐的几行。这里改成居中的欢迎语 + 单列快捷操作，
+                // 与豆包插件助手的首屏一致：先告诉用户「能帮你做什么」，再给可点的入口。
+                <div className="flex h-full flex-col items-center justify-center px-2 py-6 text-center">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-white shadow-[0_8px_24px_-6px_hsl(var(--primary)/0.5)] ring-1 ring-white/15">
+                    <Sparkles className="h-6 w-6" aria-hidden="true" />
+                  </span>
+                  <h2 className="mt-4 text-base font-semibold text-foreground">
+                    {t('chat.dockEmptyTitle')}
+                  </h2>
+                  <p className="mt-1.5 max-w-[19rem] text-xs leading-relaxed text-secondary-text">
+                    {t('chat.dockEmptyDescription')}
+                  </p>
+                  <div className="mt-5 flex w-full max-w-[22rem] flex-col gap-2">
+                    {DOCK_QUICK_QUESTIONS.map((question) => (
+                      <button
+                        key={question}
+                        type="button"
+                        onClick={() => handleSend(question)}
+                        disabled={!agentAvailable}
+                        className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border/50 bg-surface/30 px-3.5 py-2.5 text-left text-[13px] leading-snug text-secondary-text transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span>{question}</span>
+                        <ArrowRight
+                          className="h-3.5 w-3.5 flex-shrink-0 text-muted-text transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
               <div className="flex h-full items-center justify-center">
@@ -1802,6 +1987,7 @@ const ChatPage: React.FC = () => {
                         renderActionProposalCard(msg, proposal, index),
                       )}
                     {msg.role === 'assistant' ? (
+                      <>
                       <div className="relative">
                         <div className="chat-message-actions">
                           <button
@@ -1812,19 +1998,30 @@ const ChatPage: React.FC = () => {
                           >
                             {copiedMessages.has(msg.id) ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => downloadMessageAsMarkdown(msg)}
-                            className="chat-copy-btn"
-                            aria-label="导出此条消息为 Markdown"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                          </button>
+                          {/* 悬浮面板里不提供单条导出：整页顶部才有「导出会话」，
+                              面板宽度也只够放一个次要操作。 */}
+                          {!isDock && (
+                            <button
+                              type="button"
+                              onClick={() => downloadMessageAsMarkdown(msg)}
+                              className="chat-copy-btn"
+                              aria-label="导出此条消息为 Markdown"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                         <div className="chat-prose pr-3 sm:pr-4">
                           <MarkdownBody content={msg.content} />
                         </div>
                       </div>
+                      {(msg.actionExecutions ?? []).map((execution, index) =>
+                        renderActionExecutionCard(msg, execution, index),
+                      )}
+                      {(msg.actionTasks ?? []).map((task, index) =>
+                        renderActionTaskCard(msg, task, index),
+                      )}
+                      </>
                     ) : (
                       <>
                         {msg.imageDataUrl && (
@@ -1900,14 +2097,21 @@ const ChatPage: React.FC = () => {
           )}
 
           {/* Input area */}
-          <div className="border-t border-white/6 bg-card/88 p-4 md:p-6 relative z-20">
+          <div
+            className={cn(
+              'border-t border-white/6 bg-card/88 relative z-20',
+              isDock ? 'p-3' : 'p-4 md:p-6',
+            )}
+          >
             <div
               className="space-y-3"
               onDrop={handleImageDrop}
               onDragOver={(e) => e.preventDefault()}
             >
               {/* 上下文压缩和「策略 ▾」都是单行控件，各自占一整行时白白吃掉 ~52px 高度，
-                  在 756/600 这类矮窗口里直接挤占消息区。sm 以上并排放，更窄仍上下堆叠。 */}
+                  在 756/600 这类矮窗口里直接挤占消息区。sm 以上并排放，更窄仍上下堆叠。
+                  悬浮助手面板只有 ~400px 宽，这两组控件会把输入框挤到屏幕外，统一留给整页形态。 */}
+              {!isDock && (
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/6 bg-surface/25 px-3 py-2 sm:flex-1 sm:basis-64">
                 <label
@@ -2029,6 +2233,7 @@ const ChatPage: React.FC = () => {
                 </div>
               )}
               </div>
+              )}
 
             {activeStockCode && (
               <div className="flex items-center gap-2">
@@ -2107,13 +2312,46 @@ const ChatPage: React.FC = () => {
                       handleImageFile(f, (files?.length ?? 1) - 1);
                     }
                   }}
-                  placeholder={t('chat.inputPlaceholder')}
+                  // 悬浮面板只有 ~400px 宽，整页的长示例会折成三行把输入框撑高。
+                  placeholder={isDock ? t('chat.inputPlaceholderDock') : t('chat.inputPlaceholder')}
                   disabled={loading || !agentAvailable}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
                   onInput={resizeInputTextarea}
                 />
-                {loading ? (
+                {isDock ? (
+                  // 悬浮面板里发送/停止收成方形图标按钮：460px 宽的输入行再放一枚
+                  // 文字的「发送」，输入框只剩 300px。图标按钮保留 aria-label，
+                  // 键盘与读屏行为与整页的文字按钮一致。
+                  loading ? (
+                    <button
+                      type="button"
+                      onClick={stopStream}
+                      disabled={stopping}
+                      aria-label={stopping ? t('chat.stoppingAnalysis') : t('chat.stopAnalysis')}
+                      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl border border-danger/40 bg-danger/15 text-danger transition-colors hover:bg-danger/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {stopping ? (
+                        <span
+                          className="h-4 w-4 animate-spin rounded-full border-2 border-danger/30 border-t-danger"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSend()}
+                      disabled={(!input.trim() && !pendingImage) || loading || !agentAvailable}
+                      aria-label={t('chat.send')}
+                      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-[0_6px_16px_-4px_hsl(var(--primary)/0.5)] transition-[background-color,transform] hover:bg-primary/90 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      <ArrowUp className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                  )
+                ) : loading ? (
                   <Button
                     variant="danger-subtle"
                     onClick={stopStream}

@@ -1428,6 +1428,10 @@ FastAPI provides RESTful API service for configuration management and triggering
 - **Backtest Validation** - Evaluate historical analysis accuracy, query direction win rate and simulated returns
 - **API Documentation** - Visit `/docs` for Swagger UI
 
+### Ask-stock site operations assistant
+
+Ask Stock can also read site-wide data, run low-risk reversible actions immediately, submit long-running background tasks, and raise confirmation cards for high-risk writes. The master switch is `AGENT_CHAT_SITE_OPERATIONS_ENABLED` (default `true`); disabling it restores the pre-feature tool set (including the existing portfolio-trade and alert-rule proposal cards) and removes every tool added by this feature. Because the tool registry is cached, the change takes effect after a service restart. See [Ask-stock Site Operations Assistant](agent-chat-site-operations.md) (Chinese-only) for the boundaries of direct actions, background tasks, and proposals, explicit exclusions, and audit/rollback behavior.
+
 ### Product behavior notes
 
 For this feature, the product behavior is:

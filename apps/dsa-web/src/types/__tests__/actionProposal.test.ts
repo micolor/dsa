@@ -10,14 +10,14 @@ import { parseActionProposalEvent } from '../actionProposal';
 describe('parseActionProposalEvent', () => {
   const validEvent = {
     type: 'action_proposal',
-    kind: 'alert',
+    kind: 'alert_create',
     summary: '「600519」价格上穿 ¥1800',
     proposal: { target: '600519' },
   };
 
   it('parses a valid event, keeping the proposal body untouched', () => {
     expect(parseActionProposalEvent(validEvent)).toEqual({
-      kind: 'alert',
+      kind: 'alert_create',
       summary: '「600519」价格上穿 ¥1800',
       proposal: { target: '600519' },
     });
@@ -27,13 +27,13 @@ describe('parseActionProposalEvent', () => {
     ['kind 缺失', { summary: 'x', proposal: { a: 1 } }],
     ['kind 不是字符串', { kind: 42, summary: 'x', proposal: { a: 1 } }],
     ['kind 不在白名单（但确实是字符串）', { kind: 'drop_table', summary: 'x', proposal: { a: 1 } }],
-    ['summary 缺失', { kind: 'alert', proposal: { a: 1 } }],
-    ['summary 不是字符串', { kind: 'alert', summary: 42, proposal: { a: 1 } }],
-    ['proposal 缺失', { kind: 'alert', summary: 'x' }],
-    ['proposal 不是对象', { kind: 'alert', summary: 'x', proposal: 'nope' }],
-    ['proposal 是数组（数组也是 object，但不是合法请求体）', { kind: 'alert', summary: 'x', proposal: [] }],
-    ['summary 是空串', { kind: 'alert', summary: '', proposal: { a: 1 } }],
-    ['summary 只有空白', { kind: 'alert', summary: '   ', proposal: { a: 1 } }],
+    ['summary 缺失', { kind: 'alert_create', proposal: { a: 1 } }],
+    ['summary 不是字符串', { kind: 'alert_create', summary: 42, proposal: { a: 1 } }],
+    ['proposal 缺失', { kind: 'alert_create', summary: 'x' }],
+    ['proposal 不是对象', { kind: 'alert_create', summary: 'x', proposal: 'nope' }],
+    ['proposal 是数组（数组也是 object，但不是合法请求体）', { kind: 'alert_create', summary: 'x', proposal: [] }],
+    ['summary 是空串', { kind: 'alert_create', summary: '', proposal: { a: 1 } }],
+    ['summary 只有空白', { kind: 'alert_create', summary: '   ', proposal: { a: 1 } }],
   ];
 
   it.each(invalidCases)('returns undefined when %s', (_label, event) => {

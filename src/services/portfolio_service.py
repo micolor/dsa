@@ -661,6 +661,170 @@ class PortfolioService:
         portfolio_cache.put_snapshot(cache_key, result)
         return result
 
+    def get_portfolio_snapshot_readonly(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        as_of: Optional[date] = None,
+        cost_method: str = "fifo",
+    ) -> Dict[str, Any]:
+        """Return the last persisted portfolio snapshot without replaying it.
+
+        ``get_portfolio_snapshot`` retains its write path (it replaces cached
+        positions/lots and the daily snapshot, and may start a quote-refresh
+        thread). Read-only consumers such as agent tools must not trigger that,
+        so this method only reads the newest persisted daily snapshot per
+        account and returns the same public payload shape. Accounts that have
+        never been replayed yield a bounded notice instead of a computed
+        snapshot.
+        """
+        as_of_date = as_of or date.today()
+        method = self._normalize_cost_method(cost_method)
+        if account_id is not None:
+            account_rows = [self._require_active_account(account_id)]
+        else:
+            account_rows = self.repo.list_accounts(include_inactive=False)
+
+        accounts_payload: List[Dict[str, Any]] = []
+        aggregate_currency = "CNY"
+        aggregate = {
+            "total_cash": 0.0,
+            "total_market_value": 0.0,
+            "total_equity": 0.0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "fee_total": 0.0,
+            "tax_total": 0.0,
+            "fx_stale": False,
+            "limitations": [],
+        }
+
+        for account in account_rows:
+            row = self.repo.get_latest_daily_snapshot(
+                account_id=account.id,
+                as_of=as_of_date,
+                cost_method=method,
+            )
+            if row is None:
+                accounts_payload.append({
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "owner_id": account.owner_id,
+                    "broker": account.broker,
+                    "market": account.market,
+                    "base_currency": account.base_currency,
+                    "as_of": None,
+                    "message": "no cached portfolio snapshot",
+                    "positions": [],
+                })
+                continue
+
+            try:
+                account_payload = json.loads(row.payload) if row.payload else {}
+            except (TypeError, ValueError):
+                account_payload = {}
+            if not isinstance(account_payload, dict):
+                account_payload = {}
+            account_payload.setdefault("account_id", account.id)
+            account_payload.setdefault("account_name", account.name)
+            account_payload.setdefault("owner_id", account.owner_id)
+            account_payload.setdefault("broker", account.broker)
+            account_payload.setdefault("market", account.market)
+            account_payload.setdefault("base_currency", account.base_currency)
+            account_payload.setdefault("as_of", row.snapshot_date.isoformat())
+            account_payload.setdefault("cost_method", method)
+            account_payload.setdefault("positions", [])
+            accounts_payload.append(account_payload)
+
+            aggregate["limitations"] = _merge_portfolio_limitations(
+                aggregate["limitations"],
+                account_payload.get("limitations", []),
+            )
+
+            base_currency = account.base_currency
+            total_cash, stale_cash, _ = self._convert_amount(
+                amount=float(row.total_cash or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            total_mv, stale_mv, _ = self._convert_amount(
+                amount=float(row.total_market_value or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            total_equity, stale_eq, _ = self._convert_amount(
+                amount=float(row.total_equity or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            realized, stale_realized, _ = self._convert_amount(
+                amount=float(row.realized_pnl or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            unrealized, stale_unrealized, _ = self._convert_amount(
+                amount=float(row.unrealized_pnl or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            fee, stale_fee, _ = self._convert_amount(
+                amount=float(row.fee_total or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+            tax, stale_tax, _ = self._convert_amount(
+                amount=float(row.tax_total or 0.0),
+                from_currency=base_currency,
+                to_currency=aggregate_currency,
+                as_of_date=as_of_date,
+            )
+
+            aggregate["total_cash"] += total_cash
+            aggregate["total_market_value"] += total_mv
+            aggregate["total_equity"] += total_equity
+            aggregate["realized_pnl"] += realized
+            aggregate["unrealized_pnl"] += unrealized
+            aggregate["fee_total"] += fee
+            aggregate["tax_total"] += tax
+            aggregate["fx_stale"] = aggregate["fx_stale"] or bool(row.fx_stale) or any(
+                [
+                    stale_cash,
+                    stale_mv,
+                    stale_eq,
+                    stale_realized,
+                    stale_unrealized,
+                    stale_fee,
+                    stale_tax,
+                ]
+            )
+
+        limitations = aggregate["limitations"]
+        return {
+            "as_of": as_of_date.isoformat(),
+            "cost_method": method,
+            "currency": aggregate_currency,
+            "account_count": len(account_rows),
+            "total_cash": round(aggregate["total_cash"], 6),
+            "total_market_value": round(aggregate["total_market_value"], 6),
+            "total_equity": round(aggregate["total_equity"], 6),
+            "realized_pnl": round(aggregate["realized_pnl"], 6),
+            "unrealized_pnl": round(aggregate["unrealized_pnl"], 6),
+            "fee_total": round(aggregate["fee_total"], 6),
+            "tax_total": round(aggregate["tax_total"], 6),
+            "fx_stale": aggregate["fx_stale"],
+            "data_quality": "partial" if limitations else "ok",
+            "limitations": limitations,
+            "accounts": accounts_payload,
+            "read_only": True,
+            "source": "persisted_snapshot",
+        }
+
     def refresh_fx_rates(
         self,
         *,

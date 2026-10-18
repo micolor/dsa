@@ -7,12 +7,20 @@ from unittest import mock
 
 import pytest
 
-from src.agent.runner import _maybe_emit_action_proposal
+from src.agent.runner import _maybe_emit_action_event
 from src.agent.tools.action_tools import (
     SUPPORTED_MARKETS,
     SUPPORTED_SIDES,
+    _handle_propose_paper_reset,
+    _handle_propose_portfolio_account_change,
+    _handle_propose_portfolio_ledger_entry,
     _handle_propose_portfolio_trade,
+    _handle_propose_signal_change,
+    propose_paper_reset,
+    propose_portfolio_account_change,
+    propose_portfolio_ledger_entry,
     propose_portfolio_trade_tool,
+    propose_signal_change,
 )
 
 _ACCOUNTS = [
@@ -52,7 +60,8 @@ def _patch_accounts(accounts=None):
 def test_tool_declares_proposal_policy():
     assert propose_portfolio_trade_tool.name == "propose_portfolio_trade"
     assert propose_portfolio_trade_tool.category == "action"
-    assert propose_portfolio_trade_tool.policy.read_only is True
+    assert propose_portfolio_trade_tool.policy.read_only is False
+    assert propose_portfolio_trade_tool.policy.execution_mode == "proposal"
     # 不进 Codex 只读面：cancellation_safe 必须为 False
     assert propose_portfolio_trade_tool.policy.cancellation_safe is False
 
@@ -361,177 +370,8 @@ def test_enums_mirror_the_api_contract():
     assert set(SUPPORTED_MARKETS) == api_markets == set(VALID_MARKETS)
 
 
-# ============================================================
-# propose_watchlist_change
-# ============================================================
-
-from src.agent.tools.action_tools import (  # noqa: E402
-    ALL_ACTION_TOOLS,
-    SUPPORTED_WATCHLIST_ACTIONS,
-    _ACTION_KINDS,
-    _KIND_VERBS,
-    _handle_propose_watchlist_change,
-    propose_watchlist_change_tool,
-)
-
-
-def _patch_named_lists(names=("短线池",), keys=None):
-    """``keys`` 直接给出配置里的原始 key，用于构造非规范 key（如 ``WATCHLIST_MY-LIST``，注意
-    必须仍以大写 ``WATCHLIST_`` 开头，否则会被 ``list_named_watchlists`` 直接滤掉）；
-    省略时按 ``WATCHLIST_<NAME>`` 生成（``list_named_watchlists`` 的 name 即 key 后缀小写）。
-    """
-    service = mock.MagicMock()
-    if keys is None:
-        keys = [f"WATCHLIST_{n.upper()}" for n in names]
-
-    def _get_config(include_schema=True, mask_token="******"):
-        # 断言侧会检查 get_config 的调用参数：真实 get_config(include_schema=True) 返回的是带
-        # schema/掩码的结构而不是裸 items，若实现里漏传 False，只有断言过这个参数才抓得到。
-        return {
-            "config_version": "v1",
-            "items": [{"key": key, "value": ""} for key in keys],
-        }
-
-    service.get_config.side_effect = _get_config
-    return mock.patch(
-        "src.services.system_config_service.SystemConfigService", return_value=service
-    )
-
-
-def test_watchlist_tool_parameter_is_named_symbol_not_stock_code():
-    """参数名必须是 symbol。
-
-    叫 stock_code 会被 `_is_stock_scoped_tool`（`src/agent/tools/execution.py:189-193`）视为受股票
-    范围约束的工具，`_guard_tool_stock_scope` 会在单股会话里对跨标的请求硬阻断
-    （`retriable: False`，模型无法绕过），从而拒绝用户明确点名的标的。这条断言把该决定钉住，
-    防止将来有人「为了和请求体字段名对齐」把它改回去。
-    """
-    declared = {param.name for param in propose_watchlist_change_tool.parameters}
-    assert "symbol" in declared
-    assert "stock_code" not in declared
-
-
-def test_watchlist_tool_registered_in_all_action_tools():
-    names = [t.name for t in ALL_ACTION_TOOLS]
-    assert names == ["propose_portfolio_trade", "propose_watchlist_change"]
-    assert propose_watchlist_change_tool.category == "action"
-    assert propose_watchlist_change_tool.policy.read_only is True
-    assert propose_watchlist_change_tool.policy.cancellation_safe is False
-
-
-def test_watchlist_add_proposal_shape():
-    result = _handle_propose_watchlist_change(action="add", symbol=" 600519 ")
-    assert "error" not in result
-    assert result["kind"] == "watchlist_add"
-    # proposal 用的是请求体字段名 stock_code，与工具参数名 symbol 刻意不同
-    assert result["proposal"] == {"stock_code": "600519", "list_name": None}
-    assert result["summary"] == "把「600519」加入自选"
-
-
-def test_watchlist_remove_proposal_shape():
-    result = _handle_propose_watchlist_change(action="remove", symbol="AAPL")
-    assert result["kind"] == "watchlist_remove"
-    assert result["summary"] == "把「AAPL」移出自选"
-
-
-def test_watchlist_named_list_is_echoed_in_summary():
-    with _patch_named_lists():
-        result = _handle_propose_watchlist_change(
-            action="add", symbol="600519", list_name="短线池"
-        )
-    assert "error" not in result
-    assert result["proposal"] == {"stock_code": "600519", "list_name": "短线池"}
-    assert result["summary"] == "把「600519」加入自选列表「短线池」"
-
-
-def test_watchlist_helpers_request_config_without_schema():
-    """list_named_watchlists 必须传 include_schema=False，否则拿到的是 schema 结构而非裸 items。"""
-    with _patch_named_lists() as patched:
-        _handle_propose_watchlist_change(action="add", symbol="600519", list_name="短线池")
-    service = patched.return_value
-    assert service.get_config.call_args_list, "get_config 从未被调用"
-    assert all(
-        call.kwargs.get("include_schema") is False for call in service.get_config.call_args_list
-    )
-
-
-def test_watchlist_rejects_unknown_named_list_and_lists_valid_names():
-    with _patch_named_lists(names=("短线池", "长线池")):
-        result = _handle_propose_watchlist_change(
-            action="add", symbol="600519", list_name="编的池子"
-        )
-    assert "不存在" in result["error"]
-    assert "短线池" in result["error"]
-    assert "长线池" in result["error"]
-
-
-def test_watchlist_named_list_matching_uses_resolved_key():
-    """"My List" 应能命中 WATCHLIST_MY_LIST，而不是按小写名比对时被判为不存在。"""
-    with _patch_named_lists(names=("my_list",)):
-        result = _handle_propose_watchlist_change(
-            action="add", symbol="600519", list_name="My List"
-        )
-    assert "error" not in result
-    assert result["proposal"]["list_name"] == "My List"
-
-
-def test_watchlist_rejects_bad_action_and_bad_code():
-    assert "action" in _handle_propose_watchlist_change(action="toggle", symbol="600519")["error"]
-    assert "不是合法的股票代码格式" in _handle_propose_watchlist_change(
-        action="add", symbol="600519;;;"
-    )["error"]
-
-
-def test_watchlist_appends_reason():
-    result = _handle_propose_watchlist_change(
-        action="add", symbol="600519", reason="突破前高"
-    )
-    assert result["summary"].endswith("（突破前高）")
-
-
-def test_watchlist_envelope_is_json_serializable():
-    result = _handle_propose_watchlist_change(action="add", symbol="600519")
-    json.dumps(result, ensure_ascii=False)
-
-
-def test_watchlist_action_kinds_cover_the_supported_actions():
-    """kind 必须与 action 集合一一对应：漏一个就会在确认卡片上标错动作。
-
-    ``SUPPORTED_WATCHLIST_ACTIONS = tuple(_ACTION_KINDS)``，所以第一条断言其实是恒等式
-    （``set(tuple(d)) == set(d)`` 对任何 dict 都成立），只钉住推导关系；真正的守卫是第二条。
-    """
-    assert set(_ACTION_KINDS) == set(SUPPORTED_WATCHLIST_ACTIONS)
-    # 这条等式是唯一守卫：去掉它，往 _ACTION_KINDS 一边加成员不会有任何测试变红
-    # （新增 action 若无测试覆盖，_KIND_VERBS 的 KeyError 只在运行时才炸）。
-    assert set(_KIND_VERBS) == set(_ACTION_KINDS.values())
-
-
-def test_watchlist_hint_skips_names_that_cannot_round_trip():
-    """非规范 key ``WATCHLIST_MY-LIST`` 的 name 是「my-list」，但
-    ``resolve_watchlist_key("my-list")`` 会把 ``-`` 折成 ``_`` 得到 ``WATCHLIST_MY_LIST``：
-    把它列进「可用列表」等于推荐一个随后必然被拒的名字，模型会照着自己的提示原地重试。
-
-    注意不能用小写 ``watchlist_foo`` 当夹具：``list_named_watchlists`` 自己会按
-    ``startswith("WATCHLIST_")`` 把它整个滤掉，被测的往返过滤根本不会执行。
-    """
-    with _patch_named_lists(keys=["WATCHLIST_MY-LIST"]):
-        result = _handle_propose_watchlist_change(
-            action="add", symbol="600519", list_name="短线池"
-        )
-    assert "my-list" not in result["error"]
-    assert "list_name" in result["error"]
-    # 不能教模型「省略 list_name 用默认自选」：用户点名了某个列表，静默改用默认等于替用户
-    # 改写目标；必须先取到用户同意，或给出新建/重命名这类替代方案。
-    assert "省略 list_name" not in result["error"]
-    assert "用户同意" in result["error"]
-
-
 def test_reason_is_length_bounded_in_the_action_tools():
     """reason 会流进 summary → SSE 事件 → 确认卡片，模型不能往里塞几 KB 文本。"""
-    watchlist = _handle_propose_watchlist_change(
-        action="add", symbol="600519", reason="很" * 5000
-    )
-    assert watchlist["summary"].endswith("（" + "很" * 200 + "）")
     with _patch_accounts():
         trade = _handle_propose_portfolio_trade(
             account_id=1,
@@ -550,7 +390,13 @@ def test_action_tools_are_registered_with_chinese_labels():
     from src.agent.runner import _THINKING_TOOL_LABELS
 
     registry = get_tool_registry()
-    for name in ("propose_portfolio_trade", "propose_watchlist_change"):
+    for name in (
+        "propose_portfolio_trade",
+        "propose_portfolio_ledger_entry",
+        "propose_portfolio_account_change",
+        "propose_signal_change",
+        "propose_paper_reset",
+    ):
         tool = registry.resolve(name)
         assert tool is not None, f"{name} 未注册"
         assert _THINKING_TOOL_LABELS.get(name), f"{name} 缺少思考过程标签"
@@ -558,16 +404,23 @@ def test_action_tools_are_registered_with_chinese_labels():
 
 
 def test_emitter_rejects_unknown_kind():
+    from src.agent.factory import get_tool_registry
+
     events = []
     tc = SimpleNamespace(name="propose_portfolio_trade")
     raw = json.dumps({"kind": "drop_table", "summary": "x", "proposal": {"a": 1}})
-    out = _maybe_emit_action_proposal(tc, raw, events.append, step=1)
+    out = _maybe_emit_action_event(
+        tc, raw, events.append, step=1, tool_registry=get_tool_registry()
+    )
     assert out == raw
     assert events == []
 
 
 def test_emitter_rejects_malformed_summary_and_proposal():
+    from src.agent.factory import get_tool_registry
+
     events = []
+    registry = get_tool_registry()
     tc = SimpleNamespace(name="propose_portfolio_trade")
     for payload in (
         {"kind": "portfolio_trade", "summary": 1, "proposal": {"a": 1}},
@@ -579,7 +432,9 @@ def test_emitter_rejects_malformed_summary_and_proposal():
         {"kind": "portfolio_trade", "summary": "   ", "proposal": {"a": 1}},
     ):
         raw = json.dumps(payload)
-        assert _maybe_emit_action_proposal(tc, raw, events.append, step=1) == raw
+        assert _maybe_emit_action_event(
+            tc, raw, events.append, step=1, tool_registry=registry
+        ) == raw
     assert events == []
 
 
@@ -587,10 +442,10 @@ def test_emitter_rejects_malformed_summary_and_proposal():
     ("tool_name", "envelope", "expected_kind"),
     [
         (
-            "propose_alert",
-            {"kind": "alert", "summary": "「600519」价格上穿 ¥1800",
+            "propose_alert_rule_change",
+            {"kind": "alert_create", "summary": "「600519」价格上穿 ¥1800",
              "proposal": {"target": "600519", "alert_type": "price_cross"}},
-            "alert",
+            "alert_create",
         ),
         (
             "propose_portfolio_trade",
@@ -598,25 +453,24 @@ def test_emitter_rejects_malformed_summary_and_proposal():
              "proposal": {"account_id": 1, "symbol": "005827", "side": "buy"}},
             "portfolio_trade",
         ),
-        (
-            "propose_watchlist_change",
-            {"kind": "watchlist_add", "summary": "把「600519」加入自选",
-             "proposal": {"stock_code": "600519", "list_name": None}},
-            "watchlist_add",
-        ),
     ],
 )
 def test_emitter_accepts_every_proposal_tool_envelope(tool_name, envelope, expected_kind):
-    """三个提案工具的每种信封都必须被发射。
+    """每个提案工具的每种信封都必须被发射。
 
-    漏掉任一工具名（`_PROPOSAL_TOOL_NAMES`）或任一 kind（`_ALLOWED_PROPOSAL_KINDS`），
-    该动作的提案会被静默丢弃、前端永远等不到卡片，而旧版只用 watchlist 一个工具的写法
-    对 `propose_portfolio_trade` 缺失是空转的（实测：删掉它 46 个测试仍全绿）。
+    漏掉任一工具的 `execution_mode="proposal"` 声明，或漏掉任一 kind
+    （`ACTION_PROPOSAL_KINDS`），该动作的提案会被静默丢弃、前端永远等不到卡片；
+    旧版只用 watchlist 一个工具的写法对 `propose_portfolio_trade` 缺失是空转的
+    （实测：删掉它 46 个测试仍全绿）。
     """
+    from src.agent.factory import get_tool_registry
+
     events = []
     tc = SimpleNamespace(name=tool_name)
     raw = json.dumps(envelope, ensure_ascii=False)
-    out = _maybe_emit_action_proposal(tc, raw, events.append, step=2)
+    out = _maybe_emit_action_event(
+        tc, raw, events.append, step=2, tool_registry=get_tool_registry()
+    )
 
     assert events[0]["type"] == "action_proposal"
     assert events[0]["kind"] == expected_kind
@@ -624,32 +478,573 @@ def test_emitter_accepts_every_proposal_tool_envelope(tool_name, envelope, expec
 
 
 def test_every_proposable_kind_is_accepted_by_the_runner():
-    """工具能产出的 kind 必须恰好在 runner 白名单内。
+    """工具能产出的 kind 必须包含在 action contract 的提案白名单内。
 
     这条把 runner 侧的白名单与工具侧的实际产出一致性钉住：漏一个，该动作的提案会被
-    `_maybe_emit_action_proposal` 静默丢弃（工具结果按原样放行），前端永远等不到卡片，
-    而且没有任何测试会红。白名单里多一个死值同样会被这条抓出来。
+    `_maybe_emit_action_event` 静默丢弃（工具结果按原样放行），前端永远等不到卡片，
+    而且没有任何测试会红。
     """
-    from src.agent.runner import _ALLOWED_PROPOSAL_KINDS
-    from src.agent.tools.action_tools import _ACTION_KINDS
+    from src.agent.action_contract import ACTION_PROPOSAL_KINDS
 
-    producible = {"alert", "portfolio_trade", *set(_ACTION_KINDS.values())}
-    assert _ALLOWED_PROPOSAL_KINDS == producible
+    # ``propose_watchlist_change`` was replaced by the direct ``manage_watchlist``
+    # tool; the remaining proposal tools produce the kinds below.
+    producible = {
+        "portfolio_trade",
+        "alert_create", "alert_update", "alert_delete",
+        "portfolio_cash_create", "portfolio_cash_delete",
+        "portfolio_corporate_create", "portfolio_corporate_delete",
+        "portfolio_account_create", "portfolio_account_update", "portfolio_account_deactivate",
+        "signal_create", "signal_status", "signal_feedback", "signal_reassess",
+        "paper_reset",
+        "history_delete_records", "history_delete_by_code",
+        "intelligence_source_create", "intelligence_defaults_create",
+        "config_update", "scheduler_run", "notification_test",
+    }
+    assert producible <= ACTION_PROPOSAL_KINDS
 
 
 def test_proposal_tool_names_match_the_registry():
-    """runner 的提案工具集合必须与注册表里所有 propose_* 工具一致。
+    """注册表里所有 propose_* 工具都必须声明 execution_mode="proposal"。
 
-    硬编码的工具名列表无法发现「新注册了一个提案工具但没加进 runner 集合」——
-    那种情况下该工具的提案会被静默丢弃，且现有测试全绿。这条从注册表反查，
-    把那个方向也堵上。
+    runner 现在按工具策略分派事件：漏声明或声明成别的模式，该工具的提案会被静默丢弃，
+    且现有测试全绿。这条从注册表反查，把那个方向也堵上。
     """
     from src.agent.factory import get_tool_registry
-    from src.agent.runner import _PROPOSAL_TOOL_NAMES
 
-    registered = {n for n in get_tool_registry().list_names() if n.startswith("propose_")}
-    runner_names = set(_PROPOSAL_TOOL_NAMES)
-    assert registered == runner_names, (
-        f"提案工具集合不一致：仅注册表有 {sorted(registered - runner_names)}；"
-        f"仅 runner 有 {sorted(runner_names - registered)}"
+    registry = get_tool_registry()
+    registered = {n for n in registry.list_names() if n.startswith("propose_")}
+    declared = {
+        n for n in registry.list_names()
+        if registry.resolve(n).policy.execution_mode == "proposal"
+    }
+    assert registered == declared, (
+        f"提案工具集合不一致：仅注册表有 {sorted(registered - declared)}；"
+        f"仅声明 proposal 的有 {sorted(declared - registered)}"
     )
+
+
+# ============================================================
+# propose_portfolio_ledger_entry
+# ============================================================
+
+def _invoke(name, args):
+    from src.agent.factory import get_tool_registry
+
+    # Handlers return the envelope dict; the runner serializes it for the LLM.
+    # Goes through ``execute`` on purpose: the account-change handler also takes
+    # a ``name`` argument, which used to collide with the registry method's
+    # parameter (``execute(name, **{"name": ...})`` → TypeError at runtime).
+    return get_tool_registry().execute(name, **args)
+
+
+def test_portfolio_cash_delete_envelope():
+    payload = _invoke("propose_portfolio_ledger_entry", {"action": "delete_cash", "entry_id": 9})
+    assert payload["kind"] == "portfolio_cash_delete"
+    assert payload["proposal"] == {"entry_id": 9}
+
+
+def test_portfolio_corporate_delete_envelope():
+    payload = _invoke(
+        "propose_portfolio_ledger_entry", {"action": "delete_corporate", "action_id": 11}
+    )
+    assert payload["kind"] == "portfolio_corporate_delete"
+    assert payload["proposal"] == {"action_id": 11}
+
+
+def test_portfolio_cash_create_envelope_normalizes_aliases():
+    """``deposit``/``withdraw`` 是自然语言别名；落库契约只接受 ``in``/``out``。"""
+    with _patch_accounts():
+        payload = _invoke(
+            "propose_portfolio_ledger_entry",
+            {
+                "action": "cash",
+                "account_id": 1,
+                "event_date": "2026-09-22",
+                "direction": "deposit",
+                "amount": 1000,
+                "note": "转入",
+            },
+        )
+    assert payload["kind"] == "portfolio_cash_create"
+    assert payload["proposal"] == {
+        "account_id": 1,
+        "event_date": "2026-09-22",
+        "direction": "in",
+        "amount": 1000.0,
+        "currency": None,
+        "note": "转入",
+    }
+
+
+def test_portfolio_cash_create_rejects_bad_date_direction_amount():
+    with _patch_accounts():
+        assert "event_date" in _handle_propose_portfolio_ledger_entry(
+            action="cash", account_id=1, event_date="2026/09/22", direction="in", amount=1
+        )["error"]
+        assert "direction" in _handle_propose_portfolio_ledger_entry(
+            action="cash", account_id=1, event_date="2026-09-22", direction="sideways", amount=1
+        )["error"]
+        assert "amount" in _handle_propose_portfolio_ledger_entry(
+            action="cash", account_id=1, event_date="2026-09-22", direction="in", amount=0
+        )["error"]
+
+
+def test_portfolio_corporate_create_envelope():
+    with _patch_accounts():
+        payload = _invoke(
+            "propose_portfolio_ledger_entry",
+            {
+                "action": "corporate",
+                "account_id": 1,
+                "symbol": "600519",
+                "effective_date": "2026-06-20",
+                "action_type": "cash_dividend",
+                "cash_dividend_per_share": 2.5,
+            },
+        )
+    assert payload["kind"] == "portfolio_corporate_create"
+    assert payload["proposal"] == {
+        "account_id": 1,
+        "symbol": "600519",
+        "effective_date": "2026-06-20",
+        "action_type": "cash_dividend",
+        "market": None,
+        "currency": None,
+        "cash_dividend_per_share": 2.5,
+        "split_ratio": None,
+        "note": None,
+    }
+
+
+def test_portfolio_corporate_create_requires_a_value_and_valid_action_type():
+    with _patch_accounts():
+        assert "cash_dividend_per_share" in _handle_propose_portfolio_ledger_entry(
+            action="corporate",
+            account_id=1,
+            symbol="600519",
+            effective_date="2026-06-20",
+            action_type="cash_dividend",
+        )["error"]
+        assert "action_type" in _handle_propose_portfolio_ledger_entry(
+            action="corporate",
+            account_id=1,
+            symbol="600519",
+            effective_date="2026-06-20",
+            action_type="merger",
+            split_ratio=2,
+        )["error"]
+
+
+def test_portfolio_ledger_rejects_unknown_action():
+    payload = _invoke("propose_portfolio_ledger_entry", {"action": "transfer"})
+    assert "action" in payload["error"]
+
+
+# ============================================================
+# propose_portfolio_account_change
+# ============================================================
+
+def test_portfolio_account_create_envelope():
+    payload = _invoke(
+        "propose_portfolio_account_change",
+        {"action": "create", "name": "A股主账户", "market": "cn"},
+    )
+    assert payload["kind"] == "portfolio_account_create"
+    assert payload["proposal"] == {
+        "name": "A股主账户",
+        "broker": None,
+        "market": "cn",
+        "base_currency": "CNY",
+        "owner_id": None,
+    }
+
+
+def test_portfolio_account_create_defaults_market_to_cn():
+    """描述里承诺 market 可选、默认 cn；handler 必须真的接受省略值。"""
+    payload = _invoke(
+        "propose_portfolio_account_change",
+        {"action": "create", "name": "A股主账户"},
+    )
+    assert payload["proposal"]["market"] == "cn"
+    assert payload["proposal"]["base_currency"] == "CNY"
+
+
+def test_portfolio_account_create_validates_name_and_market():
+    assert "name" in _invoke(
+        "propose_portfolio_account_change", {"action": "create", "name": "   ", "market": "cn"}
+    )["error"]
+    assert "market" in _invoke(
+        "propose_portfolio_account_change", {"action": "create", "name": "x", "market": "eu"}
+    )["error"]
+
+
+def test_portfolio_account_deactivate_envelope():
+    payload = _invoke(
+        "propose_portfolio_account_change", {"action": "deactivate", "account_id": 3}
+    )
+    assert payload["kind"] == "portfolio_account_deactivate"
+    assert payload["proposal"] == {"account_id": 3}
+
+
+def test_portfolio_account_update_envelope():
+    payload = _invoke(
+        "propose_portfolio_account_change",
+        {"action": "update", "account_id": 3, "name": "新名字", "is_active": True},
+    )
+    assert payload["kind"] == "portfolio_account_update"
+    assert payload["proposal"] == {"account_id": 3, "name": "新名字", "is_active": True}
+
+
+def test_portfolio_account_update_requires_a_field_and_valid_market():
+    assert "至少需要" in _handle_propose_portfolio_account_change(
+        action="update", account_id=3
+    )["error"]
+    assert "market" in _handle_propose_portfolio_account_change(
+        action="update", account_id=3, market="eu"
+    )["error"]
+
+
+def test_portfolio_account_change_rejects_unknown_action():
+    payload = _invoke("propose_portfolio_account_change", {"action": "merge", "account_id": 1})
+    assert "action" in payload["error"]
+
+
+# ============================================================
+# propose_signal_change
+# ============================================================
+
+_SIGNAL_CREATE_PAYLOAD = {
+    "stock_code": "600519",
+    "market": "cn",
+    "source_type": "agent",
+    "trigger_source": "chat",
+    "action": "buy",
+}
+
+
+def test_signal_create_envelope():
+    payload = _invoke(
+        "propose_signal_change",
+        {"action": "create", "payload": _SIGNAL_CREATE_PAYLOAD},
+    )
+    assert payload["kind"] == "signal_create"
+    assert payload["proposal"] == _SIGNAL_CREATE_PAYLOAD
+
+
+def test_signal_create_requires_complete_payload():
+    payload = _invoke(
+        "propose_signal_change", {"action": "create", "payload": {"stock_code": "600519"}}
+    )
+    assert "payload 缺少字段" in payload["error"]
+
+
+def test_signal_status_envelope():
+    payload = _invoke(
+        "propose_signal_change",
+        {"action": "status", "signal_id": 5, "status": "active"},
+    )
+    assert payload["kind"] == "signal_status"
+    assert payload["proposal"] == {"signal_id": 5, "status": "active"}
+
+
+def test_signal_status_rejects_unknown_status():
+    payload = _invoke(
+        "propose_signal_change",
+        {"action": "status", "signal_id": 5, "status": "draft"},
+    )
+    assert "status" in payload["error"]
+
+
+def test_signal_feedback_envelope():
+    payload = _invoke(
+        "propose_signal_change",
+        {
+            "action": "feedback",
+            "signal_id": 5,
+            "feedback_value": "not_useful",
+            "reason_code": "late",
+            "note": "太慢了",
+        },
+    )
+    assert payload["kind"] == "signal_feedback"
+    assert payload["proposal"] == {
+        "signal_id": 5,
+        "feedback_value": "not_useful",
+        "reason_code": "late",
+        "note": "太慢了",
+    }
+
+
+def test_signal_feedback_rejects_unknown_value():
+    payload = _invoke(
+        "propose_signal_change",
+        {"action": "feedback", "signal_id": 5, "feedback_value": "wrong"},
+    )
+    assert "feedback_value" in payload["error"]
+
+
+def test_signal_reassess_envelope():
+    proposal = {"source_report_id": 12, "decision_profile": "balanced", "persist": True}
+    payload = _invoke("propose_signal_change", {"action": "reassess", "payload": proposal})
+    assert payload["kind"] == "signal_reassess"
+    assert payload["proposal"] == proposal
+
+
+def test_signal_reassess_drops_extra_payload_keys():
+    """DecisionSignalReassessRequest 是 extra="forbid"：转发多余键会让确认时 422。"""
+    payload = _invoke(
+        "propose_signal_change",
+        {
+            "action": "reassess",
+            "payload": {
+                "source_report_id": 12,
+                "decision_profile": "balanced",
+                "persist": False,
+                "symbol": "600519",
+            },
+        },
+    )
+    assert payload["kind"] == "signal_reassess"
+    assert payload["proposal"] == {
+        "source_report_id": 12,
+        "decision_profile": "balanced",
+        "persist": False,
+    }
+
+
+def test_signal_change_rejects_unknown_action():
+    payload = _invoke("propose_signal_change", {"action": "delete", "signal_id": 5})
+    assert "action" in payload["error"]
+
+
+# ============================================================
+# propose_paper_reset
+# ============================================================
+
+def test_paper_reset_envelope():
+    payload = _invoke("propose_paper_reset", {"initial_capital": 100000})
+    assert payload["kind"] == "paper_reset"
+    assert payload["proposal"]["initial_capital"] == 100000.0
+
+
+def test_paper_reset_omits_empty_capital():
+    result = _handle_propose_paper_reset()
+    assert result["proposal"] == {}
+    assert result["kind"] == "paper_reset"
+
+
+def test_paper_reset_rejects_non_positive_capital():
+    assert "initial_capital" in _handle_propose_paper_reset(initial_capital=-1)["error"]
+
+
+# ============================================================
+# registration / policy
+# ============================================================
+
+def test_new_proposal_tools_declare_proposal_policy():
+    for tool in (
+        propose_portfolio_ledger_entry,
+        propose_portfolio_account_change,
+        propose_signal_change,
+        propose_paper_reset,
+    ):
+        assert tool.category == "action"
+        assert tool.policy.read_only is False
+        assert tool.policy.side_effects == ["write"]
+        assert tool.policy.execution_mode == "proposal"
+        assert tool.policy.risk_level == "high"
+        assert tool.policy.cancellation_safe is False
+
+
+def test_signal_feedback_emits_action_proposal_event():
+    from src.agent.factory import get_tool_registry
+
+    events = []
+    result = _handle_propose_signal_change(
+        action="status", signal_id=5, status="active"
+    )
+    tc = SimpleNamespace(name="propose_signal_change")
+    out = _maybe_emit_action_event(
+        tc,
+        json.dumps(result, ensure_ascii=False),
+        events.append,
+        step=1,
+        tool_registry=get_tool_registry(),
+    )
+    assert events[0]["kind"] == "signal_status"
+    assert json.loads(out) == {"message": result["summary"]}
+
+
+# ============================================================
+# propose_history_deletion / propose_intelligence_source_change
+# propose_config_update / propose_scheduler_run / propose_notification_test
+# ============================================================
+
+def test_history_delete_records_envelope():
+    payload = _invoke("propose_history_deletion", {
+        "action": "records", "record_ids": [1, 2],
+    })
+    assert payload["kind"] == "history_delete_records"
+    assert payload["proposal"]["record_ids"] == [1, 2]
+
+
+def test_history_delete_by_code_requires_code():
+    payload = _invoke("propose_history_deletion", {"action": "by_code"})
+    assert payload["error"]
+
+
+def test_history_delete_by_code_envelope_names_the_target():
+    payload = _invoke("propose_history_deletion", {
+        "action": "by_code", "stock_code": "600519",
+    })
+    assert payload["kind"] == "history_delete_by_code"
+    assert payload["proposal"] == {"stock_code": "600519"}
+    assert "600519" in payload["summary"]
+
+
+def test_history_delete_by_code_is_stock_scoped_for_the_runner_guard():
+    from src.agent.factory import get_tool_registry
+    from src.agent.stock_scope import StockScope
+    from src.agent.tools.execution import _guard_tool_stock_scope
+
+    registry = get_tool_registry()
+    tool = registry.resolve("propose_history_deletion")
+    assert any(param.name == "stock_code" for param in tool.parameters)
+    assert tool.policy.scope_dimensions == ["stock"]
+
+    scope = StockScope(expected_stock_code="600519", allowed_stock_codes={"600519"})
+    denied = _guard_tool_stock_scope(
+        registry, "propose_history_deletion", {"stock_code": "000001"}, scope,
+    )
+    assert denied is not None
+    assert denied["error"] == "stock_scope_violation"
+    assert _guard_tool_stock_scope(
+        registry, "propose_history_deletion", {"stock_code": "600519"}, scope,
+    ) is None
+
+
+def test_history_delete_records_rejects_invalid_ids():
+    payload = _invoke("propose_history_deletion", {
+        "action": "records", "record_ids": [0],
+    })
+    assert payload["error"]
+    assert _invoke("propose_history_deletion", {"action": "records"})["error"]
+
+
+def test_intelligence_source_create_envelope_is_schema_shaped(monkeypatch):
+    # ``_validate_url`` resolves DNS; keep the unit test deterministic and offline.
+    monkeypatch.setattr(
+        "src.services.intelligence_service.socket.getaddrinfo",
+        lambda host, port: [(None, None, None, "", ("93.184.216.34", 0))],
+    )
+    payload = _invoke("propose_intelligence_source_change", {
+        "action": "create",
+        "payload": {
+            "name": "我的 RSS",
+            "url": "https://example.com/feed.xml",
+        },
+    })
+    assert payload["kind"] == "intelligence_source_create"
+    # Defaults mirror IntelligenceSourceCreateRequest so confirm never 422s.
+    assert payload["proposal"] == {
+        "name": "我的 RSS",
+        "url": "https://example.com/feed.xml",
+        "source_type": "rss",
+        "enabled": True,
+        "scope_type": "market",
+        "scope_value": None,
+        "market": "cn",
+    }
+
+
+def test_intelligence_source_create_rejects_missing_required_fields():
+    assert _invoke("propose_intelligence_source_change", {"action": "create"})["error"]
+    assert _invoke("propose_intelligence_source_change", {
+        "action": "create", "payload": {"url": "https://example.com/feed.xml"},
+    })["error"]
+    assert _invoke("propose_intelligence_source_change", {
+        "action": "create",
+        "payload": {"name": "n", "url": "https://e.com", "source_type": "unknown"},
+    })["error"]
+    assert _invoke("propose_intelligence_source_change", {
+        "action": "create",
+        "payload": {"name": "n", "url": "https://e.com", "scope_type": "symbol"},
+    })["error"]
+    assert _invoke("propose_intelligence_source_change", {
+        "action": "create",
+        "payload": {"name": "n", "url": "ftp://e.com/feed"},
+    })["error"]
+
+
+def test_intelligence_source_create_rejects_urls_the_service_will_reject():
+    for url in (
+        "https://user:pass@example.com/feed.xml",
+        "http://localhost:8080/feed",
+        "http://127.0.0.1/feed",
+        "http://feed.local/rss",
+    ):
+        payload = _invoke("propose_intelligence_source_change", {
+            "action": "create",
+            "payload": {"name": "n", "url": url},
+        })
+        assert payload["error"], url
+        assert "payload.url" in payload["error"]
+
+
+def test_intelligence_defaults_envelope():
+    payload = _invoke("propose_intelligence_source_change", {"action": "defaults"})
+    assert payload["kind"] == "intelligence_defaults_create"
+    assert payload["proposal"] == {}
+
+
+def test_scheduler_run_envelope():
+    # run-now takes no request body; the proposal must not promise an option.
+    payload = _invoke("propose_scheduler_run", {})
+    assert payload["kind"] == "scheduler_run"
+    assert payload["proposal"] == {}
+
+
+def test_notification_test_envelope():
+    payload = _invoke("propose_notification_test", {"channel": "feishu"})
+    assert payload["kind"] == "notification_test"
+    assert payload["proposal"]["channel"] == "feishu"
+
+
+def test_notification_test_normalizes_and_bounds_text():
+    payload = _invoke("propose_notification_test", {
+        "channel": " Feishu ",
+        "title": "t" * 100,
+        "content": "c" * 1200,
+    })
+    assert payload["proposal"]["channel"] == "feishu"
+    assert len(payload["proposal"]["title"]) == 80
+    assert len(payload["proposal"]["content"]) == 1000
+
+
+def test_notification_test_rejects_unknown_channel():
+    payload = _invoke("propose_notification_test", {"channel": "nope"})
+    assert payload["error"]
+
+
+def test_new_write_proposal_tools_declare_proposal_policy():
+    from src.agent.tools.action_tools import (
+        propose_config_update,
+        propose_history_deletion,
+        propose_intelligence_source_change,
+        propose_notification_test,
+        propose_scheduler_run,
+    )
+
+    for tool in (
+        propose_history_deletion,
+        propose_intelligence_source_change,
+        propose_config_update,
+        propose_scheduler_run,
+        propose_notification_test,
+    ):
+        assert tool.category == "action"
+        assert tool.policy.read_only is False
+        assert tool.policy.side_effects == ["write"]
+        assert tool.policy.execution_mode == "proposal"
+        assert tool.policy.risk_level == "high"
+        assert tool.policy.cancellation_safe is False

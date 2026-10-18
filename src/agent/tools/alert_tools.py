@@ -1,20 +1,21 @@
-"""Agent tool for proposing alert rules for user confirmation.
+"""Agent tool for proposing alert rule changes for user confirmation.
 
-The ``propose_alert`` tool is **read-only**: it validates a well-formed alert
-proposal (matching the backend ``AlertRuleCreateRequest`` contract) and returns a
-``{"kind": "alert", "summary": ..., "proposal": ...}`` envelope so the runner can
-surface it as an ``action_proposal`` SSE event. The actual rule is created only after
-the user confirms, via the existing ``POST /api/v1/alerts/rules`` endpoint (triggered
-from the web client). This keeps the "confirm before create" semantics and reuses the
-existing validation, permission and notification paths.
+The ``propose_alert_rule_change`` tool **never persists anything**: it validates a
+well-formed alert rule create/update/delete proposal (matching the backend
+``AlertRuleCreateRequest`` / ``AlertRuleUpdateRequest`` contracts) and returns a
+``{"kind": ..., "summary": ..., "proposal": ...}`` envelope so the runner can surface
+it as an ``action_proposal`` SSE event. The actual rule is only written after the user
+confirms, via the existing ``/api/v1/alerts/rules`` endpoints (triggered from the web
+client). This keeps the "confirm before write" semantics and reuses the existing
+validation, permission and notification paths.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter, ToolPolicy
-# reason 的长度上限与 action_tools 的两个提案工具共用一份：三个工具的 reason 都汇进同一条
+# reason 的长度上限与 action_tools 的提案工具共用一份：它们的 reason 都汇进同一条
 # summary → SSE 事件 → 确认卡片通道，各写一份上限迟早会漂移。
-from src.agent.tools.action_tools import _normalize_reason
+from src.agent.tools.action_tools import _normalize_reason, _require_positive_int
 from src.services.alert_service import (
     AlertService,
     AlertServiceError,
@@ -36,12 +37,12 @@ _ALERT_TYPE_LABELS: Dict[str, str] = {
 }
 
 _ALERT_PROPOSAL_POLICY = ToolPolicy.declared(
-    read_only=True,
-    side_effects=[],
-    permissions=[],
-    scope_dimensions=[],
-    # Not cancellation-safe for the Codex read-only surface: propose_alert is an
-    # interactive confirm-flow tool for the default (LiteLLM) chat path only.
+    read_only=False,
+    side_effects=["write"],
+    execution_mode="proposal",
+    risk_level="high",
+    # Not cancellation-safe for the Codex read-only surface: proposal tools are an
+    # interactive confirm-flow surface for the default (LiteLLM) chat path only.
     cancellation_safe=False,
 )
 
@@ -102,81 +103,110 @@ def _build_summary(target: str, alert_type: str, parameters: Dict[str, Any]) -> 
     return f"「{target}」{_ALERT_TYPE_LABELS.get(alert_type, alert_type)}"
 
 
-def _handle_propose_alert(
-    target: str,
-    alert_type: str,
-    parameters: Dict[str, Any],
+def _handle_propose_alert_rule_change(
+    action: str,
+    target: str = "",
+    alert_type: str = "",
+    parameters: Optional[Dict[str, Any]] = None,
     name: str = "",
     severity: str = "info",
+    rule_id: Optional[int] = None,
     reason: str = "",
 ) -> Dict[str, Any]:
-    """Validate a single-symbol alert proposal and return it (no persistence)."""
-    alert_type = str(alert_type or "").strip().lower()
-    if alert_type not in SYMBOL_ALERT_TYPES:
-        return {"error": f"unsupported alert_type: {alert_type}; supported: {sorted(SYMBOL_ALERT_TYPES)}"}
+    """Validate an alert rule create/update/delete proposal; persists nothing."""
+    norm_action = str(action or "").strip().lower()
+    if norm_action not in ("create", "update", "delete"):
+        return {"error": f"action must be create/update/delete, got {action!r}"}
+    if norm_action in ("update", "delete"):
+        parsed_rule_id, err = _require_positive_int(rule_id, "rule_id")
+        if err:
+            return {"error": err}
+        if norm_action == "delete":
+            return {
+                "kind": "alert_delete",
+                "summary": f"删除告警规则 #{parsed_rule_id}",
+                "proposal": {"rule_id": parsed_rule_id},
+            }
+    else:
+        parsed_rule_id = None
 
-    severity = str(severity or "info").strip().lower()
-    if severity not in SUPPORTED_SEVERITIES:
-        return {"error": f"unsupported severity: {severity}; supported: {sorted(SUPPORTED_SEVERITIES)}"}
-
+    norm_type = str(alert_type or "").strip().lower()
+    if not norm_type:
+        return {"error": "alert_type 不能为空"}
+    if norm_type not in SYMBOL_ALERT_TYPES:
+        return {"error": f"unsupported alert_type: {norm_type}; supported: {sorted(SYMBOL_ALERT_TYPES)}"}
+    norm_severity = str(severity or "info").strip().lower()
+    if norm_severity not in SUPPORTED_SEVERITIES:
+        return {"error": f"unsupported severity: {norm_severity}"}
     try:
-        norm_params = normalize_alert_parameters(alert_type, parameters or {})
+        norm_params = normalize_alert_parameters(norm_type, parameters or {})
     except AlertServiceError as exc:
         return {"error": str(exc)}
-
     norm_target = str(target or "").strip()
     if not norm_target:
         return {"error": "target must not be empty"}
-
-    rule_name = str(name or "").strip() or AlertService._default_rule_name(
-        target=norm_target,
-        alert_type=alert_type,
-        parameters=norm_params,
-    )
+    # AlertRuleCreateRequest.target max_length=64; reject rather than emit a payload
+    # the confirm-time POST will 422 on.
+    if len(norm_target) > 64:
+        return {"error": f"target 过长（最多 64 字符）: {norm_target!r}"}
 
     proposal = {
-        "name": rule_name[:64],
+        "name": (str(name or "").strip() or AlertService._default_rule_name(
+            target=norm_target,
+            alert_type=norm_type,
+            parameters=norm_params,
+        ))[:64],
         "target_scope": "single_symbol",
         "target": norm_target,
-        "alert_type": alert_type,
+        "alert_type": norm_type,
         "parameters": norm_params,
-        "severity": severity,
+        "severity": norm_severity,
     }
-
-    summary = _build_summary(norm_target, alert_type, norm_params)
+    kind = "alert_update" if norm_action == "update" else "alert_create"
+    if norm_action == "update":
+        proposal["rule_id"] = int(parsed_rule_id)
+    summary = _build_summary(norm_target, norm_type, norm_params)
+    if norm_action == "update":
+        summary = f"更新告警规则：{summary}"
     norm_reason = _normalize_reason(reason)
     if norm_reason:
         summary = f"{summary}（{norm_reason}）"
+    return {"kind": kind, "summary": summary, "proposal": proposal}
 
-    return {"kind": "alert", "summary": summary, "proposal": proposal}
 
-
-propose_alert_tool = ToolDefinition(
-    name="propose_alert",
+propose_alert_rule_change_tool = ToolDefinition(
+    name="propose_alert_rule_change",
     description=(
-        "当识别到某个股票值得监控的价格上穿/下穿、涨跌幅、成交量异动或技术指标（均线/RSI/MACD/KDJ/CCI）"
-        "信号时，用本工具生成一个告警提案交给用户确认。只生成提案，不创建任何规则。\n"
+        "生成告警规则的创建/更新/删除提案，交给用户确认；本工具不写入任何规则。"
+        "创建和更新需要 target/alert_type/parameters；更新和删除需要 rule_id。\n"
         f"{_PARAMETER_DOC}"
     ),
     parameters=[
         ToolParameter(
+            name="action",
+            type="string",
+            description="create|update|delete",
+            required=True,
+            enum=["create", "update", "delete"],
+        ),
+        ToolParameter(
             name="target",
             type="string",
-            description="股票代码，支持裸码或带前缀（如 600519 / HK00700 / AAPL）",
-            required=True,
+            description="股票代码，支持裸码或带前缀（如 600519 / HK00700 / AAPL）；create/update 必填",
+            required=False,
         ),
         ToolParameter(
             name="alert_type",
             type="string",
             description="告警类型：" + "、".join(sorted(SYMBOL_ALERT_TYPES)),
-            required=True,
+            required=False,
             enum=sorted(SYMBOL_ALERT_TYPES),
         ),
         ToolParameter(
             name="parameters",
             type="object",
             description=_PARAMETER_DOC,
-            required=True,
+            required=False,
         ),
         ToolParameter(
             name="name",
@@ -193,15 +223,21 @@ propose_alert_tool = ToolDefinition(
             default="info",
         ),
         ToolParameter(
+            name="rule_id",
+            type="integer",
+            description="update/delete 时的规则 ID",
+            required=False,
+        ),
+        ToolParameter(
             name="reason",
             type="string",
             description="可选提案理由，用于在卡片上向用户说明",
             required=False,
         ),
     ],
-    handler=_handle_propose_alert,
+    handler=_handle_propose_alert_rule_change,
     category="action",
     policy=_ALERT_PROPOSAL_POLICY,
 )
 
-ALL_ALERT_TOOLS = [propose_alert_tool]
+ALL_ALERT_TOOLS = [propose_alert_rule_change_tool]

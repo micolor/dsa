@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,6 +12,7 @@ from api.deps import get_config_dep, get_database_manager
 from api.v1.errors import api_error
 from src.config import Config
 from src.services.screening_service import ScreeningService
+from src.services.site_task_submitter import submit_screening
 from src.services.task_queue import TaskStatus as QueueTaskStatus
 from src.services.task_queue import get_task_queue
 from src.storage import DatabaseManager
@@ -137,41 +137,13 @@ def screening_start_screen_task(
     config: Config = Depends(get_config_dep),
     db_manager: DatabaseManager = Depends(get_database_manager),
 ) -> ScreeningScreenAccepted:
-    task_id = uuid.uuid4().hex
-    task_queue = get_task_queue()
-
-    def run_screen() -> Dict[str, Any]:
-        task_queue.update_task_progress(
-            task_id,
-            20,
-            "正在执行选股，外部数据源较慢时会持续后台运行",
-        )
-
-        def report_progress(progress: int, message: str) -> None:
-            task_queue.update_task_progress(task_id, progress, message)
-
-        result = _service(config, db_manager).screen(
-            strategy=request.strategy,
-            market=request.market,
-            max_results=request.max_results,
-            selection_seed=request.variant_seed,
-            progress_callback=report_progress,
-        )
-        task_queue.update_task_progress(
-            task_id,
-            98,
-            f"选股已完成，正在整理 {result.get('candidate_count', 0)} 条候选",
-        )
-        return result
-
-    task = task_queue.submit_background_task(
-        run_screen,
-        stock_code="screening_screen",
-        stock_name=f"{request.strategy} / {request.market}",
-        report_type="screening_screen",
-        message="选股任务已提交",
-        task_id=task_id,
-        trace_id=task_id,
+    task = submit_screening(
+        strategy=request.strategy,
+        market=request.market,
+        max_results=request.max_results,
+        variant_seed=request.variant_seed,
+        config=config,
+        db_manager=db_manager,
     )
     return ScreeningScreenAccepted(
         task_id=task.task_id,

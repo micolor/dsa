@@ -677,6 +677,19 @@ def test_default_production_registry_only_exposes_bounded_tools_to_codex() -> No
         "get_analysis_context",
         "get_skill_backtest_summary",
         "get_strategy_backtest_summary",
+        # Read-only site views are cancellation-safe by design.
+        "get_history_view",
+        "get_alert_view",
+        "get_analysis_task_view",
+        "get_config_view",
+        "get_backtest_view",
+        "get_screening_view",
+        "get_signal_view",
+        "get_fund_review_view",
+        "get_paper_view",
+        "get_portfolio_ledger_view",
+        "get_intelligence_view",
+        "get_scheduler_view",
     }
 
 

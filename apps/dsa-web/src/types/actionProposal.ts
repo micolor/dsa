@@ -1,9 +1,11 @@
 /**
  * 问股助手提出、等待用户确认的写操作提案。
  *
- * 这是跨域类型（告警 / 持仓 / 自选），因此不放进任何一个域文件。
- * `proposal` 保持后端原样的 snake_case，且刻意标为 `unknown`：四个 kind 的请求体形状
+ * 这是跨域类型（告警 / 持仓 / 信号 / 历史 / 情报 / 系统配置），因此不放进任何一个域文件。
+ * `proposal` 保持后端原样的 snake_case，且刻意标为 `unknown`：各 kind 的请求体形状
  * 不同，硬塞泛型只会堆断言，转换与断言统一放在 `utils/actionProposal.ts` 的 apply 分支里。
+ * 本数组与后端 `src/agent/action_contract.py::ACTION_PROPOSAL_KINDS` 严格相等，
+ * 由 `tests/test_action_proposal_kinds_parity.py` 钉住。
  *
  * `ACTION_PROPOSAL_KINDS` 是 kind 的**单一源**（运行时数组在前，类型从中派生）。刻意不写成
  * 「联合类型 + 另在 store 里放一份运行时数组」：那样两份可以漂移，而真正决定事件是否被接受
@@ -11,10 +13,29 @@
  * `tsc` 不会报错——`readonly ActionProposalKind[]` 只约束成员合法，不要求覆盖全部成员。
  */
 export const ACTION_PROPOSAL_KINDS = [
-  'alert',
+  'alert_create',
+  'alert_update',
+  'alert_delete',
   'portfolio_trade',
-  'watchlist_add',
-  'watchlist_remove',
+  'portfolio_cash_create',
+  'portfolio_cash_delete',
+  'portfolio_corporate_create',
+  'portfolio_corporate_delete',
+  'portfolio_account_create',
+  'portfolio_account_update',
+  'portfolio_account_deactivate',
+  'signal_create',
+  'signal_status',
+  'signal_feedback',
+  'signal_reassess',
+  'paper_reset',
+  'history_delete_records',
+  'history_delete_by_code',
+  'intelligence_source_create',
+  'intelligence_defaults_create',
+  'config_update',
+  'scheduler_run',
+  'notification_test',
 ] as const;
 
 /** kind 类型从运行时数组派生：单一源，二者不可能不一致（详见上方注释）。 */

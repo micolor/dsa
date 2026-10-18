@@ -152,6 +152,7 @@ class IntelligenceRepository:
     def list_items(
         self,
         *,
+        source_id: Optional[int] = None,
         scope_type: Optional[str] = None,
         scope_value: Optional[str] = None,
         market: Optional[str] = None,
@@ -162,6 +163,8 @@ class IntelligenceRepository:
         page_size: int = 50,
     ) -> Tuple[List[IntelligenceItem], int]:
         conditions = []
+        if source_id is not None:
+            conditions.append(IntelligenceItem.source_id == int(source_id))
         if scope_type:
             conditions.append(IntelligenceItem.scope_type == scope_type)
         if scope_value:

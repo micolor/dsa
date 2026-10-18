@@ -4,6 +4,7 @@ import { BarChart3, X } from 'lucide-react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { SidebarNav } from './SidebarNav';
 import { GlobalTaskCenter } from '../tasks/GlobalTaskCenter';
+import { AssistantDock } from './AssistantDock';
 import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { ROUTE_TITLES } from './routeTitles';
@@ -209,6 +210,9 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
 
       {/* 全局任务中心：分析 + 选股任务的左侧任务图标，所有路由常驻 */}
       <GlobalTaskCenter />
+
+      {/* 右下角悬浮问股助手：除 /chat 外全站常驻，与整页共用会话 */}
+      <AssistantDock />
     </div>
   );
 };

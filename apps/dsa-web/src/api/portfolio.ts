@@ -1,5 +1,5 @@
 import apiClient from './index';
-import { toCamelCase } from './utils';
+import { toCamelCase, toSnakeCase } from './utils';
 import type { TaskAccepted } from '../types/analysis';
 import type {
   PortfolioAccountItem,
@@ -121,6 +121,18 @@ export const portfolioApi = {
       base_currency: payload.baseCurrency,
       owner_id: payload.ownerId,
     });
+    return toCamelCase<PortfolioAccountItem>(response.data);
+  },
+
+  /** 更新持仓账户；未提供的字段保持原值（后端 PUT 语义为部分更新）。 */
+  async updateAccount(
+    accountId: number,
+    payload: Partial<PortfolioAccountCreateRequest> & { isActive?: boolean },
+  ): Promise<PortfolioAccountItem> {
+    const response = await apiClient.put<Record<string, unknown>>(
+      `/api/v1/portfolio/accounts/${accountId}`,
+      toSnakeCase(payload),
+    );
     return toCamelCase<PortfolioAccountItem>(response.data);
   },
 

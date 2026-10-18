@@ -47,6 +47,7 @@ except Exception:  # pragma: no cover - optional dependency environments
 
 from src.enums import ReportType
 from src.config import Config
+from src.services import site_task_submitter as site_task_submitter_module
 from src.services.analysis_service import AnalysisService
 from src.services.image_stock_extractor import _call_litellm_vision
 from src.services.task_queue import AnalysisTaskQueue, TaskInfo as QueueTaskInfo, TaskStatus
@@ -214,22 +215,22 @@ class AnalysisApiContractTestCase(unittest.TestCase):
                     )
 
                     with patch.object(
-                        analysis_endpoint_module,
-                        "_try_acquire_market_review_lock",
+                        site_task_submitter_module,
+                        "try_acquire_market_review_lock",
                         return_value=object(),
                     ), patch.object(
-                        analysis_endpoint_module,
+                        site_task_submitter_module,
                         "_build_market_review_runtime",
                         return_value=(MagicMock(), MagicMock(), MagicMock()),
                     ), patch(
                         "src.core.market_review.run_market_review",
                         return_value=report,
                     ) as run_market_review, patch(
-                        "api.v1.endpoints.analysis.get_task_queue",
+                        "src.services.site_task_submitter.get_task_queue",
                         return_value=queue,
                     ), patch.object(
-                        analysis_endpoint_module,
-                        "_release_market_review_lock",
+                        site_task_submitter_module,
+                        "release_market_review_lock",
                     ):
                         accepted = trigger_market_review(request=request, config=config)
                         pending = get_analysis_status(accepted.task_id)
@@ -287,10 +288,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         lock_token = object()
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=lock_token,
-        ), patch("api.v1.endpoints.analysis.get_task_queue", return_value=task_queue):
+        ), patch("src.services.site_task_submitter.get_task_queue", return_value=task_queue):
             response = trigger_market_review(
                 request=request,
                 config=config,
@@ -333,19 +334,19 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         task_queue.submit_background_task.side_effect = _capture_background_task
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=lock_token,
         ), patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review") as run_market_review, patch(
-            "api.v1.endpoints.analysis.get_task_queue",
+            "src.services.site_task_submitter.get_task_queue",
             return_value=task_queue,
         ), patch.object(
-            analysis_endpoint_module,
-            "_release_market_review_lock",
+            site_task_submitter_module,
+            "release_market_review_lock",
             return_value=None,
         ):
             trigger_market_review(request=request, config=config)
@@ -385,19 +386,19 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         task_queue.submit_background_task.side_effect = _capture_background_task
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=object(),
         ), patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review") as run_market_review, patch(
-            "api.v1.endpoints.analysis.get_task_queue",
+            "src.services.site_task_submitter.get_task_queue",
             return_value=task_queue,
         ), patch.object(
-            analysis_endpoint_module,
-            "_release_market_review_lock",
+            site_task_submitter_module,
+            "release_market_review_lock",
             return_value=None,
         ):
             response = trigger_market_review(request=request, config=config)
@@ -429,22 +430,22 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         task_queue.submit_background_task.side_effect = _capture_background_task
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=object(),
         ), patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(MagicMock(), MagicMock(), MagicMock()),
         ), patch(
             "src.core.market_review.run_market_review",
             return_value="report",
         ) as run_market_review, patch(
-            "api.v1.endpoints.analysis.get_task_queue",
+            "src.services.site_task_submitter.get_task_queue",
             return_value=task_queue,
         ), patch.object(
-            analysis_endpoint_module,
-            "_release_market_review_lock",
+            site_task_submitter_module,
+            "release_market_review_lock",
             return_value=None,
         ):
             response = trigger_market_review(request=request, config=config)
@@ -462,15 +463,15 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         runtime_config = SimpleNamespace(market_review_region="us")
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(MagicMock(), MagicMock(), MagicMock()),
         ), patch(
             "src.core.market_review.run_market_review",
             return_value="report",
         ) as run_market_review, patch.object(
-            analysis_endpoint_module,
-            "_release_market_review_lock",
+            site_task_submitter_module,
+            "release_market_review_lock",
         ):
             analysis_endpoint_module._run_market_review_background(
                 send_notification=False,
@@ -496,10 +497,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         )
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=None,
-        ), patch("api.v1.endpoints.analysis.get_task_queue", return_value=task_queue):
+        ), patch("src.services.site_task_submitter.get_task_queue", return_value=task_queue):
             with self.assertRaises(Exception) as ctx:
                 trigger_market_review(
                     request=request,
@@ -530,7 +531,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
             task_queue = MagicMock()
             try:
-                with patch("api.v1.endpoints.analysis.get_task_queue", return_value=task_queue):
+                with patch("src.services.site_task_submitter.get_task_queue", return_value=task_queue):
                     with self.assertRaises(Exception) as ctx:
                         trigger_market_review(
                             request=analysis_endpoint_module.MarketReviewRequest(
@@ -561,10 +562,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             "src.core.trading_calendar.compute_effective_region",
             return_value="",
         ) as compute_effective_region, patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=lock_token,
-        ) as acquire, patch("api.v1.endpoints.analysis.get_task_queue", return_value=task_queue):
+        ) as acquire, patch("src.services.site_task_submitter.get_task_queue", return_value=task_queue):
             response = trigger_market_review(
                 request=request,
                 config=config,
@@ -601,7 +602,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         runtime_search = MagicMock()
         runtime_analyzer = MagicMock()
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review") as run_market_review:
@@ -655,7 +656,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         runtime_analyzer = MagicMock()
         market_review_config = SimpleNamespace()
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review", return_value="report") as run_market_review:
@@ -1185,7 +1186,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         runtime_search = MagicMock()
         runtime_analyzer = MagicMock()
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review", return_value=None):
@@ -1203,12 +1204,12 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         lock_token = object()
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             side_effect=RuntimeError("runtime init failed"),
         ), patch.object(
-            analysis_endpoint_module,
-            "_release_market_review_lock",
+            site_task_submitter_module,
+            "release_market_review_lock",
         ) as release_market_review_lock:
             with self.assertRaises(RuntimeError):
                 analysis_endpoint_module._run_market_review_background(
@@ -1236,10 +1237,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         queue = AnalysisTaskQueue(max_workers=1)
         queue._executor = _SyncExecutor()
         with patch.object(
-            analysis_endpoint_module,
+            site_task_submitter_module,
             "_build_market_review_runtime",
             side_effect=RuntimeError("runtime init failed"),
-        ), patch.object(analysis_endpoint_module, "_release_market_review_lock") as release_market_review_lock:
+        ), patch.object(site_task_submitter_module, "release_market_review_lock") as release_market_review_lock:
             task = queue.submit_background_task(
                 lambda: analysis_endpoint_module._run_market_review_background(
                     send_notification=False,
@@ -2917,10 +2918,10 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         task_queue.submit_background_task.return_value = SimpleNamespace(task_id="market-task-omitted")
 
         with patch.object(
-            analysis_endpoint_module,
-            "_try_acquire_market_review_lock",
+            site_task_submitter_module,
+            "try_acquire_market_review_lock",
             return_value=object(),
-        ), patch("api.v1.endpoints.analysis.get_task_queue", return_value=task_queue):
+        ), patch("src.services.site_task_submitter.get_task_queue", return_value=task_queue):
             response = trigger_market_review(
                 request=None,
                 config=config,

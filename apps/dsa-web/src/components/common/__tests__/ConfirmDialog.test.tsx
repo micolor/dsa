@@ -3,6 +3,7 @@ import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '../../../contexts/UiLanguageContext';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { Dialog } from '../Dialog';
 
 function renderDialog(overrides: Partial<React.ComponentProps<typeof ConfirmDialog>> = {}) {
   const onConfirm = vi.fn();
@@ -78,5 +79,26 @@ describe('ConfirmDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  // 确认框经常从别的模态里发起（事件记录里删流水、抽屉里删会话）。两者都 portal 到 body，
+  // 谁的层级高谁可见；层级一旦配反，确认框会渲染在底层弹窗后面，用户只能看到一张模糊的卡片。
+  it('stacks above an open Dialog', () => {
+    const layerZ = (dialog: HTMLElement) => {
+      const matched = dialog.parentElement?.className.match(/z-\[(\d+)\]/);
+      return matched ? Number(matched[1]) : 0;
+    };
+
+    render(
+      <UiLanguageProvider>
+        <Dialog isOpen onClose={() => {}} title="事件记录" ariaLabel="事件记录">
+          内容
+        </Dialog>
+        <ConfirmDialog isOpen title="确认操作" message="确认继续吗？" onConfirm={() => {}} onCancel={() => {}} />
+      </UiLanguageProvider>,
+    );
+
+    const [hostDialog, confirmDialog] = screen.getAllByRole('dialog');
+    expect(layerZ(confirmDialog)).toBeGreaterThan(layerZ(hostDialog));
   });
 });

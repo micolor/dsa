@@ -328,13 +328,47 @@ def test_production_codex_preparation_matches_the_three_phase6_tools(monkeypatch
         )
 
     assert result.success is True
+    # Only cancellation-safe tools may be exposed to Codex: the three Phase 6
+    # tools plus the read-only site views.
     assert _FakeTransport.last.thread_kwargs["tool_names"] == [
         "get_analysis_context",
         "get_skill_backtest_summary",
         "get_strategy_backtest_summary",
+        "get_history_view",
+        "get_alert_view",
+        "get_analysis_task_view",
+        "get_config_view",
+        "get_backtest_view",
+        "get_screening_view",
+        "get_signal_view",
+        "get_fund_review_view",
+        "get_paper_view",
+        "get_portfolio_ledger_view",
+        "get_intelligence_view",
+        "get_scheduler_view",
     ]
+    # Task tools submit background jobs and are deliberately not
+    # cancellation_safe, so Codex must never see them.
+    for task_tool in (
+        "start_stock_analysis",
+        "start_market_review",
+        "run_backtest",
+        "start_screening",
+        "fetch_intelligence",
+        "backfill_fund_nav_reviews",
+        "run_fund_nav_reviews",
+        "run_signal_outcomes",
+        "backfill_paper_signals",
+    ):
+        assert task_tool not in _FakeTransport.last.thread_kwargs["tool_names"]
     instructions = _FakeTransport.last.thread_kwargs["developer_instructions"]
-    for tool_name in _FakeTransport.last.thread_kwargs["tool_names"]:
+    # The configured prompt names the three Phase 6 tools; site read tools are
+    # advertised through the tool surface descriptors instead.
+    for tool_name in (
+        "get_analysis_context",
+        "get_skill_backtest_summary",
+        "get_strategy_backtest_summary",
+    ):
         assert tool_name in instructions
     for unavailable_tool in (
         "get_realtime_quote",

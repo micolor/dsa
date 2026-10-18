@@ -1235,6 +1235,8 @@ class Config:
     fund_nav_review_auto_eval_enabled: bool = True
     # 是否启用基金复权指标每日自动回填（默认关闭；开启后会联网）
     fund_nav_review_auto_restore_enabled: bool = False
+    # 问股全站操作：关闭后只保留原有问答/分析工具，不注册站点读写工具
+    agent_chat_site_operations_enabled: bool = True
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2259,6 +2261,9 @@ class Config:
             ),
             fund_nav_review_auto_restore_enabled=(
                 os.getenv('FUND_NAV_REVIEW_AUTO_RESTORE_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_chat_site_operations_enabled=(
+                os.getenv('AGENT_CHAT_SITE_OPERATIONS_ENABLED', 'true').lower() != 'false'
             ),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),

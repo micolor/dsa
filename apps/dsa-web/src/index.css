@@ -997,6 +997,23 @@
   animation-name: slideInFromBottomMd;
 }
 
+/* 悬浮助手面板：从右下角入口处展开。位移收敛到 10px，读起来是「长出来」而不是「飞进来」；
+   顿挫感交给尾部减速的贝塞尔曲线，不做弹簧回弹。 */
+@keyframes assistantDockIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.assistant-dock-panel {
+  animation: assistantDockIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* 减少动效：保留透明度/颜色反馈，去掉位移与缩放类动效（"gentler, not zero"） */
 @media (prefers-reduced-motion: reduce) {
   .animate-slide-up,
@@ -1006,6 +1023,7 @@
   .slide-in-from-top-1,
   .slide-in-from-top-2,
   .slide-in-from-bottom-2,
+  .assistant-dock-panel,
   .animate-pulse-glow {
     animation: none;
   }

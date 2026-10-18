@@ -13,6 +13,12 @@ import {
   parseActionProposalEvent,
   type ActionProposal,
 } from '../types/actionProposal';
+import {
+  parseActionExecutedEvent,
+  parseActionTaskEvent,
+  type ActionExecuted,
+  type ActionTask,
+} from '../types/agentAction';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
@@ -64,6 +70,10 @@ export interface Message {
    * `utils/actionProposal` 的 apply 分支里做。
    */
   actionProposals?: ActionProposal[];
+  /** 本轮已执行完的写操作，用于渲染结果卡片。 */
+  actionExecutions?: ActionExecuted[];
+  /** 本轮已提交到后台的长任务，用于渲染进度卡片。 */
+  actionTasks?: ActionTask[];
   /** 用户贴的图（仅会话内存在；刷新即失，与"不存二进制"一致）。 */
   imageDataUrl?: string;
 }
@@ -455,6 +465,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const currentProgressSteps: ProgressStep[] = [];
       // 提案事件里的待确认动作（一轮可能多个）；在 done 时挂到已提交的助手消息上，避免流中途改动消息。
       const pendingActionProposals: ActionProposal[] = [];
+      const pendingExecutions: ActionExecuted[] = [];
+      const pendingTasks: ActionTask[] = [];
       // Streaming text accumulation. content_delta events append here and the
       // assistant message is updated on a ~40ms throttle to avoid re-rendering
       // the full Markdown on every token.
@@ -599,6 +611,18 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           return;
         }
 
+        if (event.type === 'action_executed') {
+          const executed = parseActionExecutedEvent(event);
+          if (executed) pendingExecutions.push(executed);
+          return;
+        }
+
+        if (event.type === 'action_task') {
+          const task = parseActionTaskEvent(event);
+          if (task) pendingTasks.push(task);
+          return;
+        }
+
         currentProgressSteps.push(event);
         const { progressSteps: liveSteps } = get();
         const nextSteps =
@@ -667,6 +691,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
                 actionProposals: pendingActionProposals.length > 0 ? pendingActionProposals : undefined,
+                actionExecutions: pendingExecutions.length > 0 ? pendingExecutions : undefined,
+                actionTasks: pendingTasks.length > 0 ? pendingTasks : undefined,
               };
               return { messages };
             }
@@ -687,6 +713,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
                 thinkingSteps: [...currentProgressSteps],
                 backend: finalBackend,
                 actionProposals: pendingActionProposals.length > 0 ? pendingActionProposals : undefined,
+                actionExecutions: pendingExecutions.length > 0 ? pendingExecutions : undefined,
+                actionTasks: pendingTasks.length > 0 ? pendingTasks : undefined,
               },
             ],
           }));

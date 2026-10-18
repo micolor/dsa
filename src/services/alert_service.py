@@ -144,7 +144,7 @@ def normalize_alert_parameters(alert_type: str, parameters: Dict[str, Any]) -> D
     """Pure validation/normalization of alert ``parameters``.
 
     Shared by ``AlertService._normalize_parameters`` and the agent's
-    ``propose_alert`` tool so both produce identical, create-able parameter
+    ``propose_alert_rule_change`` tool so both produce identical, create-able parameter
     dicts without requiring a DB/engine (the tool never persists).
     """
     if not isinstance(parameters, dict):

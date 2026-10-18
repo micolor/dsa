@@ -1,8 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithToastHost as render } from '../../testUtils/renderWithToastHost';
 import { StrictMode, useState } from 'react';
-import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import apiClient from '../../api';
 import { createParsedApiError } from '../../api/error';
 import { UiLanguageProvider } from '../../contexts/UiLanguageContext';
 import { historyApi } from '../../api/history';
@@ -35,6 +36,7 @@ const {
   mockFormatSessionAsMarkdown,
   mockStockIndex,
   mockCreateAlertRule,
+  mockTestNotificationChannel,
 } = vi.hoisted(() => ({
   mockGetSkills: vi.fn(),
   mockGetStatus: vi.fn(),
@@ -48,6 +50,7 @@ const {
   mockDownloadSession: vi.fn(),
   mockFormatSessionAsMarkdown: vi.fn(),
   mockCreateAlertRule: vi.fn(),
+  mockTestNotificationChannel: vi.fn(),
   mockStockIndex: [
     { canonicalCode: '600519.SH', displayCode: '600519', nameZh: '贵州茅台', aliases: ['茅台'], market: 'CN', assetType: 'stock', active: true },
     { canonicalCode: '300750.SZ', displayCode: '300750', nameZh: '宁德时代', aliases: [], market: 'CN', assetType: 'stock', active: true },
@@ -108,6 +111,7 @@ vi.mock('../../api/systemConfig', () => ({
     getWatchlist: mockGetWatchlist,
     addToWatchlist: mockAddToWatchlist,
     removeFromWatchlist: mockRemoveFromWatchlist,
+    testNotificationChannel: mockTestNotificationChannel,
   },
 }));
 
@@ -2467,7 +2471,7 @@ describe('watchlist button with code variants', () => {
         content: '建议关注该价格位',
         actionProposals: [
           {
-            kind: 'alert',
+            kind: 'alert_create',
             summary: '「600519」价格上穿 ¥1800',
             // proposal 是后端原样的 snake_case 请求体
             proposal: {
@@ -2502,76 +2506,7 @@ describe('watchlist button with code variants', () => {
     expect(await screen.findByText('已提交')).toBeInTheDocument();
   });
 
-  it('applies a watchlist proposal through the systemConfig client', async () => {
-    mockAddToWatchlist.mockResolvedValue(['600519']);
-    mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '把 600519 加入自选' },
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        content: '已生成提案',
-        actionProposals: [
-          {
-            kind: 'watchlist_add',
-            summary: '把「600519」加入自选',
-            proposal: { stock_code: '600519', list_name: null },
-          },
-        ],
-      },
-    ];
-
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <ChatPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '确认' }));
-
-    await waitFor(() => expect(mockAddToWatchlist).toHaveBeenCalledWith('600519', undefined));
-    expect(mockCreateAlertRule).not.toHaveBeenCalled();
-    expect(await screen.findByText('已提交')).toBeInTheDocument();
-  });
-
-  it('refreshes the watchlist state after confirming a watchlist proposal', async () => {
-    // 首次读到的自选里还有 300750（按钮因此渲染成「从自选删除」），确认移出后再读是空的。
-    mockGetWatchlist.mockResolvedValueOnce(['300750']).mockResolvedValue([]);
-    mockRemoveFromWatchlist.mockResolvedValue([]);
-    mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '分析 300750' },
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        content: '已生成提案',
-        actionProposals: [
-          {
-            kind: 'watchlist_remove',
-            summary: '把「300750」移出自选',
-            proposal: { stock_code: '300750', list_name: null },
-          },
-        ],
-      },
-    ];
-
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <ChatPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText('从自选删除')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '确认' }));
-
-    await waitFor(() => expect(mockRemoveFromWatchlist).toHaveBeenCalledWith('300750', undefined));
-    // 卡片路径必须重取自选：不重取的话按钮仍按挂载时的旧快照渲染成「从自选删除」，
-    // 用户刚确认完移出，页面却还在说它在自选里。
-    expect(await screen.findByText('加入自选')).toBeInTheDocument();
-    expect(screen.queryByText('从自选删除')).not.toBeInTheDocument();
-  });
-
-  it('does not refetch the watchlist after a non-watchlist proposal', async () => {
+  it('does not refetch the watchlist after a proposal', async () => {
     mockCreateAlertRule.mockResolvedValue({ id: 1 });
     mockStoreState.messages = [
       { id: 'user-1', role: 'user', content: '分析 600519' },
@@ -2581,7 +2516,7 @@ describe('watchlist button with code variants', () => {
         content: '已生成提案',
         actionProposals: [
           {
-            kind: 'alert',
+            kind: 'alert_create',
             summary: '「600519」价格上穿 ¥1800',
             proposal: {
               name: '600519 price above 1800',
@@ -2623,14 +2558,14 @@ describe('watchlist button with code variants', () => {
         content: '已生成两条提案',
         actionProposals: [
           {
-            kind: 'watchlist_add',
-            summary: '把「600519」加入自选',
-            proposal: { stock_code: '600519', list_name: null },
+            kind: 'alert_create',
+            summary: '为「600519」创建价格告警',
+            proposal: { name: '600519 price above 1800' },
           },
           {
-            kind: 'watchlist_add',
-            summary: '把「300750」加入自选',
-            proposal: { stock_code: '300750', list_name: null },
+            kind: 'alert_create',
+            summary: '为「300750」创建价格告警',
+            proposal: { name: '300750 price above 200' },
           },
         ],
       },
@@ -2642,8 +2577,8 @@ describe('watchlist button with code variants', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
-    expect(screen.getByText('把「300750」加入自选')).toBeInTheDocument();
+    expect(await screen.findByText('为「600519」创建价格告警')).toBeInTheDocument();
+    expect(screen.getByText('为「300750」创建价格告警')).toBeInTheDocument();
     // 两张卡片各自一个确认按钮
     const confirmButtons = screen.getAllByRole('button', { name: '确认' });
     expect(confirmButtons).toHaveLength(2);
@@ -2651,25 +2586,25 @@ describe('watchlist button with code variants', () => {
     fireEvent.click(confirmButtons[0]);
 
     // 只提交被点的那一张，另一张仍在等待确认
-    await waitFor(() => expect(mockAddToWatchlist).toHaveBeenCalledTimes(1));
-    expect(mockAddToWatchlist).toHaveBeenCalledWith('600519', undefined);
+    await waitFor(() => expect(mockCreateAlertRule).toHaveBeenCalledTimes(1));
+    expect(mockCreateAlertRule).toHaveBeenCalledWith(expect.objectContaining({ name: '600519 price above 1800' }));
     expect(await screen.findByText('已提交')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '确认' })).toHaveLength(1);
   });
 
   it('keeps a failed proposal card actionable and shows why it failed', async () => {
-    mockAddToWatchlist.mockRejectedValue(new Error('boom'));
+    mockCreateAlertRule.mockRejectedValue(new Error('boom'));
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '把 600519 加入自选' },
+      { id: 'user-1', role: 'user', content: '给 600519 建价格告警' },
       {
         id: 'assistant-1',
         role: 'assistant',
         content: '已生成提案',
         actionProposals: [
           {
-            kind: 'watchlist_add',
-            summary: '把「600519」加入自选',
-            proposal: { stock_code: '600519', list_name: null },
+            kind: 'alert_create',
+            summary: '为「600519」创建价格告警',
+            proposal: { name: '600519 price above 1800' },
           },
         ],
       },
@@ -2681,13 +2616,52 @@ describe('watchlist button with code variants', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('把「600519」加入自选')).toBeInTheDocument();
+    expect(await screen.findByText('为「600519」创建价格告警')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认' }));
 
     // 失败原因来自 getParsedApiError（这里就是 Error('boom') 的 message），
     // 而不是诱导用户无限重试的通用文案。
     expect(await screen.findByText('boom')).toBeInTheDocument();
     // 失败态必须仍然可操作：确认（即重试）与取消都还在，用户不会被动卡死。
+    expect(screen.getByRole('button', { name: '确认' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '取消' })).toBeEnabled();
+  });
+
+  it('renders a failure state when a notification test reports success: false', async () => {
+    mockTestNotificationChannel.mockResolvedValue({
+      success: false,
+      message: 'feishu 通知测试失败',
+      errorCode: 'send_failed',
+      retryable: false,
+    });
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '测试一下飞书通知' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成提案',
+        actionProposals: [
+          {
+            kind: 'notification_test',
+            summary: '向通知渠道「feishu」发送测试消息',
+            proposal: { channel: 'feishu' },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('向通知渠道「feishu」发送测试消息')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    // 2xx + success:false 必须进入失败态并展示渠道原因，而不是显示「已提交」。
+    expect(await screen.findByText('feishu 通知测试失败')).toBeInTheDocument();
+    expect(screen.queryByText('已提交')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '取消' })).toBeEnabled();
   });
@@ -2701,7 +2675,7 @@ describe('watchlist button with code variants', () => {
         content: '建议关注该价格位',
         actionProposals: [
           {
-            kind: 'alert',
+            kind: 'alert_create',
             summary: '「600519」价格上穿 ¥1800',
             proposal: {
               name: '600519 price above 1800',
@@ -3240,5 +3214,248 @@ describe('chat image thread', () => {
     await waitFor(() => expect(mockStartStream).toHaveBeenCalled());
     const [payload] = mockStartStream.mock.calls[0];
     expect(payload.context).toBeUndefined();
+  });
+});
+
+describe('ChatPage action execution and task cards', () => {
+  beforeEach(() => {
+    mockStoreState.messages = [];
+    mockStoreState.loading = false;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('renders executed and task cards from the assistant message', () => {
+    mockStoreState.messages = [{
+      id: 'm1',
+      role: 'assistant',
+      content: '完成',
+      actionExecutions: [{
+        kind: 'fx_refresh',
+        summary: '已刷新汇率',
+        result: { updated: 3 },
+        undoHint: '再次刷新即可覆盖',
+      }],
+      actionTasks: [{
+        kind: 'stock_analysis',
+        summary: '已提交分析',
+        taskId: 'task-1',
+        statusEndpoint: '/api/v1/analysis/status/task-1',
+        pollIntervalMs: 60000,
+      }],
+    }];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('已刷新汇率')).toBeInTheDocument();
+    expect(screen.getByText(/再次刷新即可覆盖/)).toBeInTheDocument();
+    expect(screen.getByText('已提交分析')).toBeInTheDocument();
+    expect(screen.getByText('等待中', { exact: false })).toBeInTheDocument();
+  });
+
+  it('polls the task status endpoint until a terminal state and then stops', async () => {
+    const getSpy = vi.spyOn(apiClient, 'get')
+      .mockResolvedValueOnce({ data: { status: 'running', message: '分析中' } } as never)
+      .mockResolvedValueOnce({ data: { status: 'completed', message: '已完成' } } as never);
+
+    mockStoreState.messages = [{
+      id: 'm2',
+      role: 'assistant',
+      content: '已提交',
+      actionTasks: [{
+        kind: 'stock_analysis',
+        summary: '已提交分析',
+        taskId: 'task-2',
+        statusEndpoint: '/api/v1/analysis/status/task-2',
+        pollIntervalMs: 5,
+      }],
+    }];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('已提交分析')).toBeInTheDocument();
+    await waitFor(() => expect(getSpy).toHaveBeenCalledTimes(2));
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/analysis/status/task-2');
+    await waitFor(() => expect(screen.getByText('状态：completed · 已完成')).toBeInTheDocument());
+
+    // 终态之后 effect 不再安排下一次请求。
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(getSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-arms polling after a failed status request and stops on terminal', async () => {
+    vi.useFakeTimers();
+    const getSpy = vi.spyOn(apiClient, 'get')
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce({ data: { status: 'completed', message: '已完成' } } as never);
+
+    mockStoreState.messages = [{
+      id: 'm3',
+      role: 'assistant',
+      content: '已提交',
+      actionTasks: [{
+        kind: 'stock_analysis',
+        summary: '已提交分析',
+        taskId: 'task-3',
+        statusEndpoint: '/api/v1/analysis/status/task-3',
+        pollIntervalMs: 10,
+      }],
+    }];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(getSpy).toHaveBeenCalledTimes(1);
+
+    // 非 2xx / 网络错误不能终止轮询：下一轮成功并把状态渲染出来。
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(getSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('状态：completed · 已完成')).toBeInTheDocument();
+  });
+
+  it('keeps a longer poll interval from being starved by a faster task', async () => {
+    vi.useFakeTimers();
+    const getSpy = vi.spyOn(apiClient, 'get')
+      .mockResolvedValue({ data: { status: 'running' } } as never);
+
+    mockStoreState.messages = [{
+      id: 'm4',
+      role: 'assistant',
+      content: '已提交',
+      actionTasks: [
+        {
+          kind: 'stock_analysis',
+          summary: '快任务',
+          taskId: 'fast',
+          statusEndpoint: '/api/v1/analysis/status/fast',
+          pollIntervalMs: 10,
+        },
+        {
+          kind: 'market_review',
+          summary: '慢任务',
+          taskId: 'slow',
+          statusEndpoint: '/api/v1/analysis/status/slow',
+          pollIntervalMs: 50,
+        },
+      ],
+    }];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    const callsFor = (endpoint: string) => getSpy.mock.calls
+      .filter(([url]) => url === endpoint).length;
+
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+    expect(callsFor('/api/v1/analysis/status/fast')).toBe(3);
+    // 快任务每 10ms 的重排不能把慢任务的 50ms 计时清零。
+    expect(callsFor('/api/v1/analysis/status/slow')).toBe(0);
+
+    for (let i = 0; i < 2; i += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+    expect(callsFor('/api/v1/analysis/status/fast')).toBe(5);
+    expect(callsFor('/api/v1/analysis/status/slow')).toBe(1);
+  });
+
+  /**
+   * 悬浮助手（dock 形态）挂在任意路由上：它不能改当前页面标题，也不能消费/清空
+   * 当前页面的查询串。整页形态靠这两段副作用承接报告页跳转，回归时只会在
+   * 「从筛选页打开助手后筛选条件丢失」这种间接现象里暴露，所以单独钉住。
+   */
+  describe('dock variant', () => {
+    const LocationProbe = () => {
+      const location = useLocation();
+      return (
+        <div data-testid="location">
+          {location.pathname}
+          {location.search}
+        </div>
+      );
+    };
+
+    it('keeps the host page query string and title untouched', async () => {
+      document.title = 'host page title';
+      mockGetStatus.mockResolvedValue({
+        backend: 'litellm',
+        available: true,
+        experimental: false,
+        errorCode: null,
+        message: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/screening?tab=hotspot&page=2']}>
+          <ChatPage variant="dock" />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+
+      await screen.findByRole('textbox');
+      expect(screen.getByTestId('location')).toHaveTextContent('/screening?tab=hotspot&page=2');
+      expect(document.title).toBe('host page title');
+    });
+
+    it('drops page-only chrome such as the history toolbar', async () => {
+      mockGetStatus.mockResolvedValue({
+        backend: 'litellm',
+        available: true,
+        experimental: false,
+        errorCode: null,
+        message: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/portfolio']}>
+          <ChatPage variant="dock" />
+        </MemoryRouter>,
+      );
+
+      await screen.findByRole('textbox');
+      expect(screen.queryByRole('button', { name: '导出会话为 Markdown 文件' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument();
+    });
+
+    it('offers site-operation suggestions instead of the full-page strategy prompts', async () => {
+      mockGetStatus.mockResolvedValue({
+        backend: 'litellm',
+        available: true,
+        experimental: false,
+        errorCode: null,
+        message: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/portfolio']}>
+          <ChatPage variant="dock" />
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByRole('button', { name: '我的持仓情况怎么样？' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '把 600519 加入自选' })).toBeInTheDocument();
+      // 整页的策略分析推荐问法在悬浮面板里既没有策略入口也没有足够宽度，不应出现。
+      expect(screen.queryByRole('button', { name: '用缠论分析茅台' })).not.toBeInTheDocument();
+    });
   });
 });

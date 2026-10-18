@@ -230,6 +230,27 @@ class PaperService:
         account = self.paper_repo.ensure_account(initial_capital=initial_capital)
         return self._account_payload(account)
 
+    def get_existing_account_id(self, account_id: Optional[int] = None) -> Optional[int]:
+        """Return an existing account id without creating or mutating anything.
+
+        Read-only consumers must not fall back to ``ensure_account``: that
+        INSERTs the default account on an empty database and rewrites nothing
+        only by luck. With ``account_id`` given, the row must exist; otherwise
+        the lowest-id active account is returned. ``None`` means "no such
+        account" and callers should surface a notice instead of touching the DB.
+        """
+        if account_id is not None:
+            account = self.paper_repo.get_account(int(account_id))
+            return account.id if account is not None else None
+        active = [
+            account
+            for account in self.paper_repo.list_accounts()
+            if account.status == "active"
+        ]
+        if not active:
+            return None
+        return min(active, key=lambda account: account.id).id
+
     def reset_account(self, initial_capital: Optional[float] = None) -> Dict[str, Any]:
         """Archive every active account and open a fresh one, returning the new one.
 

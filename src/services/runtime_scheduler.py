@@ -30,6 +30,21 @@ _RUNTIME_ANALYSIS_LOCK = threading.Lock()
 MAX_SCHEDULED_RETRIES = 3
 RETRY_DELAY_SECONDS = 300  # 5 min
 
+# Process-local handle for read-only consumers (e.g. agent tools).  Only the
+# API lifespan publishes an instance; CLI processes leave it as ``None``.
+_runtime_scheduler_service: Optional["RuntimeSchedulerService"] = None
+
+
+def set_runtime_scheduler_service(service: Optional["RuntimeSchedulerService"]) -> None:
+    """Publish the process-local scheduler instance for read-only consumers."""
+    global _runtime_scheduler_service
+    _runtime_scheduler_service = service
+
+
+def get_runtime_scheduler_service() -> Optional["RuntimeSchedulerService"]:
+    """Return the running scheduler instance, or None outside the API process."""
+    return _runtime_scheduler_service
+
 
 def _analysis_lock_path_from_config(config: Any) -> str:
     """Cross-process lock file anchored next to the shared SQLite DB."""

@@ -395,7 +395,7 @@ describe('agentChatStore.startStream', () => {
         // 先有一段正文，让流式占位消息先被 append，从而逼出 streaming-placeholder 那个 attach 点
         // （没有 content_delta 时只走 fresh-append 那一处）。
         'data: {"type":"content_delta","delta":"先导"}',
-        'data: {"type":"action_proposal","kind":"alert","proposal":{"name":"600519 price above 1800","target_scope":"single_symbol","target":"600519","alert_type":"price_cross","parameters":{"direction":"above","price":1800},"severity":"info"},"summary":"「600519」价格上穿 ¥1800"}',
+        'data: {"type":"action_proposal","kind":"alert_create","proposal":{"name":"600519 price above 1800","target_scope":"single_symbol","target":"600519","alert_type":"price_cross","parameters":{"direction":"above","price":1800},"severity":"info"},"summary":"「600519」价格上穿 ¥1800"}',
         'data: {"type":"done","success":true,"content":"建议关注该价格位","backend":"litellm"}',
       ]),
     );
@@ -413,7 +413,7 @@ describe('agentChatStore.startStream', () => {
     // 转换交给 utils/actionProposal 的 apply 分支。
     expect(assistant.actionProposals).toEqual([
       {
-        kind: 'alert',
+        kind: 'alert_create',
         summary: '「600519」价格上穿 ¥1800',
         proposal: {
           name: '600519 price above 1800',
@@ -428,20 +428,20 @@ describe('agentChatStore.startStream', () => {
   });
 
   it('accumulates every action_proposal event in one turn instead of keeping only the last', async () => {
-    // 「把这三只加入自选」会让模型对每只各调一次提案工具，后端每次调用发一个事件；
+    // 同一轮里模型对多只股票各调一次提案工具，后端每次调用发一个事件；
     // 只留最后一个会静默丢掉其余卡片，且并行路径下顺序是完成顺序、丢哪个不确定。
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([
         accepted('request-multi-proposal'),
         'data: {"type":"content_delta","delta":"先导"}',
-        'data: {"type":"action_proposal","kind":"watchlist_add","proposal":{"stock_code":"600519","list_name":null},"summary":"把「600519」加入自选"}',
-        'data: {"type":"action_proposal","kind":"watchlist_add","proposal":{"stock_code":"300750","list_name":null},"summary":"把「300750」加入自选"}',
+        'data: {"type":"action_proposal","kind":"alert_create","proposal":{"name":"600519 price above 1800"},"summary":"为「600519」创建价格告警"}',
+        'data: {"type":"action_proposal","kind":"alert_create","proposal":{"name":"300750 price above 200"},"summary":"为「300750」创建价格告警"}',
         'data: {"type":"done","success":true,"content":"已生成两条提案","backend":"litellm"}',
       ]),
     );
 
     await useAgentChatStore.getState().startStream({
-      message: '把这两只加入自选',
+      message: '给这两只都建价格告警',
       session_id: 'session-test',
       request_id: 'request-multi-proposal',
     });
@@ -450,14 +450,14 @@ describe('agentChatStore.startStream', () => {
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1].actionProposals).toEqual([
       {
-        kind: 'watchlist_add',
-        summary: '把「600519」加入自选',
-        proposal: { stock_code: '600519', list_name: null },
+        kind: 'alert_create',
+        summary: '为「600519」创建价格告警',
+        proposal: { name: '600519 price above 1800' },
       },
       {
-        kind: 'watchlist_add',
-        summary: '把「300750」加入自选',
-        proposal: { stock_code: '300750', list_name: null },
+        kind: 'alert_create',
+        summary: '为「300750」创建价格告警',
+        proposal: { name: '300750 price above 200' },
       },
     ]);
   });
@@ -478,6 +478,30 @@ describe('agentChatStore.startStream', () => {
     });
 
     expect(useAgentChatStore.getState().messages[1].actionProposals).toBeUndefined();
+  });
+
+  it('attaches executed and task actions to the assistant message', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(createStreamResponse([
+      accepted('req-1'),
+      `data: ${JSON.stringify({
+        type: 'action_executed', kind: 'fx_refresh', summary: '已刷新汇率',
+        result: { updated: 3 }, undo_hint: '再次刷新即可覆盖',
+      })}`,
+      `data: ${JSON.stringify({
+        type: 'action_task', kind: 'stock_analysis', summary: '已提交分析',
+        task_id: 'abc', status_endpoint: '/api/v1/analysis/status/abc',
+        poll_interval_ms: 2000,
+      })}`,
+      `data: ${JSON.stringify({ type: 'done', success: true, content: '完成' })}`,
+    ]));
+    await useAgentChatStore.getState().startStream({
+      message: '刷新汇率并分析 600519',
+      session_id: 'session-test',
+      request_id: 'req-1',
+    });
+    const message = useAgentChatStore.getState().messages.at(-1);
+    expect(message?.actionExecutions?.[0].kind).toBe('fx_refresh');
+    expect(message?.actionTasks?.[0].taskId).toBe('abc');
   });
 
   it('keeps streamed text when the stream fails after content_delta', async () => {

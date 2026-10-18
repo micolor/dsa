@@ -57,6 +57,7 @@ class FundNavReviewRepository:
         fund_code: Optional[str] = None,
         force: bool = False,
         checked_before: Optional[datetime] = None,
+        exclude_ids: Optional[List[int]] = None,
         limit: int = 400,
     ) -> List[FundNavReviewRecord]:
         safe_limit = max(1, min(int(limit), 400))
@@ -65,6 +66,8 @@ class FundNavReviewRepository:
             conditions.append(FundNavReviewRecord.horizon.in_(horizons))
         if fund_code:
             conditions.append(FundNavReviewRecord.fund_code == fund_code)
+        if exclude_ids:
+            conditions.append(FundNavReviewRecord.id.not_in(list(exclude_ids)))
         if not force:
             conditions.extend([
                 FundNavReviewRecord.eval_status == 'pending',

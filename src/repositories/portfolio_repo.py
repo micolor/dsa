@@ -827,6 +827,34 @@ class PortfolioRepository:
                 existing.updated_at = datetime.now()
             session.commit()
 
+    def get_latest_daily_snapshot(
+        self,
+        *,
+        account_id: int,
+        as_of: date,
+        cost_method: str = "fifo",
+    ) -> Optional[PortfolioDailySnapshot]:
+        """Return the most recent persisted snapshot row for an account.
+
+        Pure read: no replay, no position/lot refresh, no quote writes.
+        """
+        with self.db.get_session() as session:
+            return session.execute(
+                select(PortfolioDailySnapshot)
+                .where(
+                    and_(
+                        PortfolioDailySnapshot.account_id == account_id,
+                        PortfolioDailySnapshot.snapshot_date <= as_of,
+                        PortfolioDailySnapshot.cost_method == cost_method,
+                    )
+                )
+                .order_by(
+                    PortfolioDailySnapshot.snapshot_date.desc(),
+                    PortfolioDailySnapshot.id.desc(),
+                )
+                .limit(1)
+            ).scalars().first()
+
     def list_daily_snapshots_for_risk(
         self,
         *,

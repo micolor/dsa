@@ -21,7 +21,6 @@ import copy
 import json
 import logging
 import re
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union, Dict, Any
@@ -58,10 +57,7 @@ from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.data.stock_index_loader import resolve_index_stock_code
 from src.config import Config
 from src.core.market_review_lock import (
-    MarketReviewExecutionLock as _MarketReviewExecutionLock,
     market_review_lock_path,
-    release_market_review_lock as _release_market_review_lock,
-    try_acquire_market_review_lock as _try_acquire_market_review_lock,
 )
 from src.core.market_review_runtime import (
     build_market_review_runtime as _runtime_build_market_review_runtime,
@@ -78,6 +74,11 @@ from src.services.stock_code_utils import is_code_like, resolve_index_stock_code
 from src.report_language import get_localized_stock_name, normalize_report_language
 from src.schemas.decision_action import build_action_fields
 from src.services.name_to_code_resolver import resolve_name_to_code
+from src.services.site_task_submitter import (
+    MarketReviewLockHeldError,
+    run_market_review_background as _run_market_review_background,
+    submit_market_review as _submit_market_review,
+)
 from src.services.task_queue import (
     get_task_queue,
     DuplicateTaskError,
@@ -129,51 +130,6 @@ def _with_request_report_language(config: Config, report_language: Optional[str]
     scoped_config = copy.copy(config)
     scoped_config.report_language = normalized
     return scoped_config
-
-
-def _run_market_review_background(
-    send_notification: bool,
-    effective_region: str,
-    lock_token: Optional[_MarketReviewExecutionLock] = None,
-    config: Optional[Config] = None,
-    query_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Run market review after the API response has been accepted."""
-    from src.core.market_review import run_market_review
-
-    runtime_config = config or get_config_dep()
-    try:
-        notifier, analyzer, search_service = _build_market_review_runtime(runtime_config)
-        review_kwargs = {
-            "notifier": notifier,
-            "analyzer": analyzer,
-            "search_service": search_service,
-            "config": runtime_config,
-            "send_notification": send_notification,
-            "override_region": effective_region,
-            "return_structured": True,
-            "trigger_source": "api",
-        }
-        if query_id:
-            review_kwargs["query_id"] = query_id
-        logger.info(
-            "[MarketReview] component=market_review action=background_start "
-            "trigger_source=api task_id=%s region=%s",
-            query_id or "-",
-            effective_region,
-        )
-        report = run_market_review(**review_kwargs)
-        if not report:
-            raise RuntimeError("大盘复盘未返回可持久化报告")
-        if hasattr(report, "report"):
-            return {
-                "result": report.report,
-                "market_review_payload": getattr(report, "market_review_payload", None),
-                "region": effective_region,
-            }
-        return {"result": report, "region": effective_region}
-    finally:
-        _release_market_review_lock(lock_token)
 
 
 def _coalesce_text(*values: Any) -> Optional[str]:
@@ -548,36 +504,14 @@ def trigger_market_review(
         normalize_market_review_region_lenient(runtime_config.market_review_region) or "cn"
     )
 
-    lock_token = _try_acquire_market_review_lock(runtime_config)
-    if lock_token is None:
-        raise api_error(409, "duplicate_market_review", "大盘复盘正在执行中，请稍后再试")
-
     try:
-        task_id = uuid.uuid4().hex
-        logger.info(
-            "[MarketReview] component=market_review action=submit trigger_source=api "
-            "task_id=%s region=%s send_notification=%s",
-            task_id,
-            effective_region,
-            request.send_notification,
-        )
-        task = get_task_queue().submit_background_task(
-            lambda: _run_market_review_background(
-                request.send_notification,
-                effective_region=effective_region,
-                lock_token=lock_token,
-                config=runtime_config,
-                query_id=task_id,
-            ),
-            stock_code="market_review",
-            stock_name="大盘复盘",
-            message="大盘复盘任务已提交",
-            task_id=task_id,
+        task = _submit_market_review(
+            send_notification=request.send_notification,
             region=effective_region,
+            config=runtime_config,
         )
-    except Exception:
-        _release_market_review_lock(lock_token)
-        raise
+    except MarketReviewLockHeldError as exc:
+        raise api_error(409, "duplicate_market_review", str(exc))
 
     return MarketReviewAccepted(
         status="accepted",

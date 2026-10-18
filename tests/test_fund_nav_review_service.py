@@ -398,3 +398,22 @@ def test_stats_restored_fields_are_null_when_restore_never_ran(isolated_db):
     assert stats["restored_positive_rate_pct"] is None
     assert stats["avg_restored_return_pct"] is None
     assert stats["restored_bases"] == {}
+
+
+def test_run_reviews_excludes_processed_ids_and_reports_selected_rows(isolated_db):
+    navs = _navs()
+    _record(navs)
+    _set_due(isolated_db, ANCHOR_DAY)
+    rows = _rows(isolated_db)
+    excluded = [int(row.id) for row in rows[:2]]
+
+    result = FundNavReviewService(fetcher=FakeFetcher(navs)).run_reviews(
+        as_of=ANCHOR_DAY + timedelta(days=400),
+        exclude_ids=excluded,
+    )
+
+    assert result["processed_review_ids"] == [int(row.id) for row in rows[2:]]
+    assert result["evaluated"] == 2
+    statuses = {int(row.id): row.eval_status for row in _rows(isolated_db)}
+    assert all(statuses[row_id] == "pending" for row_id in excluded)
+    assert all(statuses[int(row.id)] == "evaluated" for row in rows[2:])

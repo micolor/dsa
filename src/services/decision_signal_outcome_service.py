@@ -135,6 +135,7 @@ class DecisionSignalOutcomeService:
         status: Optional[str] = None,
         limit: int = 100,
         fetch_missing_benchmark: Optional[bool] = None,
+        exclude_signal_ids: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         signal_id_norm = self._optional_positive_int(signal_id, "signal_id")
         market_norm = DecisionSignalService._normalize_optional_market(market)
@@ -158,6 +159,7 @@ class DecisionSignalOutcomeService:
                 statuses=statuses,
                 requested_horizons=horizons_norm,
                 limit=safe_limit,
+                exclude_signal_ids=exclude_signal_ids,
             )
         else:
             signals = self.repo.list_candidate_signals(
@@ -167,6 +169,7 @@ class DecisionSignalOutcomeService:
                 action=action_norm,
                 source_type=source_type_norm,
                 statuses=statuses,
+                exclude_ids=exclude_signal_ids,
                 limit=safe_limit,
             )
         if signal_id_norm is not None and not signals:
@@ -224,6 +227,11 @@ class DecisionSignalOutcomeService:
             "updated": updated_count,
             "skipped": skipped_count,
             "engine_version": DECISION_SIGNAL_OUTCOME_ENGINE_VERSION,
+            # Signals selected by this call, including ones whose outcomes were
+            # skipped or whose evaluation remained unable. Backlog drainers can
+            # pass these back through ``exclude_signal_ids`` so retryable rows
+            # are not selected again in the same run.
+            "processed_signal_ids": [int(signal.id) for signal in signals],
         }
 
     def _backfill_benchmarks(self) -> None:
@@ -352,6 +360,7 @@ class DecisionSignalOutcomeService:
         statuses: Optional[List[str]],
         requested_horizons: Optional[List[str]],
         limit: int,
+        exclude_signal_ids: Optional[List[int]] = None,
     ) -> List[DecisionSignalRecord]:
         selected: List[DecisionSignalRecord] = []
         selected_ids = set()
@@ -366,6 +375,7 @@ class DecisionSignalOutcomeService:
                 action=action,
                 source_type=source_type,
                 statuses=statuses,
+                exclude_ids=exclude_signal_ids,
                 offset=offset,
                 limit=BATCH_CANDIDATE_SCAN_PAGE_SIZE,
             )

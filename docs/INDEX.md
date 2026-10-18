@@ -50,6 +50,7 @@
 | [场外基金净值复盘](fund-nav-review.md) | 基金体检锚点、1m/3m/6m/1y 净值后验口径、分红再投资复权与累计净值回退链、区间净值 API 与走势图、报告页复盘摘要、状态机、历史补录、复权指标回填、自动评估开关与回滚 |
 | [资讯 / 情报源](intelligence-sources.md) | RSS/Atom 合规资讯源配置、测试、拉取、去重、存储、查询与安全边界 |
 | [分析上下文包契约、运行态消费与可见性](analysis-context-pack.md) | AnalysisContextPack 首版范围、字段质量状态、P1/P2 内部契约、P3 Prompt 摘要消费、P4 历史/API/Web 低敏可见性、P5 数据质量评分、P6 迁移回滚与源码锚点；完整指南补充 #1386 阶段感知分析、迁移与回滚入口 |
+| [问股全站操作助手](agent-chat-site-operations.md) | 问股读取全站数据、低风险直接执行、后台任务与高风险确认卡片的执行语义、工具清单、明确排除项和审计回滚方式 |
 | [图片识别 Prompt](image-extract-prompt.md) | 图片识别股票信息的 Prompt 与使用边界 |
 | [OpenClaw Skill 集成](openclaw-skill-integration.md) | OpenClaw / Skill 外部集成说明 |
 

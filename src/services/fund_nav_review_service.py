@@ -185,6 +185,7 @@ class FundNavReviewService:
         limit: int = 100,
         as_of: Optional[date] = None,
         now: Optional[datetime] = None,
+        exclude_ids: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """Evaluate due anchors, fetching each fund's NAV range once per run."""
         as_of = as_of or date.today()
@@ -200,6 +201,7 @@ class FundNavReviewService:
             fund_code=normalized_code,
             force=force,
             checked_before=now - CHECK_COOLDOWN,
+            exclude_ids=exclude_ids,
             limit=min(max(int(limit), 1), MAX_ROWS_PER_RUN),
         )
 
@@ -256,6 +258,10 @@ class FundNavReviewService:
             "unable": counts["unable"],
             "skipped": counts["skipped"],
             "engine_version": FUND_NAV_REVIEW_ENGINE_VERSION,
+            # Every selected row has been handled, including fetch-error rows
+            # that never reach ``items``. Callers draining a backlog can pass
+            # these back through ``exclude_ids`` to avoid reselecting them.
+            "processed_review_ids": [int(row.id) for row in rows],
         }
 
     def _evaluate_row(

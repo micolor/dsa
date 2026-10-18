@@ -25,6 +25,11 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, List, Optional
 
+from src.agent.action_contract import (
+    ACTION_EXECUTED_KINDS,
+    ACTION_PROPOSAL_KINDS,
+    ACTION_TASK_KINDS,
+)
 from src.agent.llm_adapter import LLMCallCancelled, LLMToolAdapter
 from src.agent.dashboard_payload import sanitize_agent_dashboard_payload
 from src.agent.protocols import StageFailureReason
@@ -82,9 +87,48 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
     "get_skill_backtest_summary": "技能回测概览",
     "get_strategy_backtest_summary": "策略回测概览",
     "get_stock_backtest_summary": "个股回测数据",
-    "propose_alert": "告警提案生成",
+    "propose_alert_rule_change": "告警规则提案生成",
     "propose_portfolio_trade": "持仓录入提案生成",
-    "propose_watchlist_change": "自选变更提案生成",
+    "propose_portfolio_ledger_entry": "持仓流水提案生成",
+    "propose_portfolio_account_change": "持仓账户提案生成",
+    "propose_signal_change": "决策信号提案生成",
+    "propose_paper_reset": "模拟盘重置提案生成",
+    # Site write proposals (Task 13).
+    "propose_history_deletion": "历史删除提案生成",
+    "propose_intelligence_source_change": "情报源提案生成",
+    "propose_config_update": "配置修改提案生成",
+    "propose_scheduler_run": "调度执行提案生成",
+    "propose_notification_test": "通知测试提案生成",
+    # Site read tools (Task 8) and low-risk direct actions (Task 9).
+    "get_history_view": "读取分析历史",
+    "get_alert_view": "读取告警视图",
+    "get_analysis_task_view": "读取分析任务",
+    "get_backtest_view": "读取回测统计",
+    "get_screening_view": "读取选股视图",
+    "get_signal_view": "读取决策信号",
+    "get_fund_review_view": "读取基金复盘",
+    "get_paper_view": "读取模拟盘",
+    "get_portfolio_ledger_view": "读取持仓账本",
+    "get_intelligence_view": "读取情报视图",
+    "get_config_view": "读取系统配置",
+    "get_scheduler_view": "读取调度状态",
+    "manage_watchlist": "管理自选",
+    "set_alert_rule_enabled": "启停告警规则",
+    "dry_run_alert_rule": "预览告警规则",
+    "refresh_fx_rates": "刷新汇率",
+    "refresh_paper_valuation": "刷新模拟盘估值",
+    "test_intelligence_source": "测试情报源",
+    "test_llm_channel": "测试 LLM 渠道",
+    # Site task tools (Task 11).
+    "start_stock_analysis": "提交股票分析",
+    "start_market_review": "提交大盘复盘",
+    "run_backtest": "提交回测任务",
+    "start_screening": "提交选股任务",
+    "fetch_intelligence": "抓取情报",
+    "backfill_fund_nav_reviews": "补录基金复盘",
+    "run_fund_nav_reviews": "评估基金复盘",
+    "run_signal_outcomes": "评估信号后验",
+    "backfill_paper_signals": "回填模拟盘信号",
 }
 
 
@@ -676,61 +720,129 @@ def run_agent_loop(
 # Internal tool execution
 # ============================================================
 
-# 提案工具：只读、返回 {kind, summary, proposal} 信封，由 runner 转成 action_proposal 事件。
-_PROPOSAL_TOOL_NAMES = frozenset({
-    "propose_alert",
-    "propose_portfolio_trade",
-    "propose_watchlist_change",
-})
-
-# 前端能分发的动作类型；越界的 kind 一律不发射，避免出现前端无法处理的卡片。
-_ALLOWED_PROPOSAL_KINDS = frozenset({
-    "alert",
-    "portfolio_trade",
-    "watchlist_add",
-    "watchlist_remove",
-})
+# 按工具策略的 execution_mode 选择可发射的 kind 白名单；越界的 kind 一律不发射，
+# 避免出现前端无法处理的卡片。
+_ACTION_KINDS = {
+    "proposal": ACTION_PROPOSAL_KINDS,
+    "direct": ACTION_EXECUTED_KINDS,
+    "task": ACTION_TASK_KINDS,
+}
 
 
-def _maybe_emit_action_proposal(
+def _log_action_rejected(tool_name: str, kind: Any, reason: str) -> None:
+    """Log exactly one rejection line for an action-mode tool result."""
+    safe_kind = kind if isinstance(kind, str) and kind else "-"
+    logger.info(
+        "[AgentAction] agent_action=action_rejected tool=%s kind=%s success=false reason=%s",
+        tool_name,
+        safe_kind,
+        reason,
+    )
+
+
+def _maybe_emit_action_event(
     tc,
     result_str: str,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]],
     step: int,
+    tool_registry: ToolRegistry,
 ) -> str:
-    """Surface a proposal tool result to the client and simplify the LLM view.
+    """Emit one action event for direct/proposal/task tools and hide raw JSON from the model.
 
-    If the executed tool is one of ``_PROPOSAL_TOOL_NAMES`` and its result is a
-    ``{"kind": ..., "summary": ..., "proposal": ...}`` envelope, emit an
-    ``action_proposal`` SSE event via ``progress_callback`` and rewrite the
-    LLM-facing ``result_str`` to a short confirmation note (so the raw proposal
-    JSON is not leaked into the conversation). Returns the (possibly rewritten)
-    ``result_str``.
+    Payload validation and the ``[AgentAction]`` audit line run for every action-mode
+    tool call, even when no ``progress_callback`` is attached (headless runs still
+    need the audit trail).  Only the SSE emission itself is conditional.
     """
-    if tc.name not in _PROPOSAL_TOOL_NAMES or not progress_callback:
+    tool_def = tool_registry.get(tc.name)
+    if tool_def is None:
+        return result_str
+    mode = tool_def.policy.execution_mode
+    allowed = _ACTION_KINDS.get(mode)
+    if allowed is None:
         return result_str
     try:
         payload = json.loads(result_str)
     except (TypeError, ValueError):
+        _log_action_rejected(tc.name, None, "invalid_json")
         return result_str
     if not isinstance(payload, dict):
+        _log_action_rejected(tc.name, None, "payload_not_object")
         return result_str
     kind = payload.get("kind")
-    proposal = payload.get("proposal")
     summary = payload.get("summary")
-    # kind 必须是字符串且在白名单内（字符串判断同时挡住 list/dict 这类不可哈希取值）。
-    if not isinstance(kind, str) or kind not in _ALLOWED_PROPOSAL_KINDS:
-        return result_str
-    if not isinstance(proposal, dict) or not isinstance(summary, str):
+    # kind 必须是字符串且在该模式的白名单内（字符串判断同时挡住 list/dict 这类不可哈希取值）。
+    if not isinstance(kind, str) or kind not in allowed:
+        _log_action_rejected(tc.name, kind, "invalid_kind")
         return result_str
     # 空白摘要与前端 `parseActionProposalEvent`（types/actionProposal.ts）的拒绝条件逐字对齐：
     # 前端丢弃它、后端却当成功并回写 `{"message": ""}`，模型会照此宣称「已生成确认卡片」，
     # 而用户什么也没看到——两层判断必须同一套，谁都不许单独放宽。
-    if not summary.strip():
+    if not isinstance(summary, str) or not summary.strip():
+        _log_action_rejected(tc.name, kind, "blank_summary")
         return result_str
-    progress_callback(
-        stream_event("action_proposal", kind=kind, proposal=proposal, summary=summary)
-    )
+
+    if mode == "proposal":
+        proposal = payload.get("proposal")
+        if not isinstance(proposal, dict):
+            _log_action_rejected(tc.name, kind, "invalid_proposal")
+            return result_str
+        logger.info(
+            "[AgentAction] agent_action=proposal_emitted tool=%s kind=%s success=true summary=%s",
+            tc.name,
+            kind,
+            summary,
+        )
+        if progress_callback:
+            progress_callback(
+                stream_event("action_proposal", kind=kind, proposal=proposal, summary=summary)
+            )
+    elif mode == "direct":
+        result = payload.get("result")
+        undo_hint = payload.get("undo_hint")
+        if not isinstance(result, dict) or not isinstance(undo_hint, str):
+            _log_action_rejected(tc.name, kind, "invalid_result")
+            return result_str
+        # 与 ToolDefinition.validate_action_policy() 的非空要求对齐：空提示的已执行
+        # 卡片等于没有撤销出口。
+        if not undo_hint.strip():
+            _log_action_rejected(tc.name, kind, "blank_undo_hint")
+            return result_str
+        logger.info(
+            "[AgentAction] agent_action=direct_executed tool=%s kind=%s success=true summary=%s",
+            tc.name,
+            kind,
+            summary,
+        )
+        if progress_callback:
+            progress_callback(stream_event(
+                "action_executed",
+                kind=kind,
+                summary=summary,
+                result=result,
+                undo_hint=undo_hint,
+            ))
+    else:
+        task_id = payload.get("task_id")
+        status_endpoint = payload.get("status_endpoint")
+        if not isinstance(task_id, str) or not isinstance(status_endpoint, str):
+            _log_action_rejected(tc.name, kind, "invalid_task_payload")
+            return result_str
+        logger.info(
+            "[AgentAction] agent_action=task_submitted tool=%s kind=%s success=true task_id=%s summary=%s",
+            tc.name,
+            kind,
+            task_id,
+            summary,
+        )
+        if progress_callback:
+            progress_callback(stream_event(
+                "action_task",
+                kind=kind,
+                summary=summary,
+                task_id=task_id,
+                status_endpoint=status_endpoint,
+                poll_interval_ms=2000,
+            ))
     return json.dumps({"message": summary}, ensure_ascii=False)
 
 
@@ -846,7 +958,9 @@ def _execute_tools(
             _, result_str, success, dur, cached, guard_result = _exec_single(tc)
         if progress_callback:
             progress_callback(stream_event("tool_done", step=step, tool=tc.name, success=success, duration=dur))
-        result_str = _maybe_emit_action_proposal(tc, result_str, progress_callback, step)
+        result_str = _maybe_emit_action_event(
+            tc, result_str, progress_callback, step, tool_registry
+        )
         log_entry = {
             "step": step, "tool": tc.name, "arguments": tc.arguments,
             "success": success, "duration": dur, "result_length": len(result_str),
@@ -892,7 +1006,9 @@ def _execute_tools(
             tc_item, result_str, success, dur, cached, guard_result = done.result()
             if progress_callback:
                 progress_callback(stream_event("tool_done", step=step, tool=tc_item.name, success=success, duration=dur))
-            result_str = _maybe_emit_action_proposal(tc_item, result_str, progress_callback, step)
+            result_str = _maybe_emit_action_event(
+                tc_item, result_str, progress_callback, step, tool_registry
+            )
             log_entry = {
                 "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
                 "success": success, "duration": dur, "result_length": len(result_str),

@@ -68,7 +68,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   const dialog = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-colors"
+      // 层级取 150：确认框经常从别的模态里发起（事件记录里删流水、抽屉里删会话），
+      // 必须压在 Drawer(100) / Dialog(140) 之上；Select、DatePicker 的弹出层是 200，
+      // 仍能在确认框内部正常展开。
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-colors"
       role="presentation"
       onClick={() => {
         if (!cancelDisabled) {
