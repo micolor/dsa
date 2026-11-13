@@ -4,6 +4,7 @@ import type {
   BackfillResult,
   EquityPoint,
   PaperAccount,
+  PaperAutoTradeResult,
   PaperPosition,
   PaperSignalList,
   PaperSnapshot,
@@ -48,6 +49,13 @@ export const paperApi = {
   refresh: async (): Promise<PaperValuation> => {
     const response = await apiClient.post('/api/v1/paper/refresh');
     return toCamelCase<PaperValuation>(response.data);
+  },
+
+  autoTrade: async (lookbackDays?: number): Promise<PaperAutoTradeResult> => {
+    const response = await apiClient.post('/api/v1/paper/auto-trade', null, {
+      params: lookbackDays == null ? undefined : { lookback_days: lookbackDays },
+    });
+    return toCamelCase<PaperAutoTradeResult>(response.data);
   },
 
   backfill: async (fromDate: string, toDate?: string): Promise<BackfillResult> => {

@@ -1041,6 +1041,9 @@ class Config:
     agent_event_monitor_enabled: bool = False  # Enable periodic event-driven alert checks in schedule mode
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     paper_trading_enabled: bool = True  # Enable the paper-trading daily valuation background task
+    paper_auto_trade_enabled: bool = True  # Consume active decision signals into the paper account once a day
+    paper_auto_trade_time: str = "16:30"  # Asia/Shanghai time for the daily auto-trade pass
+    paper_auto_trade_lookback_days: int = 7  # Only auto-trade active signals created within this window
     paper_position_weight: float = 0.20  # Target weight of total assets allocated per opened position
     paper_initial_capital: float = 1000000.0  # Starting cash for a newly created paper account
     paper_notify_enabled: bool = False  # Push a notification for live paper fills (backfill replays stay silent)
@@ -1237,6 +1240,67 @@ class Config:
     fund_nav_review_auto_restore_enabled: bool = False
     # 问股全站操作：关闭后只保留原有问答/分析工具，不注册站点读写工具
     agent_chat_site_operations_enabled: bool = True
+    # 问股意图路由：AGENT_ARCH=multi 时，只有个股分析问题进入多智能体流水线；
+    # 通用问答、站点查询/操作、大盘和基金问题走单 Agent（才能使用站点工具）。
+    agent_chat_intent_routing_enabled: bool = True
+    # 主动助手日报：按 AGENT_PROACTIVE_BRIEF_TIMES 自动生成并写入“助手日报”会话
+    agent_proactive_brief_enabled: bool = False
+    agent_proactive_brief_times: str = "08:30,15:30"
+    agent_proactive_brief_watchlist_limit: int = 20
+    agent_proactive_brief_notify: bool = False
+    # 事件驱动 Agent 分析：盘中异常事件触发一次短分析并写入“事件提醒”会话
+    agent_event_analysis_enabled: bool = False
+    agent_event_analysis_interval_minutes: int = 10
+    agent_event_analysis_max_per_run: int = 3
+    agent_event_analysis_notify: bool = False
+    agent_event_analysis_timeout_s: int = 60
+    # 用户风险画像：供问股提示词、主动日报/事件分析和周复盘使用
+    agent_risk_profile_horizon: str = "medium"
+    agent_risk_profile_max_drawdown_pct: float = 15.0
+    agent_risk_profile_max_position_pct: float = 35.0
+    agent_risk_profile_notes: str = ""
+    agent_risk_profile_accounts_json: str = ""
+    # 每周复盘：默认周五 15:30 生成
+    agent_weekly_review_enabled: bool = False
+    agent_weekly_review_day: int = 4
+    agent_weekly_review_time: str = "15:30"
+    agent_weekly_review_notify: bool = False
+    # 机会扫描：把最近一次选股快照与热点题材整理成候选清单
+    agent_opportunity_scan_enabled: bool = False
+    agent_opportunity_scan_times: str = "08:45,15:45"
+    agent_opportunity_scan_max_candidates: int = 5
+    agent_opportunity_scan_max_age_hours: int = 72
+    agent_opportunity_scan_notify: bool = False
+    # 机会扫描发现快照过期时自动重跑选股（默认关闭；会联网且耗时）
+    agent_opportunity_scan_refresh: bool = False
+    agent_opportunity_scan_refresh_strategy: str = "capital_heat"
+    agent_opportunity_scan_refresh_market: str = "cn"
+    agent_opportunity_scan_refresh_max_results: int = 20
+    # 主动助手免打扰时段，例如 22:00-08:00；留空表示不静音
+    agent_proactive_quiet_hours: str = ""
+    # 主动任务只在交易日/交易时段运行（事件分析额外限制在盘中与收盘后一小时内）
+    agent_proactive_market_guard: bool = True
+    # 事件分析每天最多调用多少次 LLM（0 表示不限制）
+    agent_event_analysis_max_per_day: int = 20
+    agent_event_analysis_news_enabled: bool = True
+    agent_event_analysis_digest_notify: bool = False
+    # 主动推送策略
+    agent_proactive_notify_min_severity: str = "info"
+    agent_proactive_notify_route: str = ""
+    agent_proactive_notify_retries: int = 1
+    agent_proactive_notify_base_url: str = ""
+    # 主动助手并发读取行情/日线的线程数
+    agent_proactive_scan_concurrency: int = 4
+    # 独立数据刷新：在机会扫描前更新选股快照与热点缓存
+    agent_data_refresh_enabled: bool = False
+    agent_data_refresh_times: str = "08:40,15:40"
+    agent_data_refresh_strategy: str = "capital_heat"
+    agent_data_refresh_market: str = "cn"
+    agent_data_refresh_max_results: int = 20
+    # 主动运行记录保留天数
+    agent_proactive_retention_days: int = 90
+    # 用户自定义定时任务（日历）总开关；关闭后不再注册调度轮询
+    scheduled_tasks_enabled: bool = True
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -2023,6 +2087,18 @@ class Config:
             agent_context_protected_turns=agent_context_protected_turns,
             agent_event_monitor_enabled=os.getenv('AGENT_EVENT_MONITOR_ENABLED', 'false').lower() == 'true',
             paper_trading_enabled=os.getenv('PAPER_TRADING_ENABLED', 'true').lower() == 'true',
+            paper_auto_trade_enabled=parse_env_bool(
+                os.getenv('PAPER_AUTO_TRADE_ENABLED'),
+                default=True,
+            ),
+            paper_auto_trade_time=(os.getenv('PAPER_AUTO_TRADE_TIME', '16:30') or '16:30').strip(),
+            paper_auto_trade_lookback_days=parse_env_int(
+                os.getenv('PAPER_AUTO_TRADE_LOOKBACK_DAYS'),
+                7,
+                field_name='PAPER_AUTO_TRADE_LOOKBACK_DAYS',
+                minimum=1,
+                maximum=365,
+            ),
             paper_position_weight=parse_env_float(
                 os.getenv('PAPER_POSITION_WEIGHT'),
                 0.20,
@@ -2265,6 +2341,175 @@ class Config:
             agent_chat_site_operations_enabled=(
                 os.getenv('AGENT_CHAT_SITE_OPERATIONS_ENABLED', 'true').lower() != 'false'
             ),
+            agent_chat_intent_routing_enabled=(
+                os.getenv('AGENT_CHAT_INTENT_ROUTING_ENABLED', 'true').lower() != 'false'
+            ),
+            agent_proactive_brief_enabled=(
+                os.getenv('AGENT_PROACTIVE_BRIEF_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_proactive_brief_times=os.getenv('AGENT_PROACTIVE_BRIEF_TIMES', '08:30,15:30'),
+            agent_proactive_brief_watchlist_limit=parse_env_int(
+                os.getenv('AGENT_PROACTIVE_BRIEF_WATCHLIST_LIMIT'),
+                20,
+                field_name='AGENT_PROACTIVE_BRIEF_WATCHLIST_LIMIT',
+                minimum=1,
+                maximum=100,
+            ),
+            agent_proactive_brief_notify=(
+                os.getenv('AGENT_PROACTIVE_BRIEF_NOTIFY', 'false').lower() == 'true'
+            ),
+            agent_event_analysis_enabled=(
+                os.getenv('AGENT_EVENT_ANALYSIS_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_event_analysis_interval_minutes=parse_env_int(
+                os.getenv('AGENT_EVENT_ANALYSIS_INTERVAL_MINUTES'),
+                10,
+                field_name='AGENT_EVENT_ANALYSIS_INTERVAL_MINUTES',
+                minimum=1,
+                maximum=1440,
+            ),
+            agent_event_analysis_max_per_run=parse_env_int(
+                os.getenv('AGENT_EVENT_ANALYSIS_MAX_PER_RUN'),
+                3,
+                field_name='AGENT_EVENT_ANALYSIS_MAX_PER_RUN',
+                minimum=1,
+                maximum=10,
+            ),
+            agent_event_analysis_notify=(
+                os.getenv('AGENT_EVENT_ANALYSIS_NOTIFY', 'false').lower() == 'true'
+            ),
+            agent_event_analysis_timeout_s=parse_env_int(
+                os.getenv('AGENT_EVENT_ANALYSIS_TIMEOUT_S'),
+                60,
+                field_name='AGENT_EVENT_ANALYSIS_TIMEOUT_S',
+                minimum=10,
+                maximum=600,
+            ),
+            agent_risk_profile_horizon=os.getenv('AGENT_RISK_PROFILE_HORIZON', 'medium').lower(),
+            agent_risk_profile_max_drawdown_pct=parse_env_float(
+                os.getenv('AGENT_RISK_PROFILE_MAX_DRAWDOWN_PCT'),
+                15.0,
+                field_name='AGENT_RISK_PROFILE_MAX_DRAWDOWN_PCT',
+                minimum=1.0,
+                maximum=100.0,
+            ),
+            agent_risk_profile_max_position_pct=parse_env_float(
+                os.getenv('AGENT_RISK_PROFILE_MAX_POSITION_PCT'),
+                35.0,
+                field_name='AGENT_RISK_PROFILE_MAX_POSITION_PCT',
+                minimum=1.0,
+                maximum=100.0,
+            ),
+            agent_risk_profile_notes=os.getenv('AGENT_RISK_PROFILE_NOTES', ''),
+            agent_risk_profile_accounts_json=os.getenv('AGENT_RISK_PROFILE_ACCOUNTS_JSON', ''),
+            agent_weekly_review_enabled=(
+                os.getenv('AGENT_WEEKLY_REVIEW_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_weekly_review_day=parse_env_int(
+                os.getenv('AGENT_WEEKLY_REVIEW_DAY'),
+                4,
+                field_name='AGENT_WEEKLY_REVIEW_DAY',
+                minimum=0,
+                maximum=6,
+            ),
+            agent_weekly_review_time=os.getenv('AGENT_WEEKLY_REVIEW_TIME', '15:30'),
+            agent_weekly_review_notify=(
+                os.getenv('AGENT_WEEKLY_REVIEW_NOTIFY', 'false').lower() == 'true'
+            ),
+            agent_opportunity_scan_enabled=(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_opportunity_scan_times=os.getenv('AGENT_OPPORTUNITY_SCAN_TIMES', '08:45,15:45'),
+            agent_opportunity_scan_max_candidates=parse_env_int(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_MAX_CANDIDATES'),
+                5,
+                field_name='AGENT_OPPORTUNITY_SCAN_MAX_CANDIDATES',
+                minimum=1,
+                maximum=20,
+            ),
+            agent_opportunity_scan_max_age_hours=parse_env_int(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_MAX_AGE_HOURS'),
+                72,
+                field_name='AGENT_OPPORTUNITY_SCAN_MAX_AGE_HOURS',
+                minimum=1,
+                maximum=720,
+            ),
+            agent_opportunity_scan_notify=(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_NOTIFY', 'false').lower() == 'true'
+            ),
+            agent_opportunity_scan_refresh=(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_REFRESH', 'false').lower() == 'true'
+            ),
+            agent_opportunity_scan_refresh_strategy=os.getenv(
+                'AGENT_OPPORTUNITY_SCAN_REFRESH_STRATEGY', 'capital_heat'
+            ),
+            agent_opportunity_scan_refresh_market=os.getenv(
+                'AGENT_OPPORTUNITY_SCAN_REFRESH_MARKET', 'cn'
+            ),
+            agent_opportunity_scan_refresh_max_results=parse_env_int(
+                os.getenv('AGENT_OPPORTUNITY_SCAN_REFRESH_MAX_RESULTS'),
+                20,
+                field_name='AGENT_OPPORTUNITY_SCAN_REFRESH_MAX_RESULTS',
+                minimum=1,
+                maximum=100,
+            ),
+            agent_proactive_quiet_hours=os.getenv('AGENT_PROACTIVE_QUIET_HOURS', ''),
+            agent_proactive_market_guard=(
+                os.getenv('AGENT_PROACTIVE_MARKET_GUARD', 'true').lower() != 'false'
+            ),
+            agent_event_analysis_max_per_day=parse_env_int(
+                os.getenv('AGENT_EVENT_ANALYSIS_MAX_PER_DAY'),
+                20,
+                field_name='AGENT_EVENT_ANALYSIS_MAX_PER_DAY',
+                minimum=0,
+                maximum=500,
+            ),
+            agent_event_analysis_news_enabled=(
+                os.getenv('AGENT_EVENT_ANALYSIS_NEWS_ENABLED', 'true').lower() != 'false'
+            ),
+            agent_event_analysis_digest_notify=(
+                os.getenv('AGENT_EVENT_ANALYSIS_DIGEST_NOTIFY', 'false').lower() == 'true'
+            ),
+            agent_proactive_notify_min_severity=os.getenv(
+                'AGENT_PROACTIVE_NOTIFY_MIN_SEVERITY', 'info'
+            ).lower(),
+            agent_proactive_notify_route=os.getenv('AGENT_PROACTIVE_NOTIFY_ROUTE', ''),
+            agent_proactive_notify_retries=parse_env_int(
+                os.getenv('AGENT_PROACTIVE_NOTIFY_RETRIES'),
+                1,
+                field_name='AGENT_PROACTIVE_NOTIFY_RETRIES',
+                minimum=0,
+                maximum=5,
+            ),
+            agent_proactive_notify_base_url=os.getenv('AGENT_PROACTIVE_NOTIFY_BASE_URL', ''),
+            agent_proactive_scan_concurrency=parse_env_int(
+                os.getenv('AGENT_PROACTIVE_SCAN_CONCURRENCY'),
+                4,
+                field_name='AGENT_PROACTIVE_SCAN_CONCURRENCY',
+                minimum=1,
+                maximum=16,
+            ),
+            agent_data_refresh_enabled=(
+                os.getenv('AGENT_DATA_REFRESH_ENABLED', 'false').lower() == 'true'
+            ),
+            agent_data_refresh_times=os.getenv('AGENT_DATA_REFRESH_TIMES', '08:40,15:40'),
+            agent_data_refresh_strategy=os.getenv('AGENT_DATA_REFRESH_STRATEGY', 'capital_heat'),
+            agent_data_refresh_market=os.getenv('AGENT_DATA_REFRESH_MARKET', 'cn'),
+            agent_data_refresh_max_results=parse_env_int(
+                os.getenv('AGENT_DATA_REFRESH_MAX_RESULTS'),
+                20,
+                field_name='AGENT_DATA_REFRESH_MAX_RESULTS',
+                minimum=1,
+                maximum=100,
+            ),
+            agent_proactive_retention_days=parse_env_int(
+                os.getenv('AGENT_PROACTIVE_RETENTION_DAYS'),
+                90,
+                field_name='AGENT_PROACTIVE_RETENTION_DAYS',
+                minimum=0,
+                maximum=3650,
+            ),
+            scheduled_tasks_enabled=os.getenv('SCHEDULED_TASKS_ENABLED', 'true').lower() == 'true',
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=parse_env_int(os.getenv('WEBUI_PORT'), 8000, field_name='WEBUI_PORT', minimum=1, maximum=65535),

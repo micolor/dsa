@@ -589,6 +589,918 @@
         }
       }
     },
+    "/api/v1/agent/proactive/brief/preview": {
+      "get": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Preview Brief",
+        "description": "Generate a brief without writing it into the chat session.",
+        "operationId": "preview_brief_api_v1_agent_proactive_brief_preview_get",
+        "parameters": [
+          {
+            "name": "slot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "manual",
+              "title": "Slot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Preview Brief Api V1 Agent Proactive Brief Preview Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/brief/run": {
+      "post": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Run Brief",
+        "description": "Generate a brief and persist it as an assistant message.",
+        "operationId": "run_brief_api_v1_agent_proactive_brief_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BriefRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Brief Api V1 Agent Proactive Brief Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/events/preview": {
+      "get": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Preview Events",
+        "description": "Detect event-driven candidates without calling the LLM.",
+        "operationId": "preview_events_api_v1_agent_proactive_events_preview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Events Api V1 Agent Proactive Events Preview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/events/run": {
+      "post": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Run Events",
+        "description": "Analyse pending events now. This calls the configured LLM and may push notifications.",
+        "operationId": "run_events_api_v1_agent_proactive_events_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EventRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Events Api V1 Agent Proactive Events Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/weekly/preview": {
+      "get": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Preview Weekly Review",
+        "operationId": "preview_weekly_review_api_v1_agent_proactive_weekly_preview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Weekly Review Api V1 Agent Proactive Weekly Preview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/weekly/run": {
+      "post": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Run Weekly Review",
+        "operationId": "run_weekly_review_api_v1_agent_proactive_weekly_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Weekly Review Api V1 Agent Proactive Weekly Run Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/opportunity/preview": {
+      "get": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Preview Opportunity Scan",
+        "operationId": "preview_opportunity_scan_api_v1_agent_proactive_opportunity_preview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Opportunity Scan Api V1 Agent Proactive Opportunity Preview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/opportunity/run": {
+      "post": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Run Opportunity Scan",
+        "operationId": "run_opportunity_scan_api_v1_agent_proactive_opportunity_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Opportunity Scan Api V1 Agent Proactive Opportunity Run Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/status": {
+      "get": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Proactive Status",
+        "operationId": "proactive_status_api_v1_agent_proactive_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Proactive Status Api V1 Agent Proactive Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/proactive/data-refresh/run": {
+      "post": {
+        "tags": [
+          "Proactive"
+        ],
+        "summary": "Run Data Refresh",
+        "operationId": "run_data_refresh_api_v1_agent_proactive_data_refresh_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Data Refresh Api V1 Agent Proactive Data Refresh Run Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inbox/messages": {
+      "get": {
+        "tags": [
+          "Inbox"
+        ],
+        "summary": "List Inbox Messages",
+        "operationId": "list_inbox_messages_api_v1_inbox_messages_get",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "name": "unread_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Unread Only"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Inbox Messages Api V1 Inbox Messages Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inbox/read": {
+      "post": {
+        "tags": [
+          "Inbox"
+        ],
+        "summary": "Mark Inbox Read",
+        "operationId": "mark_inbox_read_api_v1_inbox_read_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Mark Inbox Read Api V1 Inbox Read Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inbox/unread": {
+      "post": {
+        "tags": [
+          "Inbox"
+        ],
+        "summary": "Mark Inbox Unread",
+        "operationId": "mark_inbox_unread_api_v1_inbox_unread_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Mark Inbox Unread Api V1 Inbox Unread Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inbox/read-all": {
+      "post": {
+        "tags": [
+          "Inbox"
+        ],
+        "summary": "Mark All Inbox Read",
+        "operationId": "mark_all_inbox_read_api_v1_inbox_read_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Mark All Inbox Read Api V1 Inbox Read All Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks": {
+      "get": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "List Scheduled Tasks",
+        "operationId": "list_scheduled_tasks_api_v1_scheduled_tasks_get",
+        "parameters": [
+          {
+            "name": "enabled_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Enabled Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Scheduled Tasks Api V1 Scheduled Tasks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Create Scheduled Task",
+        "operationId": "create_scheduled_task_api_v1_scheduled_tasks_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledTaskCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Scheduled Task Api V1 Scheduled Tasks Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks/{task_id}": {
+      "patch": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Update Scheduled Task",
+        "operationId": "update_scheduled_task_api_v1_scheduled_tasks__task_id__patch",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledTaskUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update Scheduled Task Api V1 Scheduled Tasks  Task Id  Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Delete Scheduled Task",
+        "operationId": "delete_scheduled_task_api_v1_scheduled_tasks__task_id__delete",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Scheduled Task Api V1 Scheduled Tasks  Task Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks/{task_id}/enabled": {
+      "post": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Set Scheduled Task Enabled",
+        "operationId": "set_scheduled_task_enabled_api_v1_scheduled_tasks__task_id__enabled_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledTaskEnabledRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Set Scheduled Task Enabled Api V1 Scheduled Tasks  Task Id  Enabled Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks/{task_id}/run": {
+      "post": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Run Scheduled Task Now",
+        "description": "Run asynchronously; the calendar/run history shows the final status.",
+        "operationId": "run_scheduled_task_now_api_v1_scheduled_tasks__task_id__run_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Run Scheduled Task Now Api V1 Scheduled Tasks  Task Id  Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks/calendar": {
+      "get": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "Scheduled Task Calendar",
+        "operationId": "scheduled_task_calendar_api_v1_scheduled_tasks_calendar_get",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Start date YYYY-MM-DD",
+              "title": "Start"
+            },
+            "description": "Start date YYYY-MM-DD"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "End date YYYY-MM-DD",
+              "title": "End"
+            },
+            "description": "End date YYYY-MM-DD"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Scheduled Task Calendar Api V1 Scheduled Tasks Calendar Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduled-tasks/{task_id}/runs": {
+      "get": {
+        "tags": [
+          "ScheduledTasks"
+        ],
+        "summary": "List Scheduled Task Runs",
+        "operationId": "list_scheduled_task_runs_api_v1_scheduled_tasks__task_id__runs_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Scheduled Task Runs Api V1 Scheduled Tasks  Task Id  Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/analysis/analyze": {
       "post": {
         "tags": [
@@ -5991,6 +6903,81 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/auto-trade": {
+      "post": {
+        "tags": [
+          "Paper"
+        ],
+        "summary": "手动执行一次模拟盘自动交易",
+        "operationId": "auto_trade_api_v1_paper_auto_trade_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "账户ID，0 表示默认账户",
+              "default": 0,
+              "title": "Account Id"
+            },
+            "description": "账户ID，0 表示默认账户"
+          },
+          {
+            "name": "lookback_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 365,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "回看天数，省略则用配置值",
+              "title": "Lookback Days"
+            },
+            "description": "回看天数，省略则用配置值"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperAutoTradeResponse"
                 }
               }
             }
@@ -13302,6 +14289,17 @@
         ],
         "title": "Body_parse_csv_import_api_v1_portfolio_imports_csv_parse_post"
       },
+      "BriefRunRequest": {
+        "properties": {
+          "slot": {
+            "type": "string",
+            "title": "Slot",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "title": "BriefRunRequest"
+      },
       "CallTypeBreakdown": {
         "properties": {
           "call_type": {
@@ -16198,6 +17196,23 @@
           "message": "资源不存在"
         }
       },
+      "EventRunRequest": {
+        "properties": {
+          "max_events": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Events"
+          }
+        },
+        "type": "object",
+        "title": "EventRunRequest"
+      },
       "ExportSystemConfigResponse": {
         "properties": {
           "content": {
@@ -17834,6 +18849,20 @@
         "title": "ImportSystemConfigRequest",
         "description": "Import request payload for raw `.env` backups."
       },
+      "InboxReadRequest": {
+        "properties": {
+          "message_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Message Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "InboxReadRequest"
+      },
       "IntelligenceDefaultSourceCreateResponse": {
         "properties": {
           "items": {
@@ -19447,6 +20476,57 @@
           "snapshot"
         ],
         "title": "PaperAccountResponse"
+      },
+      "PaperAutoTradeResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "account_id": {
+            "type": "integer",
+            "title": "Account Id"
+          },
+          "lookback_days": {
+            "type": "integer",
+            "title": "Lookback Days",
+            "default": 7
+          },
+          "signals_seen": {
+            "type": "integer",
+            "title": "Signals Seen",
+            "default": 0
+          },
+          "processed": {
+            "type": "integer",
+            "title": "Processed",
+            "default": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "default": 0
+          },
+          "unavailable": {
+            "type": "integer",
+            "title": "Unavailable",
+            "default": 0
+          },
+          "results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id"
+        ],
+        "title": "PaperAutoTradeResponse"
       },
       "PaperPositionItem": {
         "properties": {
@@ -22771,6 +23851,153 @@
         "title": "RunFlowSummary",
         "description": "Compact summary metrics for the run-flow view."
       },
+      "ScheduledTaskCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Weekdays"
+          },
+          "time_of_day": {
+            "type": "string",
+            "title": "Time Of Day"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "trading_day_only": {
+            "type": "boolean",
+            "title": "Trading Day Only",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "task_type",
+          "time_of_day"
+        ],
+        "title": "ScheduledTaskCreateRequest"
+      },
+      "ScheduledTaskEnabledRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "ScheduledTaskEnabledRequest"
+      },
+      "ScheduledTaskUpdateRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "task_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekdays"
+          },
+          "time_of_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Of Day"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "trading_day_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Day Only"
+          }
+        },
+        "type": "object",
+        "title": "ScheduledTaskUpdateRequest"
+      },
       "ScreeningScreenAccepted": {
         "properties": {
           "task_id": {
@@ -24231,6 +25458,16 @@
           "is_editable": {
             "type": "boolean",
             "title": "Is Editable"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "advanced"
+            ],
+            "title": "Tier",
+            "description": "Default-view exposure tier",
+            "default": "advanced"
           },
           "default_value": {
             "anyOf": [

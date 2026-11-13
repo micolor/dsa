@@ -17,6 +17,7 @@ from api.v1.schemas.paper import (
     BackfillResponse,
     EquityPoint,
     PaperAccountResponse,
+    PaperAutoTradeResponse,
     PaperPositionItem,
     PaperResetRequest,
     PaperSignalListResponse,
@@ -214,6 +215,35 @@ def backfill(
     except Exception as exc:
         logger.error("模拟盘历史回填失败: %s", exc, exc_info=True)
         raise api_error(500, "internal_error", "模拟盘历史回填失败")
+
+
+@router.post(
+    "/auto-trade",
+    response_model=PaperAutoTradeResponse,
+    responses={500: {"description": "服务器错误", "model": ErrorResponse}},
+    summary="手动执行一次模拟盘自动交易",
+)
+def auto_trade(
+    account_id: int = Query(0, description="账户ID，0 表示默认账户"),
+    lookback_days: Optional[int] = Query(None, ge=1, le=365, description="回看天数，省略则用配置值"),
+    db_manager: DatabaseManager = Depends(get_database_manager),
+) -> PaperAutoTradeResponse:
+    try:
+        service = _service(db_manager)
+        if account_id <= 0:
+            account_id = service.get_or_create_account()["account_id"]
+        if lookback_days is None:
+            from src.config import get_config
+
+            lookback_days = int(getattr(get_config(), "paper_auto_trade_lookback_days", 7) or 7)
+        result = service.auto_trade_once(
+            account_id=account_id,
+            lookback_days=int(lookback_days),
+        )
+        return PaperAutoTradeResponse(**result)
+    except Exception as exc:
+        logger.error("模拟盘自动交易失败: %s", exc, exc_info=True)
+        raise api_error(500, "internal_error", "模拟盘自动交易失败")
 
 
 @router.post(

@@ -73,6 +73,7 @@ def test_background_task_list_includes_fund_review():
         paper_trading_enabled=False,
         signal_outcome_auto_eval_enabled=False,
         fund_nav_review_auto_eval_enabled=True,
+        agent_proactive_retention_days=0,
     )
     names = [task["name"] for task in svc._current_background_tasks(config)]
     assert names == ["fund_nav_review_evaluation"]
@@ -142,6 +143,7 @@ def test_background_task_list_includes_restore_backfill():
         signal_outcome_auto_eval_enabled=False,
         fund_nav_review_auto_eval_enabled=True,
         fund_nav_review_auto_restore_enabled=True,
+        agent_proactive_retention_days=0,
     )
     names = [task["name"] for task in svc._current_background_tasks(config)]
     assert names == [

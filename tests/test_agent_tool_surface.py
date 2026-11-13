@@ -690,6 +690,10 @@ def test_default_production_registry_only_exposes_bounded_tools_to_codex() -> No
         "get_portfolio_ledger_view",
         "get_intelligence_view",
         "get_scheduler_view",
+        "get_scheduled_tasks_view",
+        "get_usage_view",
+        "get_data_quality_view",
+        "get_notification_delivery_view",
     }
 
 

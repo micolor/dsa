@@ -1,10 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarNav } from '../SidebarNav';
 
 const mockLogout = vi.fn().mockResolvedValue(undefined);
 const mockGetScreeningStatus = vi.fn().mockResolvedValue({ enabled: false, available: false });
+const { mockInboxList } = vi.hoisted(() => ({
+  mockInboxList: vi.fn().mockResolvedValue({ items: [], unreadCount: 0, total: 0, page: 1, pageSize: 1, hasMore: false }),
+}));
 
 const completionBadgeState = { value: true };
 
@@ -20,6 +23,14 @@ vi.mock('../../../stores/agentChatStore', () => ({
     selector({ completionBadge: completionBadgeState.value }),
 }));
 
+vi.mock('../../../api/inbox', () => ({
+  INBOX_OPEN_ALL_EVENT: 'dsa-inbox-open-all',
+  INBOX_UPDATED_EVENT: 'dsa-inbox-updated',
+  inboxApi: {
+    list: (...args: unknown[]) => mockInboxList(...args),
+  },
+}));
+
 vi.mock('../../../api/screening', () => ({
   SCREENING_CONFIG_CHANGED_EVENT: 'screening-config-changed',
   SYSTEM_CONFIG_CHANGED_EVENT: 'dsa-system-config-changed',
@@ -31,6 +42,15 @@ vi.mock('../../../api/screening', () => ({
 describe('SidebarNav', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    mockInboxList.mockClear();
+    mockInboxList.mockResolvedValue({
+      items: [],
+      unreadCount: 0,
+      total: 0,
+      page: 1,
+      pageSize: 1,
+      hasMore: false,
+    });
   });
 
   it('renders the screening item from local cache on first render without a fetch', () => {
@@ -47,6 +67,43 @@ describe('SidebarNav', () => {
     );
 
     expect(screen.getByRole('link', { name: '选股' })).toBeInTheDocument();
+  });
+
+  it('groups navigation entries into sections', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('工作台')).toBeInTheDocument();
+    expect(screen.getByText('研究')).toBeInTheDocument();
+    expect(screen.getByText('交易')).toBeInTheDocument();
+    expect(screen.getByText('自动化')).toBeInTheDocument();
+    expect(screen.getByText('系统')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'AI 建议' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '模拟盘' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '提醒' })).toBeInTheDocument();
+  });
+
+  it('shows the unread count on the reminders entry', async () => {
+    mockInboxList.mockResolvedValueOnce({
+      items: [],
+      unreadCount: 3,
+      total: 3,
+      page: 1,
+      pageSize: 1,
+      hasMore: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    const reminders = screen.getByRole('button', { name: '提醒' });
+    expect(await within(reminders).findByText('3')).toBeInTheDocument();
   });
 
   it('writes the screening flag to local cache after a successful fetch', async () => {
@@ -74,7 +131,7 @@ describe('SidebarNav', () => {
     expect(screen.queryByRole('link', { name: '选股' })).not.toBeInTheDocument();
   });
 
-  it('shows screening directly after chat when Screening is enabled', async () => {
+  it('shows screening in the research group when Screening is enabled', async () => {
     mockGetScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
 
     render(
@@ -85,7 +142,7 @@ describe('SidebarNav', () => {
 
     expect(await screen.findByRole('link', { name: '选股' })).toHaveAttribute('href', '/screening');
     const hrefs = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
-    expect(hrefs.slice(0, 5)).toEqual(['/', '/chat', '/screening', '/portfolio', '/decision-signals']);
+    expect(hrefs.slice(0, 4)).toEqual(['/', '/chat', '/screening', '/decision-signals']);
   });
 
   it('refreshes the controlled screening entry after config changes', async () => {

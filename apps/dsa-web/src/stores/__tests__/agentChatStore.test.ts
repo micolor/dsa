@@ -69,6 +69,7 @@ beforeEach(() => {
     sessionId: 'session-test',
     sessions: [],
     sessionsLoading: false,
+    sessionSeenAt: {},
     chatError: null,
     currentRoute: '/chat',
     completionBadge: false,
@@ -79,8 +80,15 @@ beforeEach(() => {
     stopping: false,
     terminalStatus: null,
     stopError: false,
+    sessionStreams: {},
   });
   vi.clearAllMocks();
+  // mockClear 不会清掉 mockResolvedValue，给每个用例一个空历史基线。
+  vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue({
+    session_id: 'session-test',
+    messages: [],
+    session_state: { selected_skill_ids: [] },
+  });
 });
 
 describe('agentChatStore.startStream', () => {
@@ -235,7 +243,7 @@ describe('agentChatStore.startStream', () => {
     expect(useAgentChatStore.getState().chatError).toBeNull();
   });
 
-  it('ignores late events from an old stream after switching sessions', async () => {
+  it('keeps a background stream out of the active session and restores it on switch back', async () => {
     let streamController!: ReadableStreamDefaultController<Uint8Array>;
     const onAccepted = vi.fn();
     useAgentChatStore.setState({ currentRoute: '/dashboard' });
@@ -262,22 +270,26 @@ describe('agentChatStore.startStream', () => {
     streamController.enqueue(encoder.encode([
       accepted('request-old-session', 'session-test'),
       'data: {"type":"thinking","message":"旧请求处理中"}',
-      'data: {"type":"error","message":"旧请求失败"}',
+      'data: {"type":"done","success":true,"content":"旧请求结果"}',
     ].join('\n')));
     streamController.close();
     await streamPromise;
 
-    const state = useAgentChatStore.getState();
+    let state = useAgentChatStore.getState();
     expect(state.sessionId).toBe('session-next');
     expect(state.messages).toEqual([]);
     expect(state.progressSteps).toEqual([]);
     expect(state.chatError).toBeNull();
-    expect(state.completionBadge).toBe(false);
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(agentApi.getChatSessions).not.toHaveBeenCalled();
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(state.sessionStreams['session-test']?.messages.at(-1)?.content).toBe('旧请求结果');
+
+    await useAgentChatStore.getState().switchSession('session-test');
+    state = useAgentChatStore.getState();
+    expect(state.messages.map((m) => m.content)).toContain('旧请求结果');
+    expect(state.loading).toBe(false);
   });
 
-  it('ignores late events from an old stream after starting a new chat', async () => {
+  it('keeps a background stream alive after starting a new chat', async () => {
     let streamController!: ReadableStreamDefaultController<Uint8Array>;
     const onAccepted = vi.fn();
     vi.mocked(agentApi.chatStream).mockResolvedValue(new Response(
@@ -309,14 +321,18 @@ describe('agentChatStore.startStream', () => {
     streamController.close();
     await streamPromise;
 
-    const state = useAgentChatStore.getState();
+    let state = useAgentChatStore.getState();
     expect(state.sessionId).toBe(newSessionId);
     expect(state.sessionId).not.toBe('session-test');
     expect(state.messages).toEqual([]);
     expect(state.progressSteps).toEqual([]);
     expect(state.chatError).toBeNull();
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(agentApi.getChatSessions).not.toHaveBeenCalled();
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(state.sessionStreams['session-test']?.messages.at(-1)?.content).toBe('旧请求结果');
+
+    await useAgentChatStore.getState().switchSession('session-test');
+    state = useAgentChatStore.getState();
+    expect(state.messages.map((m) => m.content)).toContain('旧请求结果');
   });
 
   it('commits the user turn once on accepted and uses its actual backend', async () => {
@@ -386,6 +402,39 @@ describe('agentChatStore.startStream', () => {
     expect(state.messages[1]).toMatchObject({ role: 'assistant', backend: 'litellm' });
     // done.content is authoritative over whatever streamed so far
     expect(state.messages[1].content).toBe('权威终稿');
+  });
+
+  it('paces a long reply instead of revealing it in one frame', async () => {
+    vi.useFakeTimers();
+    try {
+      const longAnswer = '答'.repeat(300);
+      vi.mocked(agentApi.chatStream).mockResolvedValue(
+        createStreamResponse([
+          accepted('request-paced'),
+          `data: ${JSON.stringify({ type: 'content_delta', delta: longAnswer })}`,
+          `data: ${JSON.stringify({ type: 'done', success: true, content: longAnswer, backend: 'litellm' })}`,
+        ]),
+      );
+
+      const streamPromise = useAgentChatStore.getState().startStream({
+        message: '问股',
+        session_id: 'session-test',
+        request_id: 'request-paced',
+      });
+
+      // 第一帧只揭示一小段：provider 一次吐完 300 字时不能整段瞬间出现。
+      await vi.advanceTimersByTimeAsync(80);
+      const partial = useAgentChatStore.getState().messages[1]?.content ?? '';
+      expect(partial.length).toBeGreaterThan(0);
+      expect(partial.length).toBeLessThan(longAnswer.length);
+
+      // 揭示追上后仍需提交权威的 done.content。
+      await vi.advanceTimersByTimeAsync(5000);
+      await streamPromise;
+      expect(useAgentChatStore.getState().messages[1].content).toBe(longAnswer);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('attaches an action_proposal event to the committed assistant message', async () => {
@@ -879,7 +928,7 @@ describe('agentChatStore.stopStream', () => {
 });
 
 describe('agentChatStore.switchSession', () => {
-  it('clears transient loading state when switching sessions during a stream', async () => {
+  it('does not abort an in-flight stream when switching sessions', async () => {
     const ac = new AbortController();
     vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue({
       session_id: 'session-2',
@@ -892,6 +941,7 @@ describe('agentChatStore.switchSession', () => {
       loading: true,
       progressSteps: [{ type: 'thinking', message: '正在制定分析路径...' }],
       abortController: ac,
+      activeRequestId: 'request-running',
       chatError: {
         title: '请求失败',
         message: '旧错误',
@@ -903,7 +953,7 @@ describe('agentChatStore.switchSession', () => {
     await useAgentChatStore.getState().switchSession('session-2');
 
     const state = useAgentChatStore.getState();
-    expect(ac.signal.aborted).toBe(true);
+    expect(ac.signal.aborted).toBe(false);
     expect(state.sessionId).toBe('session-2');
     expect(state.loading).toBe(false);
     expect(state.progressSteps).toEqual([]);
@@ -913,6 +963,175 @@ describe('agentChatStore.switchSession', () => {
       { id: 'msg-2', role: 'assistant', content: '历史回复' },
     ]);
     expect(state.selectedSkillIds).toEqual(['risk']);
+    expect(state.sessionStreams['session-test']?.abortController).toBe(ac);
+    expect(state.sessionStreams['session-test']?.loading).toBe(true);
+  });
+
+  it('restores live progress when switching back to a running session', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const acceptedReceived = createDeferred<void>();
+    vi.mocked(agentApi.chatStream).mockResolvedValue(new Response(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+
+    const streamPromise = useAgentChatStore.getState().startStream(
+      {
+        message: '分析 AAPL',
+        session_id: 'session-test',
+        request_id: 'request-running-background',
+      },
+      { onAccepted: () => acceptedReceived.resolve() },
+    );
+    streamController.enqueue(encoder.encode(
+      `${accepted('request-running-background', 'session-test')}\n`,
+    ));
+    await acceptedReceived.promise;
+    streamController.enqueue(encoder.encode(
+      'data: {"type":"content_delta","delta":"部分回答"}\n',
+    ));
+    // 等一次揭示 tick，让后台会话的运行态里已经有可见正文。
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const ac = useAgentChatStore.getState().abortController;
+    await useAgentChatStore.getState().switchSession('session-2');
+    expect(ac?.signal.aborted).toBe(false);
+
+    await useAgentChatStore.getState().switchSession('session-test');
+
+    let state = useAgentChatStore.getState();
+    expect(state.loading).toBe(true);
+    expect(state.messages.some((m) => m.content === '部分回答')).toBe(true);
+    expect(state.abortController).toBe(ac);
+
+    streamController.enqueue(encoder.encode(
+      'data: {"type":"done","success":true,"content":"完整回答"}\n',
+    ));
+    streamController.close();
+    await streamPromise;
+
+    state = useAgentChatStore.getState();
+    expect(state.loading).toBe(false);
+    expect(state.messages.at(-1)?.content).toBe('完整回答');
+  });
+
+  it('keeps two sessions streaming independently', async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    vi.mocked(agentApi.chatStream).mockImplementation(() => Promise.resolve(new Response(
+      new ReadableStream({
+        start(controller) {
+          controllers.push(controller);
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )));
+
+    const acceptedA = createDeferred<void>();
+    const streamA = useAgentChatStore.getState().startStream(
+      { message: '问题 A', session_id: 'session-a', request_id: 'request-a' },
+      { onAccepted: () => acceptedA.resolve() },
+    );
+    controllers[0].enqueue(encoder.encode(`${accepted('request-a', 'session-a')}\n`));
+    await acceptedA.promise;
+
+    await useAgentChatStore.getState().switchSession('session-b');
+
+    const acceptedB = createDeferred<void>();
+    const streamB = useAgentChatStore.getState().startStream(
+      { message: '问题 B', session_id: 'session-b', request_id: 'request-b' },
+      { onAccepted: () => acceptedB.resolve() },
+    );
+    controllers[1].enqueue(encoder.encode(`${accepted('request-b', 'session-b')}\n`));
+    await acceptedB.promise;
+
+    const streamAState = useAgentChatStore.getState().sessionStreams['session-a'];
+    const streamBState = useAgentChatStore.getState().sessionStreams['session-b'];
+    expect(streamAState?.abortController?.signal.aborted).toBe(false);
+    expect(streamBState?.abortController?.signal.aborted).toBe(false);
+
+    controllers[0].enqueue(encoder.encode(
+      'data: {"type":"done","success":true,"content":"A 的最终答案"}\n',
+    ));
+    controllers[0].close();
+    await streamA;
+    expect(useAgentChatStore.getState().sessionId).toBe('session-b');
+    expect(useAgentChatStore.getState().messages.map((m) => m.content)).not.toContain('A 的最终答案');
+
+    controllers[1].enqueue(encoder.encode(
+      'data: {"type":"done","success":true,"content":"B 的最终答案"}\n',
+    ));
+    controllers[1].close();
+    await streamB;
+    expect(useAgentChatStore.getState().messages.at(-1)?.content).toBe('B 的最终答案');
+
+    await useAgentChatStore.getState().switchSession('session-a');
+    expect(useAgentChatStore.getState().messages.at(-1)?.content).toBe('A 的最终答案');
+  });
+
+  it('stops only the active session stream', async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    vi.mocked(agentApi.chatStream).mockImplementation(() => Promise.resolve(new Response(
+      new ReadableStream({
+        start(controller) {
+          controllers.push(controller);
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )));
+    vi.mocked(agentApi.cancelChatStream).mockResolvedValue({
+      accepted: true,
+      request_id: 'request-stop-b',
+    });
+
+    const acceptedA = createDeferred<void>();
+    const streamA = useAgentChatStore.getState().startStream(
+      { message: '问题 A', session_id: 'session-a', request_id: 'request-stop-a' },
+      { onAccepted: () => acceptedA.resolve() },
+    );
+    controllers[0].enqueue(encoder.encode(`${accepted('request-stop-a', 'session-a')}\n`));
+    await acceptedA.promise;
+    await useAgentChatStore.getState().switchSession('session-b');
+
+    const acceptedB = createDeferred<void>();
+    const streamB = useAgentChatStore.getState().startStream(
+      { message: '问题 B', session_id: 'session-b', request_id: 'request-stop-b' },
+      { onAccepted: () => acceptedB.resolve() },
+    );
+    controllers[1].enqueue(encoder.encode(`${accepted('request-stop-b', 'session-b')}\n`));
+    await acceptedB.promise;
+
+    await useAgentChatStore.getState().stopStream();
+    expect(agentApi.cancelChatStream).toHaveBeenCalledWith('request-stop-b');
+    expect(agentApi.cancelChatStream).not.toHaveBeenCalledWith('request-stop-a');
+    expect(useAgentChatStore.getState().sessionStreams['session-a']?.abortController?.signal.aborted)
+      .toBe(false);
+
+    controllers[1].enqueue(encoder.encode(
+      'data: {"type":"done","success":false,"content":"","error_code":"cancelled"}\n',
+    ));
+    controllers[1].close();
+    await streamB;
+
+    controllers[0].enqueue(encoder.encode(
+      'data: {"type":"done","success":true,"content":"A 的最终答案"}\n',
+    ));
+    controllers[0].close();
+    await streamA;
+    expect(useAgentChatStore.getState().sessionStreams['session-a']?.messages.at(-1)?.content)
+      .toBe('A 的最终答案');
+  });
+
+  it('marks the target session as seen when switching', async () => {
+    await useAgentChatStore.getState().switchSession('session-2');
+
+    const state = useAgentChatStore.getState();
+    expect(state.sessionSeenAt['session-2']).toBeTruthy();
+    const stored = JSON.parse(localStorage.getItem('dsa_chat_seen_sessions') || '{}');
+    expect(stored['session-2']).toBeTruthy();
   });
 
   it('does not let a late session history response overwrite the current session', async () => {

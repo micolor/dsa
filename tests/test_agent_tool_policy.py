@@ -77,18 +77,21 @@ def test_site_tools_absent_when_kill_switch_off(monkeypatch):
     from src.agent.tools.site_action_tools import ALL_SITE_ACTION_TOOLS
     from src.agent.tools.site_read_tools import ALL_SITE_READ_TOOLS
     from src.agent.tools.site_task_tools import ALL_SITE_TASK_TOOLS
+    from src.agent.tools.scheduled_task_tools import ALL_SCHEDULED_TASK_TOOLS
 
     read_names = {tool.name for tool in ALL_SITE_READ_TOOLS}
     direct_names = {tool.name for tool in ALL_SITE_ACTION_TOOLS}
     task_names = {tool.name for tool in ALL_SITE_TASK_TOOLS}
-    assert len(read_names) == 12
+    scheduled_names = {tool.name for tool in ALL_SCHEDULED_TASK_TOOLS}
+    assert len(read_names) == 15
     assert len(direct_names) == 7
     assert len(task_names) == 9
+    assert len(scheduled_names) == 6
 
     # propose_alert_rule_change 是 pre-feature propose_alert 的改名替代，
     # 不在「功能新增、需要随开关移除」的集合里。
     new_proposal_names = SITE_OPERATION_PROPOSAL_TOOL_NAMES - {"propose_alert_rule_change"}
-    assert len(new_proposal_names) == 9
+    assert len(new_proposal_names) == 10
 
     monkeypatch.setattr(
         factory, "_site_operations_enabled", lambda: False, raising=False
@@ -96,7 +99,7 @@ def test_site_tools_absent_when_kill_switch_off(monkeypatch):
     factory._TOOL_REGISTRY = None
     try:
         registry = factory.get_tool_registry()
-        for name in sorted(read_names | direct_names | task_names | new_proposal_names):
+        for name in sorted(read_names | direct_names | task_names | scheduled_names | new_proposal_names):
             assert name not in registry, f"kill switch off 时仍注册了 {name}"
         # 功能上线前的提案工具必须保留，关闭开关不等于没收已有确认卡片。
         assert "propose_portfolio_trade" in registry

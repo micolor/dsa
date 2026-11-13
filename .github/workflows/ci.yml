@@ -8,6 +8,12 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Billing/trading-day tests build dates from the system clock. Pin the same
+# timezone as the runtime (docker/Dockerfile) so UTC runners do not cross a
+# date boundary at local midnight.
+env:
+  TZ: Asia/Shanghai
+
 jobs:
   changes:
     name: 🔎 Change Detection
@@ -267,5 +273,7 @@ jobs:
         run: npm ci
       - name: 🔎 Lint
         run: npm run lint
+      - name: 🧪 Unit tests
+        run: npm test
       - name: 🏗️ Build
         run: npm run build

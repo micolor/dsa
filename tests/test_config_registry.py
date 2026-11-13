@@ -150,6 +150,37 @@ class TestAstrBotFieldsRegistered(unittest.TestCase):
             self.assertIn(key, field_keys, f"{key} missing from schema response")
 
 
+class TestConfigTiers(unittest.TestCase):
+    """Settings fields carry a basic/advanced tier for the simplified view."""
+
+    def test_common_fields_are_basic(self):
+        for key in (
+            "STOCK_LIST",
+            "LITELLM_MODEL",
+            "TUSHARE_TOKEN",
+            "REPORT_LANGUAGE",
+        ):
+            self.assertEqual(get_field_definition(key)["tier"], "basic", key)
+
+    def test_ops_and_expert_fields_are_advanced(self):
+        for key in (
+            "LLM_PROMPT_CACHE_HINTS_ENABLED",
+            "BACKTEST_ENABLED",
+            "AGENT_PROACTIVE_BRIEF_TIMES",
+        ):
+            self.assertEqual(get_field_definition(key)["tier"], "advanced", key)
+
+    def test_schema_response_exposes_tier(self):
+        schema = build_schema_response()
+        fields = {
+            field["key"]: field
+            for category in schema["categories"]
+            for field in category["fields"]
+        }
+        self.assertEqual(fields["STOCK_LIST"]["tier"], "basic")
+        self.assertEqual(fields["LLM_PROMPT_CACHE_HINTS_ENABLED"]["tier"], "advanced")
+
+
 class TestScreeningFieldsRegistered(unittest.TestCase):
     def test_builtin_screening_toggle_is_registered(self):
         field = get_field_definition("SCREENING_ENABLED")

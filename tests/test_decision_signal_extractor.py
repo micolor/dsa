@@ -444,6 +444,28 @@ def test_build_payload_reuses_shared_sniper_fallback_paths(isolated_db) -> None:
     assert payload["target_price"] == 1880.0
 
 
+def test_build_payload_resolves_risk_downgraded_compound_sell_advice() -> None:
+    """风控下调的「减仓/卖出」建议必须落成可执行信号，而不是被当成歧义丢弃。"""
+    result = _result(
+        sentiment_score=39,
+        operation_advice="减仓/卖出（原建议已被风控下调）",
+        decision_type="sell",
+        action=None,
+    )
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        trace_id="trace-risk-downgraded-sell",
+        query_source="api",
+        report_type="simple",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    assert payload["action"] == "reduce"
+    assert payload["action_label"] == "减仓"
+
+
 def test_build_payload_skips_ambiguous_action_non_stock_and_unknown_market() -> None:
     ambiguous = _result(operation_advice="买盘增强，继续观察", action=None)
     assert build_decision_signal_payload_from_report(

@@ -224,10 +224,12 @@ def get_tool_registry():
         from src.agent.tools.site_read_tools import ALL_SITE_READ_TOOLS
         from src.agent.tools.site_action_tools import ALL_SITE_ACTION_TOOLS
         from src.agent.tools.site_task_tools import ALL_SITE_TASK_TOOLS
+        from src.agent.tools.scheduled_task_tools import ALL_SCHEDULED_TASK_TOOLS
 
         tool_modules.append(ALL_SITE_READ_TOOLS)
         tool_modules.append(ALL_SITE_ACTION_TOOLS)
         tool_modules.append(ALL_SITE_TASK_TOOLS)
+        tool_modules.append(ALL_SCHEDULED_TASK_TOOLS)
 
     registry = ToolRegistry()
     for tool_fn in [tool for group in tool_modules for tool in group]:
@@ -419,29 +421,10 @@ def build_agent_executor(config=None, skills: Optional[List[str]] = None):
     )
 
 
-def build_agent_chat_executor(config=None, skills: Optional[List[str]] = None):
-    """Build the backend-neutral executor used only by Agent Chat endpoints."""
-    if config is None:
-        from src.config import get_config
-
-        config = get_config()
-
-    from src.agent.agent_backend import (
-        AgentBackendConfigError,
-        LiteLLMAgentBackend,
-        resolve_agent_backend_id,
-    )
+def _build_single_agent_chat_executor(config, skills: Optional[List[str]], *, backend_id: str):
+    """Build the single-Agent chat executor for a resolved backend."""
+    from src.agent.agent_backend import LiteLLMAgentBackend
     from src.agent.chat_executor import AgentChatExecutor
-
-    backend_id = resolve_agent_backend_id(config)
-    arch = str(getattr(config, "agent_arch", "single") or "single").strip().lower()
-    if backend_id == "codex_app_server" and arch != "single":
-        raise AgentBackendConfigError(
-            "unsupported_agent_arch",
-            "Codex Agent currently supports single-agent Chat only",
-        )
-    if backend_id == "litellm" and arch == "multi":
-        return build_agent_executor(config, skills=skills)
 
     registry = get_tool_registry()
     prompt_state = resolve_skill_prompt_state(config, skills=skills)
@@ -474,6 +457,92 @@ def build_agent_chat_executor(config=None, skills: Optional[List[str]] = None):
             0,
             field_name="agent_orchestrator_timeout_s",
         ),
+    )
+
+
+def build_agent_chat_executor(config=None, skills: Optional[List[str]] = None):
+    """Build the backend-neutral executor used only by Agent Chat endpoints."""
+    if config is None:
+        from src.config import get_config
+
+        config = get_config()
+
+    from src.agent.agent_backend import (
+        AgentBackendConfigError,
+        resolve_agent_backend_id,
+    )
+
+    backend_id = resolve_agent_backend_id(config)
+    arch = str(getattr(config, "agent_arch", "single") or "single").strip().lower()
+    if backend_id == "codex_app_server" and arch != "single":
+        raise AgentBackendConfigError(
+            "unsupported_agent_arch",
+            "Codex Agent currently supports single-agent Chat only",
+        )
+    if backend_id == "litellm" and arch == "multi":
+        return build_agent_executor(config, skills=skills)
+
+    return _build_single_agent_chat_executor(config, skills, backend_id=backend_id)
+
+
+def build_general_chat_executor(config=None, skills: Optional[List[str]] = None):
+    """Build the general single Agent (site tools included), bypassing multi routing.
+
+    Scheduled custom prompts should not pay for the multi-agent stock pipeline:
+    they are background instructions, usually short summaries or site actions.
+    """
+    if config is None:
+        from src.config import get_config
+
+        config = get_config()
+
+    from src.agent.agent_backend import resolve_agent_backend_id
+
+    return _build_single_agent_chat_executor(
+        config,
+        skills,
+        backend_id=resolve_agent_backend_id(config),
+    )
+
+
+def build_routed_chat_executor(config=None, skills: Optional[List[str]] = None):
+    """Build a Chat executor that routes each turn by intent.
+
+    ``AGENT_ARCH=single`` keeps the existing single-Agent behavior.  With
+    ``AGENT_ARCH=multi`` the multi-agent pipeline is kept for stock analysis,
+    while greetings, site queries/actions, market-wide questions and fund
+    questions go to the general single Agent (which owns the site tools).
+    """
+    if config is None:
+        from src.config import get_config
+
+        config = get_config()
+
+    from src.agent.agent_backend import resolve_agent_backend_id
+
+    arch = str(getattr(config, "agent_arch", "single") or "single").strip().lower()
+    routing_enabled = bool(getattr(config, "agent_chat_intent_routing_enabled", True))
+    if arch != "multi" or not routing_enabled:
+        return build_agent_chat_executor(config, skills=skills)
+
+    backend_id = resolve_agent_backend_id(config)
+    if backend_id != "litellm":
+        # Codex + multi is rejected by build_agent_chat_executor with a clear error.
+        return build_agent_chat_executor(config, skills=skills)
+
+    from src.agent.routed_chat_executor import RoutedAgentChatExecutor
+
+    multi_executor = build_agent_executor(config, skills=skills)
+    single_executor = _build_single_agent_chat_executor(
+        config,
+        skills,
+        backend_id="litellm",
+    )
+    logger.info("[AgentFactory] Chat intent routing enabled (single <-> multi)")
+    return RoutedAgentChatExecutor(
+        single_executor=single_executor,
+        multi_executor=multi_executor,
+        config=config,
     )
 
 

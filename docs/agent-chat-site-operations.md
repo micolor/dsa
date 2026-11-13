@@ -7,9 +7,11 @@
 一段停用说明，明确告知模型这些工具不可调用、不得声称操作已执行。工具注册表带缓存，
 需重启服务后生效。
 
-运行前提：`AGENT_ARCH=single`（默认值）。`AGENT_ARCH=multi` 时问股走多智能体分析流水线，
-该流水线按个股分析阶段固定编排，不读取本页的对话规则，也不会调度这些站点操作工具；
-需要全站操作助手时请改用单 Agent 架构。
+运行前提：`AGENT_ARCH=single`（默认值）时，所有问股消息都走通用单 Agent，站点工具始终可用。
+`AGENT_ARCH=multi` 时问股按意图分流：个股分析问题走多智能体分析流水线；通用问答、站点查询/操作、
+大盘和基金问题走单 Agent，因此本页的站点工具仍然可用。分流由
+`AGENT_CHAT_INTENT_ROUTING_ENABLED`（默认 `true`）控制；关闭后所有问题都走多智能体流水线，
+此时流水线按个股分析阶段固定编排，不读取本页的对话规则，也不会调度这些站点操作工具。
 
 ## 执行语义
 
@@ -36,7 +38,9 @@
 - `get_fund_review_view`：基金净值复盘台账、统计，以及净值区间序列
   （`nav_range`，需 `fund_code`、`start_date`、`end_date`）。
 - 其余：`get_analysis_task_view`、`get_backtest_view`、`get_paper_view`、
-  `get_portfolio_ledger_view`、`get_intelligence_view`、`get_scheduler_view`。
+  `get_portfolio_ledger_view`、`get_intelligence_view`、`get_scheduler_view`、
+  `get_scheduled_tasks_view`、`get_usage_view`、`get_data_quality_view`、
+  `get_notification_delivery_view`。
 
 以下前端能力刻意不暴露为 agent 读取工具：历史页的诊断/流程视图，以及选股任务详情
 `screen/tasks/{id}`；助手只能读到已有的任务列表/详情与历史运行结果。
@@ -44,7 +48,9 @@
 ## 直接执行（低风险）
 
 `manage_watchlist`、`set_alert_rule_enabled`、`dry_run_alert_rule`、`refresh_fx_rates`、
-`refresh_paper_valuation`、`test_intelligence_source`、`test_llm_channel`。这些操作可逆、
+`refresh_paper_valuation`、`test_intelligence_source`、`test_llm_channel`、
+`create_scheduled_task` / `update_scheduled_task` / `set_scheduled_task_enabled` /
+`run_scheduled_task_now`。已执行动作统一返回「已执行」卡片与撤销提示。这些操作可逆、
 不涉及资金、不修改密钥；其中 `test_llm_channel` 的密钥只在服务端读取，不会进入对话或事件。
 
 ## 后台任务
@@ -56,13 +62,16 @@
 ## 提案（高风险）
 
 告警规则增删改、持仓交易/资金/公司行动/账户变更、决策信号、模拟盘重置、历史删除、
-情报源创建、系统配置修改、立即调度、通知渠道测试。提案不会直接写入；用户确认后由浏览器
+情报源创建、系统配置修改、立即调度、通知渠道测试、删除定时任务。提案不会直接写入；用户确认后由浏览器
 以当前会话调用既有 REST 接口，AI 不持有写权限。删除类操作使用普通确认卡片，不要求输入文本。
+系统配置提案会附带只读的逐项 old → new 预览（长值截断）；`preview` 只用于前端展示，提交前会被剥离，
+不会进入 `/system/config/update` 请求体。预览读取失败时提案仍可生成，卡片退回只显示摘要。
 
 ## 明确排除
 
 - 登录、登出、会话、API Key 等认证与密钥操作。
 - 配置 schema 中 `is_sensitive=true` 的字段（`propose_config_update` 会拒绝并提示到设置页修改）。
+- 配置 schema 中 `is_editable=false` 的字段（例如 `ADMIN_AUTH_ENABLED`）；API 配置更新与 Agent 提案都会拒绝，避免绕过设置页认证边界。
 - 配置导入/导出、CSV 文件导入（需要本地文件选择，属于纯 UI 操作）。
 - 情报源更新/删除：当前后端没有对应 REST 端点，助手只支持创建情报源与创建默认源。
 

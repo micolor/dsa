@@ -4221,6 +4221,19 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         }
         self.assertEqual(items["CUSTOM_WEBHOOK_BODY_TEMPLATE"]["value"], template)
 
+    def test_update_rejects_non_editable_field(self) -> None:
+        version = self.manager.get_config_version()
+        with self.assertRaises(ConfigValidationError) as ctx:
+            self.service.update(
+                config_version=version,
+                items=[{"key": "ADMIN_AUTH_ENABLED", "value": "true"}],
+                reload_now=False,
+            )
+        self.assertTrue(
+            any(issue["key"] == "ADMIN_AUTH_ENABLED" for issue in ctx.exception.issues)
+        )
+        self.assertNotIn("ADMIN_AUTH_ENABLED=true", self.env_path.read_text(encoding="utf-8"))
+
     def test_update_raises_conflict_for_stale_version(self) -> None:
         with self.assertRaises(ConfigConflictError):
             self.service.update(

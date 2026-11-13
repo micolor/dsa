@@ -42,17 +42,33 @@ cp .env.example .env
 vim .env  # 填入真实的 API Key 等配置
 ```
 
-### 3. 一键启动
+### 3. 一键构建并启动（推荐）
 
 ```bash
-# 构建并启动（同时包含定时分析和 Web 界面服务）
-docker-compose -f ./docker/docker-compose.yml up -d
+# 构建镜像 + 启动一体化服务（Web UI + 运行时调度器）
+./scripts/docker-oneclick.sh --up
 
-# 查看日志
-docker-compose -f ./docker/docker-compose.yml logs -f
+# 只构建镜像，不启动
+./scripts/docker-oneclick.sh
 
-# 查看运行状态
-docker-compose -f ./docker/docker-compose.yml ps
+# 忽略缓存重新构建后再启动
+./scripts/docker-oneclick.sh --no-cache --up
+```
+
+脚本会自动：从 `.env.example` 生成缺失的 `.env`、创建数据/日志/报告等挂载目录、构建 `app` 服务镜像。
+
+等价的原始命令：
+
+```bash
+# 一体化服务（Web UI + 调度器）
+docker compose -f ./docker/docker-compose.yml up -d app
+
+# 分开部署：analyzer 只跑调度，server 只提供 Web/API
+docker compose -f ./docker/docker-compose.yml up -d analyzer server
+
+# 查看日志 / 状态
+docker compose -f ./docker/docker-compose.yml logs -f app
+docker compose -f ./docker/docker-compose.yml ps
 ```
 
 启动成功后，在浏览器输入 `http://服务器公网IP:8000` 即可打开 Web 管理界面。如果打不开，记得先在云服务器控制台的「安全组」里放行 8000 端口。
@@ -81,7 +97,7 @@ docker-compose -f ./docker/docker-compose.yml restart
 # 更新代码后重新部署
 git pull
 docker-compose -f ./docker/docker-compose.yml build --no-cache
-docker-compose -f ./docker/docker-compose.yml up -d
+docker-compose -f ./docker/docker-compose.yml up -d app
 
 # 进入容器调试
 docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer bash
@@ -334,7 +350,7 @@ deploy:
   ```bash
   docker-compose -f ./docker/docker-compose.yml down
   docker-compose -f ./docker/docker-compose.yml build --no-cache
-  docker-compose -f ./docker/docker-compose.yml up -d
+  docker-compose -f ./docker/docker-compose.yml up -d app
   ```
   构建完成后刷新浏览器缓存（`Ctrl+Shift+R`）再访问。
 
@@ -368,7 +384,7 @@ mkdir -p /opt/stock-analyzer
 cd /opt/stock-analyzer
 git clone <your-repo-url> .
 tar -xzvf stock-analyzer-backup.tar.gz
-docker-compose -f ./docker/docker-compose.yml up -d
+docker-compose -f ./docker/docker-compose.yml up -d app
 ```
 
 ---

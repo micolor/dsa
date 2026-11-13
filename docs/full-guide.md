@@ -1600,6 +1600,14 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 - 🧩 **输入数据块可见** - 普通分析报告会在历史详情、同步响应和 completed 任务状态中返回低敏 `AnalysisContextPack` overview，Web 报告页在策略点位和资讯之后默认折叠展示数据块状态、来源、缺失原因和降级摘要
 - 💬 **问股追问上下文** - 从历史报告进入问股后，后续追问会持续携带当前 `stock_code/stock_name`；切回或重载已有问股会话时，会从已加载的历史用户消息恢复基础当前标的；只有用户明确切换标的时才切换上下文，含比较/对比/vs/差异/相比等明确比较意图或多个非当前明确股票代码的问题不会污染当前标的；裸 5 位数字只在写成零填充的港股代码形态（`00700`）或带 `hk` / `.HK` 标记时才被认作标的，价格/成交量/金额（`12000 手`、`目标价 25000`、`市值 21000 亿`）不会被误判成切股
 - 🧠 **会话级 Skill 选择** - 问股会话会持久化当前 Skill 选择；刷新或切换会话时恢复各自选择，新会话继续使用服务器默认 Skill
+- 🔄 **问股后台会话** - 分析进行中切到其它会话或新建对话不会中断原会话：旧会话的流继续在后台运行，切回时继续显示实时阶段进度，已完成则直接显示最终结果；不同会话可以同时运行分析，互不覆盖
+- 🧭 **问股意图分流** - `AGENT_ARCH=multi` 时只有个股分析问题进入「技术面 → 情报面 → 风险面 → 策略 → 决策」流水线；问候、站点查询/操作、大盘和基金问题走通用单 Agent，不再让每个问题都先跑一轮技术面，同时保留持仓/告警/配置等站点工具。`AGENT_CHAT_INTENT_ROUTING_ENABLED=false` 可关闭分流，恢复全部走多智能体流水线
+- 🗞️ **主动助手日报** - 盘前/盘后自动汇总持仓盈亏、自选异动、近 24 小时告警和市场指数，写入顶部铃铛的主动提醒收件箱；同一时间槽同日幂等，单只标的失败只降级对应区块。`AGENT_PROACTIVE_BRIEF_NOTIFY=true` 时同时推送到通知渠道。`AGENT_PROACTIVE_BRIEF_ENABLED=true` 开启，时间由 `AGENT_PROACTIVE_BRIEF_TIMES` 配置；`--serve-only` 不启动调度器，可用 `POST /api/v1/agent/proactive/brief/run` 手动生成。详见 [主动助手日报](proactive-brief.md)
+- ⚡ **事件驱动 Agent 分析** - 盘中告警、持仓浮亏 ≥10%、单日涨跌 ≥5%、放量、跌破 MA20 等事件触发一次短分析，输出 3-5 句风险/机会与观察点，写入主动提醒收件箱并按配置推送；按事件去重、每轮最多 3 条。`AGENT_EVENT_ANALYSIS_ENABLED=true` 开启。详见 [事件驱动 Agent 分析](event-driven-agent.md)
+- 🔔 **主动提醒收件箱** - 顶部栏右侧铃铛汇总日报/事件/周复盘/机会四类消息，支持全部已读、标记未读、查看完整 Markdown 与事件「加入自选」；主动消息不再写入问股会话。推送支持最低等级（`AGENT_PROACTIVE_NOTIFY_MIN_SEVERITY`）、路由类型（`AGENT_PROACTIVE_NOTIFY_ROUTE`）、失败重试（`AGENT_PROACTIVE_NOTIFY_RETRIES`）和站内深链（`AGENT_PROACTIVE_NOTIFY_BASE_URL`）；`AGENT_EVENT_ANALYSIS_DIGEST_NOTIFY=true` 时同一轮事件合并为一条摘要推送。详见 [主动助手总览](proactive-assistant.md)
+- 🎯 **风险画像与每周复盘** - 通过 `AGENT_RISK_PROFILE_*` 设置投资期限、单票上限、回撤容忍，问股/事件分析/周复盘都会遵守；每周五默认生成「每周复盘」，汇总账户、决策命中率与超额收益、画像超限、自选周涨跌与告警。`AGENT_WEEKLY_REVIEW_ENABLED=true` 开启。详见 [风险画像与每周复盘](risk-profile-and-weekly-review.md)
+- 🗓️ **定时任务日历** - 左侧「定时任务」可按天查看并管理用户自定义的周期任务：个股/自选分析、大盘复盘、选股、回测和自定义助手指令；问股助手可在用户明确同意后创建、启停、立即执行任务。`SCHEDULED_TASKS_ENABLED=true`（默认）时调度器每 60 秒检查时间槽，同一时间槽只执行一次。详见 [定时任务与任务日历](scheduled-tasks.md)
+- 🔎 **机会扫描** - 基于最近一次选股快照与热点题材生成候选清单，标注理由、风险、关注项和「已在自选/持仓」状态；快照或热点过期时会明确提示。默认 08:45/15:45 生成，`AGENT_OPPORTUNITY_SCAN_ENABLED=true` 开启。详见 [机会扫描](opportunity-scan.md)
 - 🖼️ **问股支持贴图** - 问股输入框支持直接粘贴（Ctrl+V）、拖入或选择一张图（jpg/png/webp/gif，上限 2MB）：发送后界面先显示「正在读取图片…」，AI 会先读取这张图再回答，图中出现的股票代码会一并列出，明确要求时可通过确认卡片一键加入自选；图片不会被保存（只在会话内存里，不会落库），刷新后无法回看；但发送后消息气泡会保留这张图的缩略图，点击可打开查看器放大 0.5x–4x、左右旋转 90° 后查看（侧边栏标题只保留你问的那句话）
 - 📈 **回测验证** - 评估历史分析准确率，查询方向胜率与模拟收益
 - 🔗 **API 文档** - 访问 `/docs` 查看 Swagger UI
@@ -1895,3 +1903,16 @@ worker 会把 `triggered`、`skipped`、`degraded`、`failed` 写入 `alert_trig
 - Agent 可通过 `get_portfolio_snapshot` 获取面向账户的紧凑持仓摘要，默认包含精简风险块，适合控制 Token 开销。
 - 可选参数包括 `account_id`、`cost_method`、`as_of`、`include_positions`、`include_risk`。
 - 若风险块生成失败，快照仍会返回；若当前环境未启用持仓模块，工具会返回结构化 `not_supported`。
+
+## 模拟盘自动交易
+
+模拟盘默认每个交易日自动执行一次：在 `PAPER_AUTO_TRADE_TIME`（Asia/Shanghai，默认 16:30）之后，消费最近 `PAPER_AUTO_TRADE_LOOKBACK_DAYS`（默认 7 天）内仍为 `active` 的 AI 决策信号。
+
+- 先处理 `sell` / `reduce` 释放现金，再按 `score` 从高到低处理 `buy` / `add`；`hold` / `watch` / `avoid` / `alert` 不产生交易。
+- 同一信号只消费一次；行情暂不可用时不记为已消费，下一次自动交易或手动回填会重试。
+- 只影响模拟账户，不涉及真实资金，也不额外调用 LLM 决定“买哪只”。
+- 手动执行：模拟盘页「自动交易」按钮，或 `POST /api/v1/paper/auto-trade?lookback_days=7`。
+- 关闭自动交易：`PAPER_AUTO_TRADE_ENABLED=false`；关闭后仍可在模拟盘页手动回填历史信号。
+- 首次开启且回看窗口较长时可能一次性补较多历史信号，建议先用 `PAPER_AUTO_TRADE_LOOKBACK_DAYS=1` 观察。
+
+实现细节与边界见 [模拟盘优化说明](paper-trading-optimization.md) 第 18 节。

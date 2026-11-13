@@ -21,6 +21,10 @@ import type {
 import type { StockIndexItem } from '../../types/stockIndex';
 import DecisionSignalsPage from '../DecisionSignalsPage';
 
+vi.mock('../BacktestPage', () => ({
+  default: () => <div data-testid="embedded-backtest-panel">backtest panel</div>,
+}));
+
 let stockIndexState: {
   index: StockIndexItem[];
   loading: boolean;
@@ -660,6 +664,16 @@ describe('DecisionSignalsPage', () => {
    */
   const queueGroupSection = (name: string) => screen.getByRole('heading', { name }).closest('section') as HTMLElement;
 
+  it('switches to the embedded backtest tab without leaving the page', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('tab', { name: '回测' }));
+
+    expect(await screen.findByTestId('embedded-backtest-panel')).toBeInTheDocument();
+    expect(window.location.search).toContain('tab=backtest');
+    expect(screen.getByRole('tab', { name: '回测' })).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('loads active signals by default', async () => {
     renderPage();
 
@@ -1041,7 +1055,7 @@ describe('DecisionSignalsPage', () => {
     // Deduped to one 茅台 (the latest) plus one 腾讯.
     // 「去重最新」打开时待处理区复用主列表的原始结果（待处理区展示全貌、本身不去重），
     // 页面上另有 2 条茅台的待处理卡片，因此这里只统计主列表内的卡片。
-    const queueCard = screen.getByRole('heading', { name: '待处理' }).closest('.terminal-card') as HTMLElement;
+    const queueCard = screen.getByRole('heading', { name: '待处理' }).closest('.glass-card') as HTMLElement;
     const listButtons = (name: string) => screen.getAllByRole('button', { name })
       .filter((button) => !queueCard.contains(button));
     expect(listButtons('查看 贵州茅台 AI 建议详情')).toHaveLength(1);
@@ -2510,7 +2524,7 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
     await screen.findByText('贵州茅台');
-    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.terminal-card') as HTMLElement;
+    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.glass-card') as HTMLElement;
 
     // 未打开去重时，待处理区用自己那次宽查询的结果。
     expect(within(queueCard()).getByRole('button', { name: '查看 宁德时代 AI 建议详情' })).toBeInTheDocument();
@@ -2663,7 +2677,7 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
     await screen.findByText('贵州茅台');
-    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.terminal-card') as HTMLElement;
+    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.glass-card') as HTMLElement;
     const wideCalls = () => vi.mocked(decisionSignalsApi.list).mock.calls
       .filter(([params]) => params?.pageSize === 100 && params?.stockCode === undefined).length;
 
@@ -2702,7 +2716,7 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
     await screen.findByText('贵州茅台');
-    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.terminal-card') as HTMLElement;
+    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.glass-card') as HTMLElement;
     expect(within(queueCard()).queryByText('正在加载...')).not.toBeInTheDocument();
 
     dedupeOn = true;
@@ -2730,7 +2744,7 @@ describe('DecisionSignalsPage', () => {
 
     renderPage();
     await screen.findByText('贵州茅台');
-    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.terminal-card') as HTMLElement;
+    const queueCard = () => screen.getByRole('heading', { name: '待处理' }).closest('.glass-card') as HTMLElement;
 
     dedupeOn = true;
     await expandFiltersSection();

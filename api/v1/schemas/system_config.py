@@ -54,6 +54,7 @@ class SystemConfigFieldSchema(BaseModel):
     is_sensitive: bool
     is_required: bool
     is_editable: bool
+    tier: Literal["basic", "advanced"] = Field("advanced", description="Default-view exposure tier")
     default_value: Optional[str] = None
     options: List[str | SystemConfigOption] = Field(default_factory=list)
     validation: Dict[str, Any] = Field(default_factory=dict)

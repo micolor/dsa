@@ -498,6 +498,33 @@ function buildAgentItem(
   };
 }
 
+function buildTierConfigItem(
+  key: string,
+  category: string,
+  tier: 'basic' | 'advanced',
+  displayOrder = 1,
+) {
+  return {
+    key,
+    value: `v-${key}`,
+    rawValueExists: true,
+    isMasked: false,
+    schema: {
+      key,
+      category,
+      dataType: 'string',
+      uiControl: 'text',
+      isSensitive: false,
+      isRequired: false,
+      isEditable: true,
+      tier,
+      options: [],
+      validation: {},
+      displayOrder,
+    },
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -512,6 +539,7 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    window.localStorage.clear();
     Object.assign(webBuildInfoMock, {
       version: '3.11.0',
       rawVersion: '3.11.0',
@@ -2342,8 +2370,8 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    // 通知分类下有三个面板各带一条诊断提示：通知测试弹框、通知投递卡片、当前配置面板。
-    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(3);
+    // 通知分类下有两个面板各带一条诊断提示：通知测试弹框、当前配置面板；投递记录已移到告警中心。
+    expect(screen.getAllByText(/浏览器开发者工具控制台与后端日志/)).toHaveLength(2);
     expect(screen.queryByText('desktop.log')).not.toBeInTheDocument();
   });
 
@@ -2353,8 +2381,8 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />);
 
-    // 与上一用例同样三个面板，只是桌面端运行时换成 desktop.log 变体。
-    expect(screen.getAllByText('desktop.log')).toHaveLength(3);
+    // 与上一用例同样两个面板，只是桌面端运行时换成 desktop.log 变体。
+    expect(screen.getAllByText('desktop.log')).toHaveLength(2);
     expect(screen.queryByText(/浏览器开发者工具控制台与后端日志/)).not.toBeInTheDocument();
   });
 
@@ -2676,6 +2704,7 @@ describe('SettingsPage', () => {
           ...buildSystemConfigState().itemsByCategory.notification,
           notificationItem('FEISHU_APP_ID'),
           notificationItem('FEISHU_CHAT_ID'),
+          notificationItem('REPORT_TYPE'),
           notificationItem('NOTIFICATION_DEDUP_TTL_SECONDS'),
         ],
       },
@@ -2687,9 +2716,13 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('FEISHU_APP_ID')).toBeInTheDocument();
     expect(screen.queryByText('WECHAT_WEBHOOK_URL')).not.toBeInTheDocument();
 
-    // 通用/报告字段不属于渠道，始终在「通用 / 报告」分区展示（与所选渠道无关）
-    expect(screen.getByText('通用 / 报告')).toBeInTheDocument();
+    // 通用/报告字段不属于渠道，始终在「报告内容 / 通知路由与频控」分区展示（与所选渠道无关）
+    expect(screen.getByText('报告内容')).toBeInTheDocument();
+    expect(screen.getByText('通知路由与频控')).toBeInTheDocument();
     expect(screen.getByText('NOTIFICATION_DEDUP_TTL_SECONDS')).toBeInTheDocument();
+    // 投递记录不再和配置混排，改为跳转到告警中心的「通知尝试记录」
+    expect(screen.getByRole('button', { name: '查看投递记录' })).toBeInTheDocument();
+    expect(screen.queryByTestId('notification-delivery-card')).not.toBeInTheDocument();
 
     // 渠道下拉不再提供「全部渠道」，只有具体渠道
     fireEvent.click(screen.getByLabelText('通知渠道'));
@@ -2700,5 +2733,121 @@ describe('SettingsPage', () => {
     expect(screen.getByText('WECHAT_WEBHOOK_URL')).toBeInTheDocument();
     expect(screen.queryByText('FEISHU_APP_ID')).not.toBeInTheDocument();
     expect(screen.getByText('NOTIFICATION_DEDUP_TTL_SECONDS')).toBeInTheDocument();
+  });
+
+  it('offers an assistant entry for a system check', async () => {
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole('button', { name: '问助手' })).toBeInTheDocument();
+  });
+
+  it('links token usage from the system settings instead of the main nav', async () => {
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole('button', { name: '查看用量' })).toBeInTheDocument();
+  });
+
+  it('defaults to the basic view and reveals advanced fields from the all-settings toggle', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'base',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        base: [
+          buildTierConfigItem('STOCK_LIST', 'base', 'basic', 1),
+          buildTierConfigItem('PAPER_NOTIFY_ENABLED', 'base', 'advanced', 2),
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByTestId('settings-field-STOCK_LIST')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-PAPER_NOTIFY_ENABLED')).not.toBeInTheDocument();
+    expect(screen.getByText(/已隐藏 1 项高级设置/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '全部设置' }));
+
+    expect(screen.getByTestId('settings-field-PAPER_NOTIFY_ENABLED')).toBeInTheDocument();
+    expect(window.localStorage.getItem('dsa.settings.viewMode')).toBe('all');
+  });
+
+  it('lets basic-view users find advanced fields by searching', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'base',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        base: [
+          buildTierConfigItem('STOCK_LIST', 'base', 'basic', 1),
+          buildTierConfigItem('PAPER_NOTIFY_ENABLED', 'base', 'advanced', 2),
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByTestId('settings-field-STOCK_LIST')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-PAPER_NOTIFY_ENABLED')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('搜索配置'), { target: { value: 'PAPER_NOTIFY' } });
+
+    expect(screen.getByTestId('settings-field-PAPER_NOTIFY_ENABLED')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-STOCK_LIST')).not.toBeInTheDocument();
+  });
+
+  it('shows only the multi-key field when both provider key fields exist', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'ai_model',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        ai_model: [
+          buildTierConfigItem('OPENAI_API_KEYS', 'ai_model', 'basic', 1),
+          buildTierConfigItem('OPENAI_API_KEY', 'ai_model', 'basic', 2),
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByTestId('settings-field-OPENAI_API_KEYS')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-OPENAI_API_KEY')).not.toBeInTheDocument();
+  });
+
+  it('keeps the legacy single-key field when only that field is configured', async () => {
+    const legacyOnly = buildTierConfigItem('OPENAI_API_KEY', 'ai_model', 'basic', 2);
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'ai_model',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        ai_model: [
+          { ...buildTierConfigItem('OPENAI_API_KEYS', 'ai_model', 'basic', 1), value: '' },
+          legacyOnly,
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByTestId('settings-field-OPENAI_API_KEY')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-OPENAI_API_KEYS')).not.toBeInTheDocument();
+  });
+
+  it('keeps the selected notification channel fields visible in the basic view', async () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'notification',
+      itemsByCategory: {
+        ...buildSystemConfigState().itemsByCategory,
+        notification: [
+          buildTierConfigItem('WECHAT_WEBHOOK_URL', 'notification', 'advanced', 1),
+          buildTierConfigItem('REPORT_LANGUAGE', 'notification', 'basic', 2),
+          buildTierConfigItem('NOTIFICATION_DEDUP_TTL_SECONDS', 'notification', 'advanced', 3),
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByTestId('settings-field-WECHAT_WEBHOOK_URL')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-field-REPORT_LANGUAGE')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-field-NOTIFICATION_DEDUP_TTL_SECONDS')).not.toBeInTheDocument();
   });
 });

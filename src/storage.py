@@ -762,6 +762,94 @@ class ConversationSessionState(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
 
+class ProactiveBriefRun(Base):
+    """One generated proactive brief slot; the unique key makes it idempotent."""
+
+    __tablename__ = 'proactive_brief_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    brief_date = Column(String(10), index=True, nullable=False)
+    slot = Column(String(20), nullable=False)
+    session_id = Column(String(100), nullable=False)
+    message_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('brief_date', 'slot', name='uix_proactive_brief_date_slot'),
+    )
+
+
+class EventAgentRun(Base):
+    """One processed event-driven Agent analysis; event_key makes it idempotent."""
+
+    __tablename__ = 'event_agent_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_key = Column(String(200), unique=True, index=True, nullable=False)
+    stock_code = Column(String(30), nullable=False)
+    event_type = Column(String(40), nullable=False)
+    message_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class ProactiveMessage(Base):
+    """Proactive assistant message kept out of normal chat sessions."""
+
+    __tablename__ = 'proactive_messages'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_type = Column(String(30), index=True, nullable=False)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    legacy_key = Column(String(80), unique=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
+
+
+class ProactiveInboxRead(Base):
+    """Server-side read marker for one proactive assistant message."""
+
+    __tablename__ = 'proactive_inbox_reads'
+
+    message_id = Column(Integer, primary_key=True)
+    read_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class ScheduledTask(Base):
+    """User-defined recurring task shown on the scheduled-task calendar."""
+
+    __tablename__ = 'scheduled_tasks'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    task_type = Column(String(30), index=True, nullable=False)
+    payload = Column(Text, nullable=False, default='{}')
+    weekdays = Column(String(40), nullable=False, default='[0,1,2,3,4,5,6]')
+    time_of_day = Column(String(5), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False, index=True)
+    trading_day_only = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+    last_run_at = Column(DateTime, nullable=True)
+    last_status = Column(String(20), nullable=True)
+    last_message = Column(Text, nullable=True)
+
+
+class ScheduledTaskRun(Base):
+    """One execution receipt for a scheduled task."""
+
+    __tablename__ = 'scheduled_task_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, index=True, nullable=False)
+    slot_key = Column(String(80), unique=True, nullable=True)
+    trigger_source = Column(String(16), nullable=False, default='schedule')
+    status = Column(String(20), nullable=False)
+    message = Column(Text, nullable=True)
+    scheduled_for = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class ConversationSummary(Base):
     """Rolling summary for visible Agent chat history."""
 
@@ -1546,6 +1634,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
             # 创建所有表
             Base.metadata.create_all(self._engine)
+            self._ensure_proactive_message_legacy_key()
             self._ensure_llm_usage_telemetry_columns()
             self._ensure_paper_trade_fee_column()
             self._ensure_decision_signal_outcome_benchmark_columns()
@@ -1556,6 +1645,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_intelligence_items_unique_index()
 
             self._initialized = True
+            self._migrate_legacy_proactive_messages()
             logger.info(f"数据库初始化完成: {db_url}")
 
             # 注册退出钩子，确保程序退出时关闭数据库连接
@@ -2081,6 +2171,68 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "ON fund_nav_reviews "
                 "(engine_version, eval_status, restored_checked_at)"
             )
+
+    def _ensure_proactive_message_legacy_key(self) -> None:
+        """Ensure the legacy_key column/index exists for older proactive_messages tables."""
+        if not self._is_sqlite_engine:
+            return
+        try:
+            with self._engine.begin() as connection:
+                columns = [
+                    row[1]
+                    for row in connection.exec_driver_sql("PRAGMA table_info(proactive_messages)")
+                ]
+                if columns and "legacy_key" not in columns:
+                    connection.exec_driver_sql(
+                        "ALTER TABLE proactive_messages ADD COLUMN legacy_key VARCHAR(80)"
+                    )
+                connection.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "uix_proactive_messages_legacy_key ON proactive_messages(legacy_key)"
+                )
+        except Exception as exc:  # pragma: no cover - defensive migration
+            logger.warning("Ensure proactive_messages legacy_key failed: %s", exc)
+
+    def _migrate_legacy_proactive_messages(self) -> None:
+        """Move legacy proactive chat messages into proactive_messages.
+
+        Older builds wrote these into conversation_messages, which put them in
+        the normal Chat history. The migration is idempotent via legacy_key;
+        chat history now filters the proactive:* sessions out.
+        """
+        type_by_session = {
+            "proactive:daily_brief": ("daily_brief", "助手日报"),
+            "proactive:event_alerts": ("event", "事件提醒"),
+            "proactive:weekly_review": ("weekly", "每周复盘"),
+            "proactive:opportunity_scan": ("opportunity", "机会扫描"),
+        }
+        try:
+            with self.session_scope() as session:
+                rows = session.execute(
+                    select(ConversationMessage).where(
+                        and_(
+                            ConversationMessage.session_id.in_(list(type_by_session)),
+                            ConversationMessage.role == "assistant",
+                        )
+                    )
+                ).scalars().all()
+                for message in rows:
+                    message_type, label = type_by_session.get(message.session_id, ("unknown", "提醒"))
+                    created = message.created_at or datetime.now()
+                    title = f"{label} · {created:%Y-%m-%d}"
+                    session.execute(
+                        sqlite_insert(ProactiveMessage)
+                        .values(
+                            message_type=message_type,
+                            title=title[:200],
+                            content=message.content,
+                            legacy_key=f"conversation:{message.id}",
+                            created_at=created,
+                        )
+                        .on_conflict_do_nothing(index_elements=["legacy_key"])
+                    )
+        except Exception as exc:  # pragma: no cover - defensive migration
+            logger.warning("Legacy proactive message migration failed: %s", exc)
 
     def _ensure_llm_usage_telemetry_columns(self) -> None:
         """Add nullable P0a usage telemetry columns to existing SQLite DBs."""
@@ -3971,6 +4123,434 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             text = text[len(sentinel):].strip()
         return (text or "新对话")[:60]
 
+    def has_proactive_brief_run(self, brief_date: str, slot: str) -> bool:
+        """Return whether a proactive brief already ran for the date + slot."""
+        with self.session_scope() as session:
+            row = session.execute(
+                select(ProactiveBriefRun.id)
+                .where(
+                    and_(
+                        ProactiveBriefRun.brief_date == brief_date,
+                        ProactiveBriefRun.slot == slot,
+                    )
+                )
+                .limit(1)
+            ).first()
+            return row is not None
+
+    def save_proactive_brief_run(
+        self,
+        brief_date: str,
+        slot: str,
+        session_id: str,
+        message_id: Optional[int] = None,
+    ) -> None:
+        """Record a brief run; duplicate date + slot is a no-op."""
+        with self.session_scope() as session:
+            stmt = sqlite_insert(ProactiveBriefRun).values(
+                brief_date=brief_date,
+                slot=slot,
+                session_id=session_id,
+                message_id=message_id,
+            ).on_conflict_do_nothing(
+                index_elements=['brief_date', 'slot'],
+            )
+            session.execute(stmt)
+
+    def has_event_agent_run(self, event_key: str) -> bool:
+        """Return whether an event was already analyzed by the Agent."""
+        with self.session_scope() as session:
+            row = session.execute(
+                select(EventAgentRun.id)
+                .where(EventAgentRun.event_key == event_key)
+                .limit(1)
+            ).first()
+            return row is not None
+
+    def save_event_agent_run(
+        self,
+        event_key: str,
+        stock_code: str,
+        event_type: str,
+        message_id: Optional[int] = None,
+    ) -> None:
+        """Record a processed event; duplicate event_key is a no-op."""
+        with self.session_scope() as session:
+            stmt = sqlite_insert(EventAgentRun).values(
+                event_key=event_key,
+                stock_code=stock_code,
+                event_type=event_type,
+                message_id=message_id,
+            ).on_conflict_do_nothing(index_elements=['event_key'])
+            session.execute(stmt)
+
+    def save_proactive_message(self, message_type: str, title: str, content: str) -> int:
+        with self.session_scope() as session:
+            message = ProactiveMessage(
+                message_type=str(message_type or "unknown"),
+                title=str(title or "")[:200],
+                content=content,
+            )
+            session.add(message)
+            session.flush()
+            return int(message.id)
+
+    def list_proactive_messages(
+        self,
+        message_types: List[str],
+        limit: int = 100,
+        offset: int = 0,
+        message_id: Optional[int] = None,
+        unread_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Return proactive messages with their read timestamps.
+
+        ``unread_only`` filters in SQL before pagination so an unread message
+        older than the newest page is still returned.
+        """
+        if not message_types:
+            return []
+        with self.session_scope() as session:
+            stmt = (
+                select(ProactiveMessage, ProactiveInboxRead.read_at)
+                .outerjoin(
+                    ProactiveInboxRead,
+                    ProactiveMessage.id == ProactiveInboxRead.message_id,
+                )
+                .where(ProactiveMessage.message_type.in_(message_types))
+            )
+            if message_id is not None:
+                stmt = stmt.where(ProactiveMessage.id == int(message_id))
+            if unread_only:
+                stmt = stmt.where(ProactiveInboxRead.read_at.is_(None))
+            stmt = (
+                stmt.order_by(desc(ProactiveMessage.created_at))
+                .offset(max(0, int(offset)))
+                .limit(limit)
+            )
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "id": int(message.id),
+                    "message_type": message.message_type,
+                    "title": message.title,
+                    "content": message.content,
+                    "created_at": message.created_at.isoformat() if message.created_at else None,
+                    "read_at": read_at.isoformat() if read_at else None,
+                }
+                for message, read_at in rows
+            ]
+
+    def count_unread_proactive_inbox(self, message_types: List[str]) -> int:
+        if not message_types:
+            return 0
+        with self.session_scope() as session:
+            read_ids = select(ProactiveInboxRead.message_id)
+            stmt = (
+                select(func.count(ProactiveMessage.id))
+                .where(
+                    and_(
+                        ProactiveMessage.message_type.in_(message_types),
+                        ~ProactiveMessage.id.in_(read_ids),
+                    )
+                )
+            )
+            return int(session.execute(stmt).scalar() or 0)
+
+    def mark_proactive_inbox_read(self, message_ids: List[int]) -> int:
+        ids = [int(item) for item in message_ids if isinstance(item, int)]
+        if not ids:
+            return 0
+        with self.session_scope() as session:
+            for message_id in ids:
+                session.execute(
+                    sqlite_insert(ProactiveInboxRead)
+                    .values(message_id=message_id)
+                    .on_conflict_do_nothing(index_elements=["message_id"])
+                )
+        return len(ids)
+
+    def mark_all_proactive_inbox_read(self, message_types: List[str]) -> int:
+        if not message_types:
+            return 0
+        with self.session_scope() as session:
+            read_ids = select(ProactiveInboxRead.message_id)
+            rows = session.execute(
+                select(ProactiveMessage.id).where(
+                    and_(
+                        ProactiveMessage.message_type.in_(message_types),
+                        ~ProactiveMessage.id.in_(read_ids),
+                    )
+                )
+            ).scalars().all()
+            for message_id in rows:
+                session.execute(
+                    sqlite_insert(ProactiveInboxRead)
+                    .values(message_id=int(message_id))
+                    .on_conflict_do_nothing(index_elements=["message_id"])
+                )
+            return len(rows)
+
+    @staticmethod
+    def _scheduled_task_to_dict(task: ScheduledTask) -> Dict[str, Any]:
+        try:
+            payload = json.loads(task.payload or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        try:
+            weekdays = json.loads(task.weekdays or "[]")
+        except (TypeError, ValueError):
+            weekdays = []
+        return {
+            "id": int(task.id),
+            "name": task.name,
+            "task_type": task.task_type,
+            "payload": payload if isinstance(payload, dict) else {},
+            "weekdays": [int(day) for day in weekdays if isinstance(day, int) or str(day).isdigit()],
+            "time_of_day": task.time_of_day,
+            "enabled": bool(task.enabled),
+            "trading_day_only": bool(task.trading_day_only),
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            "last_run_at": task.last_run_at.isoformat() if task.last_run_at else None,
+            "last_status": task.last_status,
+            "last_message": task.last_message,
+        }
+
+    def create_scheduled_task(
+        self,
+        *,
+        name: str,
+        task_type: str,
+        payload: Dict[str, Any],
+        weekdays: List[int],
+        time_of_day: str,
+        enabled: bool = True,
+        trading_day_only: bool = True,
+    ) -> Dict[str, Any]:
+        with self.session_scope() as session:
+            task = ScheduledTask(
+                name=str(name)[:120],
+                task_type=str(task_type),
+                payload=json.dumps(payload or {}, ensure_ascii=False),
+                weekdays=json.dumps(sorted({int(day) for day in weekdays})),
+                time_of_day=str(time_of_day),
+                enabled=bool(enabled),
+                trading_day_only=bool(trading_day_only),
+            )
+            session.add(task)
+            session.flush()
+            return self._scheduled_task_to_dict(task)
+
+    def update_scheduled_task(self, task_id: int, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        allowed = {
+            "name",
+            "task_type",
+            "payload",
+            "weekdays",
+            "time_of_day",
+            "enabled",
+            "trading_day_only",
+        }
+        with self.session_scope() as session:
+            task = session.get(ScheduledTask, int(task_id))
+            if task is None:
+                return None
+            for key, value in fields.items():
+                if key not in allowed:
+                    continue
+                if key == "payload":
+                    task.payload = json.dumps(value or {}, ensure_ascii=False)
+                elif key == "weekdays":
+                    task.weekdays = json.dumps(sorted({int(day) for day in value}))
+                elif key == "enabled":
+                    task.enabled = bool(value)
+                elif key == "trading_day_only":
+                    task.trading_day_only = bool(value)
+                else:
+                    setattr(task, key, value)
+            session.flush()
+            return self._scheduled_task_to_dict(task)
+
+    def delete_scheduled_task(self, task_id: int) -> bool:
+        with self.session_scope() as session:
+            task = session.get(ScheduledTask, int(task_id))
+            if task is None:
+                return False
+            session.execute(delete(ScheduledTaskRun).where(ScheduledTaskRun.task_id == int(task_id)))
+            session.delete(task)
+            return True
+
+    def list_scheduled_tasks(self, *, enabled_only: bool = False) -> List[Dict[str, Any]]:
+        with self.session_scope() as session:
+            stmt = select(ScheduledTask).order_by(ScheduledTask.time_of_day, ScheduledTask.id)
+            if enabled_only:
+                stmt = stmt.where(ScheduledTask.enabled.is_(True))
+            rows = session.execute(stmt).scalars().all()
+            return [self._scheduled_task_to_dict(row) for row in rows]
+
+    def get_scheduled_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        with self.session_scope() as session:
+            task = session.get(ScheduledTask, int(task_id))
+            return self._scheduled_task_to_dict(task) if task is not None else None
+
+    def save_scheduled_task_run(
+        self,
+        *,
+        task_id: int,
+        trigger_source: str,
+        status: str,
+        message: Optional[str] = None,
+        scheduled_for: Optional[datetime] = None,
+        slot_key: Optional[str] = None,
+    ) -> Optional[int]:
+        """Insert a run receipt; duplicate schedule slots return ``None``."""
+        with self.session_scope() as session:
+            if slot_key:
+                exists = session.execute(
+                    select(ScheduledTaskRun.id).where(ScheduledTaskRun.slot_key == slot_key)
+                ).scalar_one_or_none()
+                if exists is not None:
+                    return None
+            run = ScheduledTaskRun(
+                task_id=int(task_id),
+                slot_key=slot_key,
+                trigger_source=str(trigger_source),
+                status=str(status),
+                message=message,
+                scheduled_for=scheduled_for,
+            )
+            session.add(run)
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                return None
+            return int(run.id)
+
+    def finish_scheduled_task_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        message: Optional[str] = None,
+    ) -> None:
+        with self.session_scope() as session:
+            run = session.get(ScheduledTaskRun, int(run_id))
+            if run is None:
+                return
+            run.status = str(status)
+            if message is not None:
+                run.message = message
+            run.finished_at = datetime.now()
+
+    def update_scheduled_task_state(
+        self,
+        task_id: int,
+        *,
+        status: str,
+        message: Optional[str] = None,
+        ran_at: Optional[datetime] = None,
+    ) -> None:
+        with self.session_scope() as session:
+            task = session.get(ScheduledTask, int(task_id))
+            if task is None:
+                return
+            task.last_run_at = ran_at or datetime.now()
+            task.last_status = str(status)
+            task.last_message = message
+
+    def list_scheduled_task_runs(
+        self,
+        *,
+        task_id: Optional[int] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        with self.session_scope() as session:
+            stmt = select(ScheduledTaskRun).order_by(desc(ScheduledTaskRun.created_at))
+            if task_id is not None:
+                stmt = stmt.where(ScheduledTaskRun.task_id == int(task_id))
+            if since is not None:
+                stmt = stmt.where(ScheduledTaskRun.scheduled_for >= since)
+            if until is not None:
+                stmt = stmt.where(ScheduledTaskRun.scheduled_for < until)
+            stmt = stmt.limit(max(1, min(int(limit), 1000)))
+            rows = session.execute(stmt).scalars().all()
+            return [
+                {
+                    "id": int(run.id),
+                    "task_id": int(run.task_id),
+                    "trigger_source": run.trigger_source,
+                    "status": run.status,
+                    "message": run.message,
+                    "scheduled_for": run.scheduled_for.isoformat() if run.scheduled_for else None,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                }
+                for run in rows
+            ]
+
+    def count_event_agent_runs_for_date(self, brief_date: str) -> int:
+        """Return how many event analyses ran on a YYYY-MM-DD date."""
+        try:
+            start = datetime.strptime(brief_date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            return 0
+        end = start + timedelta(days=1)
+        with self.session_scope() as session:
+            stmt = select(func.count(EventAgentRun.id)).where(
+                and_(
+                    EventAgentRun.created_at >= start,
+                    EventAgentRun.created_at < end,
+                )
+            )
+            return int(session.execute(stmt).scalar() or 0)
+
+    def prune_proactive_records(self, cutoff: datetime) -> Dict[str, int]:
+        """Delete proactive run records and read markers older than ``cutoff``."""
+        with self.session_scope() as session:
+            reads = session.execute(
+                delete(ProactiveInboxRead).where(ProactiveInboxRead.read_at < cutoff)
+            ).rowcount
+            briefs = session.execute(
+                delete(ProactiveBriefRun).where(ProactiveBriefRun.created_at < cutoff)
+            ).rowcount
+            events = session.execute(
+                delete(EventAgentRun).where(EventAgentRun.created_at < cutoff)
+            ).rowcount
+            return {
+                "inbox_reads": int(reads or 0),
+                "brief_runs": int(briefs or 0),
+                "event_runs": int(events or 0),
+            }
+
+    def get_proactive_type_last_activity(self) -> Dict[str, str]:
+        """Return the latest proactive message time for each message type."""
+        with self.session_scope() as session:
+            rows = session.execute(
+                select(
+                    ProactiveMessage.message_type,
+                    func.max(ProactiveMessage.created_at),
+                )
+                .group_by(ProactiveMessage.message_type)
+            ).all()
+            return {
+                str(message_type): latest.isoformat() if latest else ""
+                for message_type, latest in rows
+            }
+
+    def unmark_proactive_inbox_read(self, message_ids: List[int]) -> int:
+        ids = [int(item) for item in message_ids if isinstance(item, int)]
+        if not ids:
+            return 0
+        with self.session_scope() as session:
+            result = session.execute(
+                delete(ProactiveInboxRead).where(ProactiveInboxRead.message_id.in_(ids))
+            )
+            return int(result.rowcount or 0)
+
     def get_chat_sessions(
         self,
         limit: int = 50,
@@ -4013,6 +4593,12 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 conditions.append(ConversationMessage.session_id.startswith(normalized_prefix))
             if exact_ids:
                 conditions.append(ConversationMessage.session_id.in_(exact_ids))
+            base = base.where(
+                and_(
+                    ~ConversationMessage.session_id.startswith("proactive:"),
+                    ~ConversationMessage.session_id.startswith("scheduled:"),
+                )
+            )
             if conditions:
                 base = base.where(or_(*conditions))
             stmt = (

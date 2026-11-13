@@ -38,6 +38,7 @@
 | [LiteLLM YAML 示例](examples/litellm_config.example.yaml) | LiteLLM 多渠道配置示例 |
 | [通知能力基线](notifications.md) | 企业微信、飞书、Telegram、Discord、Slack、邮件等通知渠道配置 |
 | [Tushare 股票列表指南](TUSHARE_STOCK_LIST_GUIDE.md) | Tushare 股票列表相关配置和使用说明 |
+| [配置别名收敛与迁移方案](config-consolidation.md) | 单 Key/多 Key、旧调度字段等历史别名的展示策略、迁移步骤与回滚要求 |
 
 ## 使用专题
 
@@ -51,6 +52,8 @@
 | [资讯 / 情报源](intelligence-sources.md) | RSS/Atom 合规资讯源配置、测试、拉取、去重、存储、查询与安全边界 |
 | [分析上下文包契约、运行态消费与可见性](analysis-context-pack.md) | AnalysisContextPack 首版范围、字段质量状态、P1/P2 内部契约、P3 Prompt 摘要消费、P4 历史/API/Web 低敏可见性、P5 数据质量评分、P6 迁移回滚与源码锚点；完整指南补充 #1386 阶段感知分析、迁移与回滚入口 |
 | [问股全站操作助手](agent-chat-site-operations.md) | 问股读取全站数据、低风险直接执行、后台任务与高风险确认卡片的执行语义、工具清单、明确排除项和审计回滚方式 |
+| [定时任务与任务日历](scheduled-tasks.md) | 用户自定义周期任务、任务日历、五种任务类型、助手创建/启停/立即执行与调度语义 |
+| [主动助手总览](proactive-assistant.md) ([English](proactive-assistant_EN.md)) | 助手日报、事件提醒、每周复盘、机会扫描四层能力，以及风险画像、顶部铃铛收件箱、调度、去重、推送策略和安全边界 |
 | [图片识别 Prompt](image-extract-prompt.md) | 图片识别股票信息的 Prompt 与使用边界 |
 | [OpenClaw Skill 集成](openclaw-skill-integration.md) | OpenClaw / Skill 外部集成说明 |
 

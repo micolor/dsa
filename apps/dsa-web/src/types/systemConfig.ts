@@ -46,6 +46,8 @@ export interface SystemConfigFieldSchema {
   isSensitive: boolean;
   isRequired: boolean;
   isEditable: boolean;
+  /** Which default settings view exposes this field. Unknown values are treated as basic. */
+  tier?: 'basic' | 'advanced';
   defaultValue?: string | null;
   options: Array<string | SystemConfigOption>;
   validation: Record<string, unknown>;

@@ -28,6 +28,19 @@ describe('BreadthBar', () => {
     expect(parseFloat(up.style.width.replace('%', ''))).toBe(75);
     expect(parseFloat(down.style.width.replace('%', ''))).toBe(25);
   });
+
+  it('uses the Chinese market convention: up is red, down is green', () => {
+    const { container } = render(
+      <BreadthBar upCount={75} downCount={25} ariaLabel="75 / 25" />,
+    );
+    const up = container.querySelector('[data-direction="up"]') as HTMLElement;
+    const down = container.querySelector('[data-direction="down"]') as HTMLElement;
+
+    expect(up).toHaveClass('bg-danger');
+    expect(up).not.toHaveClass('bg-success');
+    expect(down).toHaveClass('bg-success');
+    expect(down).not.toHaveClass('bg-danger');
+  });
 });
 
 describe('MiniChangeBar', () => {
@@ -42,6 +55,18 @@ describe('MiniChangeBar', () => {
     const { container } = render(<MiniChangeBar value={-1.4} maxAbs={2.4} />);
     expect(container.querySelector('[data-testid="market-index-bar"] [data-direction="down"]')).toBeInTheDocument();
     expect(container.querySelectorAll('[data-testid="market-index-bar"] [data-direction="up"]')).toHaveLength(0);
+  });
+
+  it('colors a positive change red and a negative change green', () => {
+    const positive = render(<MiniChangeBar value={1.2} maxAbs={2.4} />);
+    const positiveBar = positive.container.querySelector('[data-direction="up"]') as HTMLElement;
+    expect(positiveBar).toHaveClass('bg-danger');
+    expect(positiveBar).not.toHaveClass('bg-success');
+
+    const negative = render(<MiniChangeBar value={-1.2} maxAbs={2.4} />);
+    const negativeBar = negative.container.querySelector('[data-direction="down"]') as HTMLElement;
+    expect(negativeBar).toHaveClass('bg-success');
+    expect(negativeBar).not.toHaveClass('bg-danger');
   });
 
   it('handles a null value without any direction segment', () => {
@@ -71,11 +96,24 @@ describe('SectorBarList', () => {
     expect(bars[0].querySelector('[data-direction="up"]')).toBeInTheDocument();
   });
 
-  it('colors the whole group red for a lagging (down) ranking', () => {
+  it('colors the whole group green for a lagging (down) ranking', () => {
     const rows: MarketBarRow[] = [{ name: '煤炭', value: -1.1, label: '-1.10%' }];
     const { container } = render(<SectorBarList rows={rows} direction="down" />);
 
-    const bar = container.querySelector('[data-testid="market-sector-bar"] [data-direction]');
-    expect(bar?.getAttribute('data-direction')).toBe('down');
+    const bar = container.querySelector('[data-testid="market-sector-bar"] [data-direction]') as HTMLElement;
+    expect(bar.getAttribute('data-direction')).toBe('down');
+    expect(bar).toHaveClass('bg-success');
+    expect(bar).not.toHaveClass('bg-danger');
+    expect(screen.getByText('-1.10%')).toHaveClass('text-success');
+  });
+
+  it('colors the leading (up) group red', () => {
+    const rows: MarketBarRow[] = [{ name: '林业', value: 5.75, label: '+5.75%' }];
+    const { container } = render(<SectorBarList rows={rows} direction="up" />);
+
+    const bar = container.querySelector('[data-testid="market-sector-bar"] [data-direction]') as HTMLElement;
+    expect(bar).toHaveClass('bg-danger');
+    expect(bar).not.toHaveClass('bg-success');
+    expect(screen.getByText('+5.75%')).toHaveClass('text-danger');
   });
 });

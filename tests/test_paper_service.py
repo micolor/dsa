@@ -85,7 +85,7 @@ def _seed_daily(db, code, d, o, h, l, c):
 
 
 def _make_signal(db, action="buy", code="600519", entry_high=100.0, stop_loss=95.0,
-                 target_price=115.0, created_at=None, market="cn"):
+                 target_price=115.0, created_at=None, market="cn", score=88):
     with db.get_session() as session:
         row = DecisionSignalRecord(
             stock_code=code,
@@ -100,7 +100,7 @@ def _make_signal(db, action="buy", code="600519", entry_high=100.0, stop_loss=95
             action=action,
             action_label=action,
             confidence=0.8,
-            score=88,
+            score=score,
             horizon="3d",
             entry_low=98.0,
             entry_high=entry_high,
@@ -143,6 +143,62 @@ def test_process_signal_dedup(isolated_db, service):
     second = service.process_signal(sig.id)
     assert first["disposition"] == "opened"
     assert second["status"] == "skipped"
+
+
+def test_auto_trade_orders_buys_by_score_and_is_idempotent(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "000001", d1, 10, 10, 10, 10)
+    low = _make_signal(
+        isolated_db, action="buy", code="600519", entry_high=100.0,
+        created_at=datetime(2026, 1, 5, 1, 0), score=60,
+    )
+    high = _make_signal(
+        isolated_db, action="buy", code="000001", entry_high=10.0,
+        created_at=datetime(2026, 1, 5, 1, 0), score=90,
+    )
+
+    result = service.auto_trade_once(
+        service.get_or_create_account()["account_id"],
+        lookback_days=7,
+        now=datetime(2026, 1, 5, 9, 0),
+    )
+
+    assert result["signals_seen"] == 2
+    assert result["processed"] == 2
+    assert [item["signal_id"] for item in result["results"]] == [high.id, low.id]
+    account_id = service.get_or_create_account()["account_id"]
+    trades = service.get_trades(account_id)["items"]
+    assert {trade["stock_code"] for trade in trades} == {"000001", "600519"}
+
+    second = service.auto_trade_once(
+        account_id,
+        lookback_days=7,
+        now=datetime(2026, 1, 5, 10, 0),
+    )
+    assert second["processed"] == 0
+    assert second["skipped"] == 2
+
+
+def test_auto_trade_ignores_hold_and_signals_outside_lookback(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    _make_signal(
+        isolated_db, action="hold", created_at=datetime(2026, 1, 5, 1, 0),
+    )
+    _make_signal(
+        isolated_db, action="buy", entry_high=100.0,
+        created_at=datetime(2025, 12, 1, 1, 0),
+    )
+
+    result = service.auto_trade_once(
+        service.get_or_create_account()["account_id"],
+        lookback_days=2,
+        now=datetime(2026, 1, 5, 9, 0),
+    )
+
+    assert result["signals_seen"] == 0
+    assert result["processed"] == 0
 
 
 def test_hold_signal_ignored(isolated_db, service):
@@ -237,6 +293,29 @@ def test_sell_closes_position(isolated_db, service):
     account_id = service.get_or_create_account()["account_id"]
     positions = service.get_positions(account_id)
     assert all(p["status"] == "closed" for p in positions)
+
+
+def test_sell_without_bar_is_data_unavailable_and_retryable(isolated_db, service):
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    buy_sig = _make_signal(isolated_db, action="buy", entry_high=100.0, created_at=datetime(2026, 1, 5))
+    sell_sig = _make_signal(isolated_db, action="sell", created_at=datetime(2026, 1, 6))
+
+    service.process_signal(buy_sig.id)
+    account_id = service.get_or_create_account()["account_id"]
+    result = service.process_signal(sell_sig.id)
+
+    assert result["status"] == "data_unavailable"
+    assert result["disposition"] == "data_unavailable"
+    assert service.paper_repo.has_signal_record(account_id, sell_sig.id) is False
+    assert service.get_positions(account_id)[0]["status"] == "open"
+
+    # 补齐卖出日 bar 后重试，仍在同一持仓上完成平仓。
+    _seed_daily(isolated_db, "600519", d2, 105, 105, 105, 105)
+    retried = service.process_signal(sell_sig.id)
+    assert retried["disposition"] == "closed"
+    assert service.get_positions(account_id)[0]["status"] == "closed"
 
 
 def test_take_profit_exit(isolated_db, service):
@@ -507,12 +586,14 @@ def test_buy_without_price_is_data_unavailable_and_retryable(isolated_db, servic
     assert result2["disposition"] == "opened"
 
 
-def test_resolve_valuation_date_no_positions_returns_today(isolated_db, service):
-    # A fresh account with no open positions must fall back to the local date
-    # rather than erroring or returning a stale resolved session.
+def test_resolve_valuation_date_no_positions_uses_cn_trading_calendar(isolated_db, service):
+    # 空仓账户没有持仓市场可参考，应按 A 股交易日历取最近已收盘交易日；
+    # 直接返回自然日会让周末/节假日也写净值快照。
+    from src.core.trading_calendar import get_effective_trading_date
+
     account_id = service.get_or_create_account()["account_id"]
     account = service.paper_repo.get_account(account_id)
-    assert service.resolve_valuation_date(account) == date.today()
+    assert service.resolve_valuation_date(account) == get_effective_trading_date("cn")
 
 
 def test_bar_cache_reloads_when_the_latest_session_bar_lands_later(isolated_db, service):

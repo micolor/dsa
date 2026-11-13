@@ -141,6 +141,19 @@ def normalize_model_number(
     return number
 
 
+def normalize_model_confidence(value: Any, default: float = 0.5) -> float:
+    """Coerce a model-reported confidence into ``[0, 1]``.
+
+    Models mix the two common scales: ``0.7`` and ``70`` both mean 70%.  Treat
+    values above 1 (up to 100) as percentages, then clamp.  Non-numeric values
+    fall back to ``default`` instead of failing the stage.
+    """
+    number = normalize_model_number(value, default=default)
+    if 1.0 < number <= 100.0:
+        number /= 100.0
+    return max(0.0, min(1.0, number))
+
+
 class StageStatus(str, Enum):
     """Lifecycle status of a pipeline stage."""
     PENDING = "pending"

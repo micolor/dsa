@@ -83,6 +83,7 @@ const mockStoreState = {
     },
   ],
   sessionsLoading: false,
+  sessionSeenAt: {} as Record<string, string>,
   chatError: null,
   stopping: false,
   terminalStatus: null as 'cancelled' | 'timeout' | null,
@@ -164,6 +165,7 @@ vi.mock('../../stores/agentChatStore', () => {
 
   useAgentChatStore.getState = () => ({
     startNewChat: mockStartNewChat,
+    sessionId: mockStoreState.sessionId,
   });
 
   return { useAgentChatStore };
@@ -214,6 +216,7 @@ beforeEach(() => {
   mockStoreState.terminalStatus = null;
   mockStoreState.stopError = false;
   mockStoreState.sessionsLoading = false;
+  mockStoreState.sessionSeenAt = {};
   mockStoreState.sessionId = 'session-1';
   mockStoreState.sessions = [
     {
@@ -274,6 +277,37 @@ beforeEach(() => {
 });
 
 describe('ChatPage', () => {
+  it('shows an unread dot only for sessions updated after the last visit', () => {
+    mockStoreState.sessions = [
+      {
+        session_id: 'session-1',
+        title: '请简要分析 600519',
+        message_count: 2,
+        created_at: '2026-03-15T09:00:00Z',
+        last_active: '2026-03-15T09:05:00Z',
+      },
+      {
+        session_id: 'proactive:daily_brief',
+        title: '助手日报',
+        message_count: 2,
+        created_at: '2026-03-15T10:00:00Z',
+        last_active: '2026-03-15T11:00:00Z',
+      },
+    ];
+    mockStoreState.sessionSeenAt = {
+      'session-1': '2026-03-15T12:00:00Z',
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId('session-unread-dot-proactive:daily_brief')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-unread-dot-session-1')).not.toBeInTheDocument();
+  });
+
   it('lets the user stop an active Codex analysis from the existing Chat composer', async () => {
     mockGetStatus.mockResolvedValueOnce({
       backend: 'codex_app_server',
@@ -819,7 +853,22 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
+    // 实时进度按阶段归组后只显示阶段名（失败状态体现在样式上），
+    // 完整文案「阶段未完成」只在已提交消息的折叠面板里出现一次。
     expect(await screen.findAllByText('阶段未完成')).toHaveLength(1);
+    // 未展开折叠面板时，实时进度里已经有一行失败状态。
+    expect(container.querySelectorAll('.chat-progress-item-danger')).toHaveLength(1);
+
+    // 实时进度必须与消息行共用同一条阅读列宽，否则右侧会超出用户气泡。
+    const progressColumn = container
+      .querySelector('.chat-progress-item-danger')
+      ?.closest('.mx-auto');
+    expect(progressColumn).not.toBeNull();
+    expect(progressColumn).toHaveClass(
+      'max-w-[52rem]',
+      'xl:max-w-[64rem]',
+      '2xl:max-w-[72rem]',
+    );
 
     const thinkingToggle = container.querySelector('button[class*="mb-2"][class*="w-full"]') as HTMLButtonElement;
     fireEvent.click(thinkingToggle);
@@ -854,6 +903,8 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
+    // 预算跳过不是阶段开始/结束事件，实时进度面板不展示它；
+    // 只在已提交消息的折叠面板里出现。
     expect(await screen.findAllByText('阶段因剩余预算不足被跳过')).toHaveLength(1);
     expect(screen.queryByText('阶段超时')).not.toBeInTheDocument();
 
@@ -866,6 +917,76 @@ describe('ChatPage', () => {
     expect(budgetSkipped).toBeDefined();
     expect(budgetSkipped?.closest('.chat-progress-item')).toHaveClass('chat-progress-item-muted');
     expect(budgetSkipped?.closest('.chat-progress-item')).not.toHaveClass('chat-progress-item-danger');
+  });
+
+  it('shows a finished stage conclusion while the pipeline is still running', async () => {
+    mockStoreState.loading = true;
+    mockStoreState.progressSteps = [
+      { type: 'stage_start', stage: 'technical' },
+      {
+        type: 'stage_done',
+        stage: 'technical',
+        status: 'completed',
+        summary: '均线多头排列，量能温和放大。',
+      },
+      { type: 'stage_start', stage: 'intel' },
+    ];
+    mockStoreState.messages = [];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    // 技术面已完成而情报面仍在跑：结论必须已经可见，而不是等整条流水线结束。
+    expect(await screen.findByText('均线多头排列，量能温和放大。')).toBeInTheDocument();
+  });
+
+  it('groups live progress by stage instead of listing raw tool calls', async () => {
+    mockStoreState.loading = true;
+    const longReasoning = '很长的推理内容'.repeat(20);
+    mockStoreState.progressSteps = [
+      { type: 'stage_start', stage: 'technical', message: '技术面进行中...' },
+      {
+        type: 'tool_done',
+        stage: 'technical',
+        tool: 'analyze_trend',
+        display_name: '趋势分析',
+        duration: 48,
+        success: true,
+      },
+      {
+        type: 'stage_done',
+        stage: 'technical',
+        status: 'completed',
+        message: '技术面完成',
+        duration: 49.4,
+        signal: 'buy',
+        confidence: 0.72,
+        summary: longReasoning,
+      },
+      { type: 'stage_start', stage: 'intel', message: '情报面进行中...' },
+    ];
+    mockStoreState.messages = [];
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    // 每个阶段一行：标题 + 耗时 + 信号/置信度；正在跑的阶段显示「进行中」。
+    expect(await screen.findByText('技术面')).toBeInTheDocument();
+    expect(screen.getByText('49.4s')).toBeInTheDocument();
+    expect(screen.getByText('看多 72%')).toBeInTheDocument();
+    expect(screen.getByText('情报面 · 进行中')).toBeInTheDocument();
+    // 原始工具调用不再逐条铺进实时面板（页面其他位置的「趋势分析」技能名不算）。
+    const liveItems = [...container.querySelectorAll('.chat-progress-item')];
+    expect(liveItems.some((node) => node.textContent?.includes('趋势分析'))).toBe(false);
+    // 结论限制为一行：超长推理被截断，避免实时面板被整段文本淹没。
+    expect(screen.getByText(`${longReasoning.slice(0, 80)}…`)).toBeInTheDocument();
+    expect(screen.queryByText(longReasoning)).not.toBeInTheDocument();
   });
 
   it('selects the default skill after loading skills', async () => {
@@ -2103,6 +2224,17 @@ describe('ChatPage', () => {
     expect(mockStartNewChat).not.toHaveBeenCalled();
   });
 
+  it('prefills the prompt query parameter without sending automatically', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat?prompt=check%20my%20settings']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByDisplayValue('check my settings')).toBeInTheDocument();
+    expect(mockStartStream).not.toHaveBeenCalled();
+  });
+
   it('ignores malformed follow-up query params', async () => {
     render(
       <MemoryRouter initialEntries={['/chat?stock=%3Cscript%3E&name=Bad%0AName&recordId=abc']}>
@@ -2504,6 +2636,48 @@ describe('watchlist button with code variants', () => {
       expect.objectContaining({ target: '600519', alertType: 'price_cross' }),
     );
     expect(await screen.findByText('已提交')).toBeInTheDocument();
+  });
+
+  it('shows config old-to-new previews and strips them before submitting', async () => {
+    mockUpdateSystemConfig.mockResolvedValue({ success: true });
+    mockStoreState.messages = [
+      { id: 'user-1', role: 'user', content: '帮我把实时行情关掉' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '已生成配置修改提案',
+        actionProposals: [
+          {
+            kind: 'config_update',
+            summary: '修改 1 项系统配置：ENABLE_REALTIME_QUOTE',
+            proposal: {
+              config_version: 'v1',
+              items: [{ key: 'ENABLE_REALTIME_QUOTE', value: 'false' }],
+              preview: [{ key: 'ENABLE_REALTIME_QUOTE', from: 'true', to: 'false' }],
+            },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('将修改')).toBeInTheDocument();
+    expect(screen.getAllByText(/ENABLE_REALTIME_QUOTE/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('true')).toBeInTheDocument();
+    expect(screen.getByText('false')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(mockUpdateSystemConfig).toHaveBeenCalledTimes(1));
+    expect(mockUpdateSystemConfig).toHaveBeenCalledWith({
+      configVersion: 'v1',
+      items: [{ key: 'ENABLE_REALTIME_QUOTE', value: 'false' }],
+    });
   });
 
   it('does not refetch the watchlist after a proposal', async () => {

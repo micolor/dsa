@@ -39,6 +39,7 @@ CURRENT_PRODUCIBLE_KINDS = frozenset({
     "config_update",
     "scheduler_run",
     "notification_test",
+    "scheduled_task_delete",
 })
 
 _ARRAY_BLOCK_RE = re.compile(r"export const ACTION_PROPOSAL_KINDS = \[(.*?)\] as const;", re.DOTALL)

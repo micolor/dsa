@@ -12,6 +12,7 @@ const {
   mockGetAccount,
   mockRefresh,
   mockBackfill,
+  mockAutoTrade,
 } = vi.hoisted(() => ({
   mockGetSnapshot: vi.fn(),
   mockGetPositions: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockGetAccount: vi.fn(),
   mockRefresh: vi.fn(),
   mockBackfill: vi.fn(),
+  mockAutoTrade: vi.fn(),
 }));
 
 vi.mock('../../api/paper', () => ({
@@ -33,6 +35,7 @@ vi.mock('../../api/paper', () => ({
     getAccount: mockGetAccount,
     refresh: mockRefresh,
     backfill: mockBackfill,
+    autoTrade: mockAutoTrade,
   },
 }));
 
@@ -67,6 +70,7 @@ describe('PaperTradingPage', () => {
     mockGetAccount.mockResolvedValue(mockAccount);
     mockRefresh.mockResolvedValue({});
     mockBackfill.mockResolvedValue({});
+    mockAutoTrade.mockResolvedValue({ status: 'ok', processed: 0 });
   });
 
   it('renders metrics and empty states for a fresh account', async () => {
@@ -77,9 +81,24 @@ describe('PaperTradingPage', () => {
     );
 
     expect(await screen.findByText('Total assets')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'AI signals' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Auto trade' })).toBeInTheDocument();
     expect(screen.getAllByText('1,000,000').length).toBeGreaterThan(0);
     expect(screen.getByText('No positions')).toBeInTheDocument();
     expect(screen.getByText('No equity data')).toBeInTheDocument();
+  });
+
+  it('shows a page-level retry when the initial load fails', async () => {
+    mockGetAccount.mockRejectedValueOnce(new Error('paper backend down'));
+
+    render(
+      <UiLanguageProvider>
+        <PaperTradingPage />
+      </UiLanguageProvider>
+    );
+
+    expect(await screen.findByText('Failed to load paper trading data')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
   // 回填日期框的占位符与右侧按钮同字面（都是「Backfill history」），

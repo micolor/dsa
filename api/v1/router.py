@@ -23,10 +23,13 @@ from api.v1.endpoints import (
     fund_nav_reviews,
     health,
     history,
+    inbox,
     intelligence,
     notification_deliveries,
     paper,
     portfolio,
+    proactive,
+    scheduled_tasks,
     stocks,
     system_config,
     usage,
@@ -46,6 +49,24 @@ router.include_router(
     agent.router,
     prefix="/agent",
     tags=["Agent"]
+)
+
+router.include_router(
+    proactive.router,
+    prefix="/agent/proactive",
+    tags=["Proactive"]
+)
+
+router.include_router(
+    inbox.router,
+    prefix="/inbox",
+    tags=["Inbox"]
+)
+
+router.include_router(
+    scheduled_tasks.router,
+    prefix="/scheduled-tasks",
+    tags=["ScheduledTasks"]
 )
 
 router.include_router(

@@ -32,7 +32,14 @@ type Basis = 'restored' | 'unit';
 
 function returnClass(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value) || value === 0) return 'text-secondary-text';
-  return value > 0 ? 'text-success' : 'text-danger';
+  // 中文市场惯例：正收益红、负收益绿（与选股/大盘复盘保持一致）。
+  return value > 0 ? 'text-danger' : 'text-success';
+}
+
+function drawdownClass(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value) || value === 0) return 'text-secondary-text';
+  // 回撤本身是损失，不套用「正红负绿」，统一标红。
+  return 'text-danger';
 }
 
 function formatLocalDate(value: Date): string {
@@ -325,7 +332,7 @@ export function FundNavReviewPanel() {
                           <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(basis === 'restored' ? bucket.avgRestoredReturnPct : bucket.avgNavReturnPct))}>
                             {formatSignedPct(basis === 'restored' ? bucket.avgRestoredReturnPct : bucket.avgNavReturnPct)}
                           </td>
-                          <td className={cn('py-2 text-right tabular-nums', returnClass(basis === 'restored' ? bucket.avgRestoredMaxDrawdownPct : bucket.avgMaxDrawdownPct))}>
+                          <td className={cn('py-2 text-right tabular-nums', drawdownClass(basis === 'restored' ? bucket.avgRestoredMaxDrawdownPct : bucket.avgMaxDrawdownPct))}>
                             {formatSignedPct(basis === 'restored' ? bucket.avgRestoredMaxDrawdownPct : bucket.avgMaxDrawdownPct)}
                           </td>
                         </tr>
@@ -411,7 +418,7 @@ export function FundNavReviewPanel() {
                       <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(itemReturn(item)))}>
                         {formatSignedPct(itemReturn(item))}
                       </td>
-                      <td className={cn('py-2 pr-2 text-right tabular-nums', returnClass(itemDrawdown(item)))}>
+                      <td className={cn('py-2 pr-2 text-right tabular-nums', drawdownClass(itemDrawdown(item)))}>
                         {formatSignedPct(itemDrawdown(item))}
                       </td>
                       <td className="py-2 pr-2 whitespace-nowrap text-secondary-text">

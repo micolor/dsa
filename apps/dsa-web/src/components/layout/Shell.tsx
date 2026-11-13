@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, X } from 'lucide-react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { SidebarNav } from './SidebarNav';
+import { ProactiveInboxBell } from './ProactiveInboxBell';
 import { GlobalTaskCenter } from '../tasks/GlobalTaskCenter';
 import { AssistantDock } from './AssistantDock';
 import { useEscTopLayer } from '../../hooks/useEscTopLayer';
@@ -160,6 +161,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
                 </>
               ) : null}
             </div>
+            <ProactiveInboxBell />
           </div>
         </header>
 

@@ -982,6 +982,138 @@ get_scheduler_view = ToolDefinition(
     category="site_read",
     policy=_READ_POLICY,
 )
+def _serialize_record(record: Any, fields: tuple[str, ...]) -> dict:
+    row = {}
+    for field in fields:
+        value = getattr(record, field, None)
+        row[field] = value.isoformat() if hasattr(value, "isoformat") else value
+    return row
+
+
+def _handle_get_usage_view(period: str = "month", limit: int = 10) -> str:
+    from datetime import datetime
+
+    from src.storage import DatabaseManager
+
+    now = datetime.now()
+    normalized = str(period or "month").strip().lower()
+    if normalized == "today":
+        from_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif normalized == "all":
+        from_dt = datetime(2000, 1, 1)
+    else:
+        normalized = "month"
+        from_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    data = DatabaseManager.get_instance().get_llm_usage_summary(from_dt, now)
+    size = max(1, min(int(limit or 10), 30))
+    return json.dumps(
+        {
+            "period": normalized,
+            "from": from_dt.isoformat(timespec="seconds"),
+            "to": now.isoformat(timespec="seconds"),
+            "total_calls": data.get("total_calls", 0),
+            "total_tokens": data.get("total_tokens", 0),
+            "total_prompt_tokens": data.get("total_prompt_tokens", 0),
+            "total_completion_tokens": data.get("total_completion_tokens", 0),
+            "by_model": (data.get("by_model") or [])[:size],
+            "by_call_type": (data.get("by_call_type") or [])[:size],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _handle_get_data_quality_view(
+    market: Optional[str] = None,
+    stock_code: Optional[str] = None,
+    issue_type: Optional[str] = None,
+    limit: int = 20,
+) -> str:
+    from src.repositories.data_quality_discrepancy_repo import DataQualityDiscrepancyRepository
+
+    size = max(1, min(int(limit or 20), 50))
+    rows, total = DataQualityDiscrepancyRepository().list_discrepancies(
+        market=market or None,
+        stock_code=stock_code or None,
+        issue_type=issue_type or None,
+        page=1,
+        page_size=size,
+    )
+    fields = (
+        "id", "market", "stock_code", "issue_type", "primary_source",
+        "secondary_source", "price_diff_pct", "created_at",
+    )
+    return json.dumps(
+        {"total": int(total), "items": [_serialize_record(row, fields) for row in rows]},
+        ensure_ascii=False,
+    )
+
+
+def _handle_get_notification_delivery_view(
+    route_type: Optional[str] = None,
+    channel: Optional[str] = None,
+    success: Optional[bool] = None,
+    limit: int = 20,
+) -> str:
+    from src.repositories.notification_delivery_repo import NotificationDeliveryRepository
+
+    size = max(1, min(int(limit or 20), 50))
+    rows, total = NotificationDeliveryRepository().list_deliveries(
+        route_type=route_type or None,
+        channel=channel or None,
+        success=success,
+        page=1,
+        page_size=size,
+    )
+    fields = (
+        "id", "route_type", "channel", "success", "error_code",
+        "latency_ms", "attempt", "created_at", "diagnostics",
+    )
+    return json.dumps(
+        {"total": int(total), "items": [_serialize_record(row, fields) for row in rows]},
+        ensure_ascii=False,
+    )
+
+
+get_usage_view = ToolDefinition(
+    name="get_usage_view",
+    description="读取 LLM Token 用量汇总（按模型/调用类型），period 支持 today/month/all。",
+    parameters=[
+        ToolParameter(name="period", type="string", description="today|month|all，默认 month", required=False),
+        ToolParameter(name="limit", type="integer", description="每类最多返回多少条，默认 10", required=False),
+    ],
+    handler=_handle_get_usage_view,
+    category="site_read",
+    policy=_READ_POLICY,
+)
+
+get_data_quality_view = ToolDefinition(
+    name="get_data_quality_view",
+    description="读取跨源数据质量异常（价差/交易日/字段缺失），可按市场、股票、异常类型筛选。",
+    parameters=[
+        ToolParameter(name="market", type="string", description="cn/hk/us", required=False),
+        ToolParameter(name="stock_code", type="string", description="股票代码", required=False),
+        ToolParameter(name="issue_type", type="string", description="price_discrepancy|date_mismatch|field_missing", required=False),
+        ToolParameter(name="limit", type="integer", description="最多返回条数，默认 20", required=False),
+    ],
+    handler=_handle_get_data_quality_view,
+    category="site_read",
+    policy=_STOCK_READ_POLICY,
+)
+
+get_notification_delivery_view = ToolDefinition(
+    name="get_notification_delivery_view",
+    description="读取通知投递回执（报告/系统错误等路由），可按路由、渠道、成功与否筛选。",
+    parameters=[
+        ToolParameter(name="route_type", type="string", description="路由类型，如 report/system_error/default", required=False),
+        ToolParameter(name="channel", type="string", description="渠道，如 feishu/email", required=False),
+        ToolParameter(name="success", type="boolean", description="只看成功/失败", required=False),
+        ToolParameter(name="limit", type="integer", description="最多返回条数，默认 20", required=False),
+    ],
+    handler=_handle_get_notification_delivery_view,
+    category="site_read",
+    policy=_READ_POLICY,
+)
+
 
 ALL_SITE_READ_TOOLS = [
     get_history_view,
@@ -996,4 +1128,7 @@ ALL_SITE_READ_TOOLS = [
     get_portfolio_ledger_view,
     get_intelligence_view,
     get_scheduler_view,
+    get_usage_view,
+    get_data_quality_view,
+    get_notification_delivery_view,
 ]

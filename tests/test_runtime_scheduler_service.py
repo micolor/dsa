@@ -427,6 +427,7 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             agent_event_monitor_interval_minutes=7,
             signal_outcome_auto_eval_enabled=False,
             fund_nav_review_auto_eval_enabled=False,
+            agent_proactive_retention_days=0,
         )
 
         service = RuntimeSchedulerService(config_provider=lambda: config)
@@ -934,6 +935,44 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             self.assertIsNotNone(status["last_success_at"])
             self.assertIsNone(status["last_failed_at"])
             self.assertEqual(status["consecutive_failures"], 0)
+
+
+class PaperAutoTradeTaskTests(unittest.TestCase):
+    def _service(self, config):
+        service = RuntimeSchedulerService(
+            config_provider=lambda: config,
+            owns_schedule=True,
+        )
+        service._reload_config = lambda: config
+        return service
+
+    def test_registers_once_when_paper_auto_trade_is_enabled(self):
+        config = SimpleNamespace(
+            paper_trading_enabled=True,
+            paper_auto_trade_enabled=True,
+            paper_auto_trade_time="16:30",
+            paper_auto_trade_lookback_days=7,
+        )
+        service = self._service(config)
+
+        tasks = service._current_paper_auto_trade_background_tasks(config)
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["name"], "paper_auto_trade")
+        self.assertEqual(tasks[0]["interval_seconds"], 1800)
+        self.assertTrue(tasks[0]["run_immediately"])
+
+    def test_disabled_when_paper_trading_or_auto_trade_is_off(self):
+        for paper_trading, auto_trade in ((False, True), (True, False)):
+            config = SimpleNamespace(
+                paper_trading_enabled=paper_trading,
+                paper_auto_trade_enabled=auto_trade,
+                paper_auto_trade_time="16:30",
+                paper_auto_trade_lookback_days=7,
+            )
+            service = self._service(config)
+
+            self.assertEqual(service._current_paper_auto_trade_background_tasks(config), [])
 
 
 if __name__ == "__main__":

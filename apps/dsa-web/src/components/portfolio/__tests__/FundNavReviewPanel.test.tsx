@@ -152,10 +152,29 @@ describe('FundNavReviewPanel', () => {
     expect(within(ledger).getByText('003095')).toBeInTheDocument();
     expect(within(ledger).getByText('+2.50%')).toBeInTheDocument();
     expect(within(ledger).getByText('-1.20%')).toBeInTheDocument();
+    // 中文市场惯例：正收益红、回撤（损失）红。
+    expect(within(ledger).getByText('+2.50%')).toHaveClass('text-danger');
+    expect(within(ledger).getByText('-1.20%')).toHaveClass('text-danger');
 
     const monthly = screen.getByRole('table', { name: '月度复盘' });
     expect(within(monthly).getByText('2024-01')).toBeInTheDocument();
     expect(within(monthly).getByText('50.00%')).toBeInTheDocument();
+  });
+
+  it('colors a negative return green but keeps drawdown red', async () => {
+    list.mockResolvedValue({
+      items: [makeItem({ navReturnPct: -2.5, restoredReturnPct: -2.5 })],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+
+    render(<FundNavReviewPanel />);
+    expand();
+
+    const ledger = await screen.findByRole('table', { name: '复盘台账' });
+    expect(within(ledger).getByText('-2.50%')).toHaveClass('text-success');
+    expect(within(ledger).getByText('-1.20%')).toHaveClass('text-danger');
   });
 
   it('shows the empty state when no anchors exist yet', async () => {

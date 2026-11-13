@@ -108,5 +108,55 @@ class TestStageStreamFilter(unittest.TestCase):
         self.assertTrue(any(e["type"] == "thinking" for e in received))
 
 
+class TestStageDoneSummary(unittest.TestCase):
+    """中间阶段的结论随 stage_done 下发给前端「分析过程」区域。"""
+
+    def _result(self, agent_name, reasoning, signal="buy", confidence=0.72):
+        from src.agent.protocols import AgentOpinion
+
+        return StageResult(
+            stage_name=agent_name,
+            status=StageStatus.COMPLETED,
+            opinion=AgentOpinion(
+                agent_name=agent_name,
+                signal=signal,
+                confidence=confidence,
+                reasoning=reasoning,
+            ),
+        )
+
+    def test_intermediate_stage_summary_is_exposed(self):
+        fields = AgentOrchestrator._stage_summary_fields(
+            "technical",
+            self._result("technical", "均线多头排列，量能温和放大。"),
+        )
+        self.assertEqual(fields["signal"], "buy")
+        self.assertEqual(fields["confidence"], 0.72)
+        self.assertEqual(fields["summary"], "均线多头排列，量能温和放大。")
+
+    def test_summary_is_truncated(self):
+        fields = AgentOrchestrator._stage_summary_fields(
+            "intel",
+            self._result("intel", "长" * 900),
+        )
+        self.assertEqual(len(fields["summary"]), 400)
+
+    def test_decision_stage_never_echoes_the_answer(self):
+        # chat 模式下 decision 的 reasoning 就是最终答复，重复下发会让
+        # 「分析过程」里再出现一遍回答。
+        fields = AgentOrchestrator._stage_summary_fields(
+            "decision",
+            self._result("decision", "这是最终答复"),
+        )
+        self.assertEqual(fields, {})
+
+    def test_stage_without_opinion_adds_nothing(self):
+        fields = AgentOrchestrator._stage_summary_fields(
+            "risk",
+            StageResult(stage_name="risk", status=StageStatus.FAILED),
+        )
+        self.assertEqual(fields, {})
+
+
 if __name__ == "__main__":
     unittest.main()

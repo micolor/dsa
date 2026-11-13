@@ -193,9 +193,21 @@ const TokenUsagePage: React.FC = () => {
         {loading && !dashboard ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="h-28 animate-pulse rounded-2xl border border-border/70 bg-card/60" />
+              <div key={index} className="h-28 animate-pulse glass-card !border-transparent" />
             ))}
           </div>
+        ) : null}
+
+        {!loading && !dashboard && error ? (
+          <EmptyState
+            title={t('usage.error.title')}
+            description={error.message || t('usage.error.message')}
+            action={(
+              <Button type="button" variant="secondary" onClick={() => void loadDashboard()}>
+                {t('common.retry')}
+              </Button>
+            )}
+          />
         ) : null}
 
         {dashboard ? (

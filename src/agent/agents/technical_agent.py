@@ -14,7 +14,7 @@ import logging
 from typing import Optional
 
 from src.agent.agents.base_agent import BaseAgent
-from src.agent.protocols import AgentContext, AgentOpinion
+from src.agent.protocols import AgentContext, AgentOpinion, normalize_model_confidence
 from src.agent.runner import try_parse_json
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ Return **only** a JSON object (no markdown fences):
         return AgentOpinion(
             agent_name=self.agent_name,
             signal=parsed.get("signal", "hold"),
-            confidence=float(parsed.get("confidence", 0.5)),
+            confidence=normalize_model_confidence(parsed.get("confidence")),
             reasoning=parsed.get("reasoning", ""),
             key_levels={
                 k: float(v) for k, v in parsed.get("key_levels", {}).items()

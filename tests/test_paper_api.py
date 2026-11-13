@@ -77,6 +77,16 @@ def client(tmp_path):
             os.environ["DATABASE_PATH"] = old_database_path
 
 
+def test_auto_trade_endpoint_runs_a_pass(client):
+    response = client.post("/api/v1/paper/auto-trade")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["signals_seen"] == 0
+    assert payload["processed"] == 0
+
+
 def test_reset_opens_a_new_account_with_the_supplied_capital(client):
     first = client.get("/api/v1/paper/account")
     assert first.status_code == 200

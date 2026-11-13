@@ -81,6 +81,27 @@ WEB_SETTINGS_HIDDEN_FROM_UI = {
     "PROXY_PORT",
 }
 
+# Fields a normal user is expected to configure. Everything else is still
+# available, but only in the settings page's "all settings" view (and to the
+# Ask-Stock agent), so the default view stays focused on the main path:
+# watchlist -> model -> one notification channel -> schedule/report basics.
+_BASIC_SETTING_KEYS = frozenset({
+    "STOCK_LIST",
+    "TRADING_DAY_CHECK_ENABLED",
+    "MARKET_REVIEW_ENABLED",
+    "MARKET_REVIEW_REGION",
+    "GENERATION_BACKEND",
+    "LITELLM_MODEL",
+    "LLM_TEMPERATURE",
+    "TUSHARE_TOKEN",
+    "REPORT_TYPE",
+    "REPORT_LANGUAGE",
+    "REPORT_SUMMARY_ONLY",
+    "SINGLE_STOCK_NOTIFY",
+    "MERGE_EMAIL_NOTIFICATION",
+    "PAPER_AUTO_TRADE_ENABLED",
+})
+
 _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "STOCK_LIST": {
         "title": "Stock List",
@@ -3634,6 +3655,78 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "PAPER_AUTO_TRADE_ENABLED": {
+        "title": "Paper Trading Auto Trade",
+        "description": "Run one daily paper-trading pass that consumes active decision signals. Sell/reduce signals are processed first, then buy/add signals by score; hold/watch/avoid signals are ignored. Only simulated trades are affected.",
+        "category": "base",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "true",
+        "options": [],
+        "validation": {},
+        "display_order": 54,
+        "help_key": "settings.base.PAPER_AUTO_TRADE_ENABLED",
+        "examples": [
+            "PAPER_AUTO_TRADE_ENABLED=true",
+            "PAPER_AUTO_TRADE_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "PAPER_AUTO_TRADE_TIME": {
+        "title": "Paper Auto Trade Time",
+        "description": "Asia/Shanghai time for the daily paper-trading pass. Runs once per trading day; missed data is retried on the next pass.",
+        "category": "base",
+        "data_type": "time",
+        "ui_control": "time",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "16:30",
+        "options": [],
+        "validation": {},
+        "display_order": 55,
+        "help_key": "settings.base.PAPER_AUTO_TRADE_TIME",
+        "examples": ["PAPER_AUTO_TRADE_TIME=16:30"],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "PAPER_AUTO_TRADE_LOOKBACK_DAYS": {
+        "title": "Paper Auto Trade Lookback",
+        "description": "Only active signals created within this many days are auto-traded. Older signals stay available for manual backfill.",
+        "category": "base",
+        "data_type": "integer",
+        "ui_control": "number",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "7",
+        "options": [],
+        "validation": {"min": 1, "max": 365},
+        "display_order": 56,
+        "help_key": "settings.base.PAPER_AUTO_TRADE_LOOKBACK_DAYS",
+        "examples": ["PAPER_AUTO_TRADE_LOOKBACK_DAYS=7"],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+        ],
+        "warning_codes": [],
+    },
     "DEBUG": {
         "title": "Debug Mode",
         "description": "Enable debug mode with verbose logging.",
@@ -4469,6 +4562,305 @@ _DOC_FULL_GUIDE_ENV = [
     },
 ]
 
+_DOC_PROACTIVE_ASSISTANT = [
+    {
+        "label": "主动助手总览",
+        "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/proactive-assistant.md",
+    },
+]
+
+
+def _proactive_field(
+    title: str,
+    description: str,
+    data_type: str,
+    ui_control: str,
+    default_value: str,
+    *,
+    options: Optional[List[Dict[str, str]]] = None,
+    validation: Optional[Dict[str, Any]] = None,
+    display_order: int = 80,
+) -> Dict[str, Any]:
+    return {
+        "title": title,
+        "description": description,
+        "category": "agent",
+        "data_type": data_type,
+        "ui_control": ui_control,
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": default_value,
+        "options": options or [],
+        "validation": validation or {},
+        "display_order": display_order,
+        "help_key": "settings.agent.proactive_assistant",
+        "examples": [],
+        "docs": _DOC_PROACTIVE_ASSISTANT,
+        "warning_codes": [],
+    }
+
+
+_FIELD_DEFINITIONS.update({
+    "AGENT_CHAT_INTENT_ROUTING_ENABLED": _proactive_field(
+        "Chat Intent Routing",
+        "Route stock-analysis turns to the multi-agent pipeline and other turns to the general single Agent.",
+        "boolean", "switch", "true", display_order=72,
+    ),
+    "AGENT_PROACTIVE_BRIEF_ENABLED": _proactive_field(
+        "Proactive Daily Brief",
+        "Generate the proactive daily brief before/after market and write it into the 助手日报 session.",
+        "boolean", "switch", "false", display_order=73,
+    ),
+    "AGENT_PROACTIVE_BRIEF_TIMES": _proactive_field(
+        "Daily Brief Times",
+        "Comma-separated Asia/Shanghai times for the proactive daily brief.",
+        "string", "text", "08:30,15:30", display_order=74,
+    ),
+    "AGENT_PROACTIVE_BRIEF_WATCHLIST_LIMIT": _proactive_field(
+        "Brief Watchlist Limit",
+        "Maximum watchlist symbols checked by the daily brief; positions are not limited.",
+        "integer", "number", "20",
+        validation={"min": 1, "max": 100}, display_order=75,
+    ),
+    "AGENT_PROACTIVE_BRIEF_NOTIFY": _proactive_field(
+        "Push Daily Brief",
+        "Push the proactive daily brief to configured notification channels.",
+        "boolean", "switch", "false", display_order=76,
+    ),
+    "AGENT_EVENT_ANALYSIS_ENABLED": _proactive_field(
+        "Event-Driven Agent",
+        "Analyse alerts, MA20 breaks, large moves, volume spikes and position losses with one short LLM call.",
+        "boolean", "switch", "false", display_order=77,
+    ),
+    "AGENT_EVENT_ANALYSIS_INTERVAL_MINUTES": _proactive_field(
+        "Event Scan Interval",
+        "Minutes between event scans.",
+        "integer", "number", "10",
+        validation={"min": 1, "max": 1440}, display_order=78,
+    ),
+    "AGENT_EVENT_ANALYSIS_MAX_PER_RUN": _proactive_field(
+        "Event Max Per Run",
+        "Maximum number of events analysed in one scan.",
+        "integer", "number", "3",
+        validation={"min": 1, "max": 10}, display_order=79,
+    ),
+    "AGENT_EVENT_ANALYSIS_NOTIFY": _proactive_field(
+        "Push Event Alerts",
+        "Push event-driven analyses to configured notification channels.",
+        "boolean", "switch", "false", display_order=80,
+    ),
+    "AGENT_EVENT_ANALYSIS_TIMEOUT_S": _proactive_field(
+        "Event LLM Timeout",
+        "Timeout in seconds for the event-analysis LLM call.",
+        "integer", "number", "60",
+        validation={"min": 10, "max": 600}, display_order=81,
+    ),
+    "AGENT_RISK_PROFILE_HORIZON": _proactive_field(
+        "Risk Horizon",
+        "Investment horizon used by chat, event analysis and weekly review.",
+        "string", "select", "medium",
+        options=[
+            {"label": "短期", "value": "short"},
+            {"label": "中期", "value": "medium"},
+            {"label": "长期", "value": "long"},
+        ],
+        display_order=82,
+    ),
+    "AGENT_RISK_PROFILE_MAX_DRAWDOWN_PCT": _proactive_field(
+        "Risk Max Drawdown",
+        "Maximum tolerated portfolio drawdown percentage.",
+        "number", "number", "15",
+        validation={"min": 1, "max": 100}, display_order=83,
+    ),
+    "AGENT_RISK_PROFILE_MAX_POSITION_PCT": _proactive_field(
+        "Risk Max Position",
+        "Maximum percentage of total equity allowed in a single position.",
+        "number", "number", "35",
+        validation={"min": 1, "max": 100}, display_order=84,
+    ),
+    "AGENT_RISK_PROFILE_NOTES": _proactive_field(
+        "Risk Notes",
+        "Free-text risk preferences appended to the chat prompt.",
+        "string", "textarea", "", display_order=85,
+    ),
+    "AGENT_RISK_PROFILE_ACCOUNTS_JSON": _proactive_field(
+        "Per-Account Risk Profiles",
+        "JSON object keyed by portfolio account id overriding the global profile, e.g. {\"2\":{\"max_position_pct\":60}}.",
+        "json", "textarea", "", display_order=85,
+    ),
+    "AGENT_WEEKLY_REVIEW_ENABLED": _proactive_field(
+        "Weekly Review",
+        "Generate the weekly review (account, decision outcomes, risk profile, movers, alerts).",
+        "boolean", "switch", "false", display_order=86,
+    ),
+    "AGENT_WEEKLY_REVIEW_DAY": _proactive_field(
+        "Weekly Review Day",
+        "Weekday for the weekly review: 0=Monday ... 6=Sunday.",
+        "integer", "number", "4",
+        validation={"min": 0, "max": 6}, display_order=87,
+    ),
+    "AGENT_WEEKLY_REVIEW_TIME": _proactive_field(
+        "Weekly Review Time",
+        "Asia/Shanghai time for the weekly review.",
+        "string", "time", "15:30", display_order=88,
+    ),
+    "AGENT_WEEKLY_REVIEW_NOTIFY": _proactive_field(
+        "Push Weekly Review",
+        "Push the weekly review to configured notification channels.",
+        "boolean", "switch", "false", display_order=89,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_ENABLED": _proactive_field(
+        "Opportunity Scan",
+        "Generate a candidate shortlist from the latest screening run and hot themes.",
+        "boolean", "switch", "false", display_order=90,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_TIMES": _proactive_field(
+        "Opportunity Scan Times",
+        "Comma-separated Asia/Shanghai times for the opportunity scan.",
+        "string", "text", "08:45,15:45", display_order=91,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_MAX_CANDIDATES": _proactive_field(
+        "Opportunity Candidates",
+        "Maximum number of candidates in the opportunity scan.",
+        "integer", "number", "5",
+        validation={"min": 1, "max": 20}, display_order=92,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_MAX_AGE_HOURS": _proactive_field(
+        "Opportunity Max Age",
+        "Warn when the latest screening snapshot is older than this many hours.",
+        "integer", "number", "72",
+        validation={"min": 1, "max": 720}, display_order=93,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_NOTIFY": _proactive_field(
+        "Push Opportunity Scan",
+        "Push the opportunity scan to configured notification channels.",
+        "boolean", "switch", "false", display_order=94,
+    ),
+    "AGENT_PROACTIVE_QUIET_HOURS": _proactive_field(
+        "Proactive Quiet Hours",
+        "Skip proactive push notifications inside this Asia/Shanghai range, e.g. 22:00-08:00; empty disables quiet hours.",
+        "string", "text", "", display_order=95,
+    ),
+    "AGENT_PROACTIVE_MARKET_GUARD": _proactive_field(
+        "Proactive Market Guard",
+        "Only run proactive tasks on A-share trading days; event analysis is further limited to the session and a short post-close window.",
+        "boolean", "switch", "true", display_order=96,
+    ),
+    "AGENT_EVENT_ANALYSIS_MAX_PER_DAY": _proactive_field(
+        "Event Daily LLM Cap",
+        "Maximum event analyses per day; 0 disables the cap. Manual runs are not capped.",
+        "integer", "number", "20",
+        validation={"min": 0, "max": 500}, display_order=97,
+    ),
+    "AGENT_PROACTIVE_RETENTION_DAYS": _proactive_field(
+        "Proactive Retention Days",
+        "Delete proactive run records and inbox read markers older than this many days; 0 keeps them forever.",
+        "integer", "number", "90",
+        validation={"min": 0, "max": 3650}, display_order=98,
+    ),
+    "AGENT_EVENT_ANALYSIS_NEWS_ENABLED": _proactive_field(
+        "Event News Context",
+        "Include up to three recent stock-news items in event analysis when a news source is available.",
+        "boolean", "switch", "true", display_order=99,
+    ),
+    "AGENT_PROACTIVE_SCAN_CONCURRENCY": _proactive_field(
+        "Proactive Scan Concurrency",
+        "Thread pool size used when the daily brief/event scan fetches quotes and daily bars.",
+        "integer", "number", "4",
+        validation={"min": 1, "max": 16}, display_order=100,
+    ),
+    "AGENT_DATA_REFRESH_ENABLED": _proactive_field(
+        "Independent Data Refresh",
+        "Refresh the screening snapshot and hotspot cache before opportunity scans.",
+        "boolean", "switch", "false", display_order=101,
+    ),
+    "AGENT_DATA_REFRESH_TIMES": _proactive_field(
+        "Data Refresh Times",
+        "Comma-separated Asia/Shanghai times for the independent data refresh.",
+        "string", "text", "08:40,15:40", display_order=102,
+    ),
+    "AGENT_DATA_REFRESH_STRATEGY": _proactive_field(
+        "Data Refresh Strategy",
+        "Screening strategy used by the independent data refresh.",
+        "string", "text", "capital_heat", display_order=103,
+    ),
+    "AGENT_DATA_REFRESH_MARKET": _proactive_field(
+        "Data Refresh Market",
+        "Screening market used by the independent data refresh.",
+        "string", "text", "cn", display_order=104,
+    ),
+    "AGENT_DATA_REFRESH_MAX_RESULTS": _proactive_field(
+        "Data Refresh Max Results",
+        "Maximum candidates requested by the independent screening refresh.",
+        "integer", "number", "20",
+        validation={"min": 1, "max": 100}, display_order=105,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_REFRESH": _proactive_field(
+        "Refresh Stale Screening",
+        "Run screening once when the latest snapshot is missing or older than the max age. Opt-in; it uses network and can take minutes.",
+        "boolean", "switch", "false", display_order=96,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_REFRESH_STRATEGY": _proactive_field(
+        "Refresh Strategy",
+        "Screening strategy used by the optional opportunity auto-refresh.",
+        "string", "text", "capital_heat", display_order=97,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_REFRESH_MARKET": _proactive_field(
+        "Refresh Market",
+        "Screening market used by the optional opportunity auto-refresh.",
+        "string", "text", "cn", display_order=98,
+    ),
+    "AGENT_OPPORTUNITY_SCAN_REFRESH_MAX_RESULTS": _proactive_field(
+        "Refresh Max Results",
+        "Maximum candidates requested by the optional screening refresh.",
+        "integer", "number", "20",
+        validation={"min": 1, "max": 100}, display_order=99,
+    ),
+    "AGENT_EVENT_ANALYSIS_DIGEST_NOTIFY": _proactive_field(
+        "Digest Event Push",
+        "Merge multiple events from one run into a single digest push; off sends one push per event.",
+        "boolean", "switch", "false", display_order=106,
+    ),
+    "AGENT_PROACTIVE_NOTIFY_MIN_SEVERITY": _proactive_field(
+        "Proactive Push Min Severity",
+        "Lowest severity that triggers a push: info, warning or critical.",
+        "string", "select", "info",
+        options=[
+            {"value": "info", "label": "info"},
+            {"value": "warning", "label": "warning"},
+            {"value": "critical", "label": "critical"},
+        ], display_order=107,
+    ),
+    "AGENT_PROACTIVE_NOTIFY_ROUTE": _proactive_field(
+        "Proactive Push Route",
+        "Notification route type used by proactive pushes (e.g. alert); empty keeps the default behavior.",
+        "string", "text", "", display_order=108,
+    ),
+    "AGENT_PROACTIVE_NOTIFY_RETRIES": _proactive_field(
+        "Proactive Push Retries",
+        "Retry count for a failed proactive push (excluding the first attempt).",
+        "integer", "number", "1",
+        validation={"min": 0, "max": 5}, display_order=109,
+    ),
+    "AGENT_PROACTIVE_NOTIFY_BASE_URL": _proactive_field(
+        "Proactive Push Base URL",
+        "Base URL appended to proactive pushes as an in-app deep link, e.g. https://your-dsa-host; empty adds no link.",
+        "string", "text", "", display_order=110,
+    ),
+    "SCHEDULED_TASKS_ENABLED": _proactive_field(
+        "Custom Scheduled Tasks",
+        "Enable the user-defined scheduled tasks calendar and its one-minute dispatch loop.",
+        "boolean", "switch", "true", display_order=111,
+    ),
+})
+
+# Every visible Settings field needs a concrete example; keep one generated
+# example per proactive field instead of duplicating it in each definition.
+for _key, _field in _FIELD_DEFINITIONS.items():
+    if _field.get("help_key") == "settings.agent.proactive_assistant":
+        _field["examples"] = [f"{_key}={_field['default_value']}"]
+
 _DOC_FULL_GUIDE_SEARCH = [
     {
         "label": "完整指南：搜索服务配置",
@@ -4997,6 +5389,7 @@ def get_field_definition(key: str, value_hint: Optional[str] = None) -> Dict[str
         if key_upper in _FIELD_HELP_METADATA:
             field.update(deepcopy(_FIELD_HELP_METADATA[key_upper]))
         field["key"] = key_upper
+        field["tier"] = "basic" if key_upper in _BASIC_SETTING_KEYS else "advanced"
         validation = deepcopy(field.get("validation") or {})
         option_values = _extract_option_values(field.get("options", []))
         if field.get("ui_control") == "select" and option_values and "enum" not in validation:
@@ -5016,6 +5409,7 @@ def get_field_definition(key: str, value_hint: Optional[str] = None) -> Dict[str
         "is_sensitive": _is_sensitive_key(key_upper),
         "is_required": False,
         "is_editable": True,
+        "tier": "advanced",
         "default_value": None,
         "options": [],
         "validation": {},

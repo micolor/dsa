@@ -112,6 +112,15 @@ describe('TokenUsagePage', () => {
     });
   });
 
+  it('shows a page-level error and retry instead of a blank page', async () => {
+    get.mockRejectedValueOnce(new Error('usage backend down'));
+
+    renderPage();
+
+    expect(await screen.findByText('Token 用量加载失败')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  });
+
   it('renders English copy when the UI language is English', async () => {
     window.localStorage.setItem('dsa.uiLanguage', 'en');
 

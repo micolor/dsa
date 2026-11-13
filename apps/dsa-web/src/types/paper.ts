@@ -80,6 +80,23 @@ export interface PaperValuation {
   returnPct: number;
 }
 
+export interface PaperAutoTradeResult {
+  status: string;
+  accountId: number;
+  lookbackDays: number;
+  signalsSeen: number;
+  processed: number;
+  skipped: number;
+  unavailable: number;
+  results: Array<{
+    signalId: number;
+    stockCode: string;
+    action: string;
+    status: string;
+    disposition?: string | null;
+  }>;
+}
+
 export interface BackfillResult {
   accountId: number;
   fromDate: string;

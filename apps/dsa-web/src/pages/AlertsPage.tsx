@@ -13,6 +13,8 @@ import {
 } from '../components/alerts/AlertRuleList';
 import { AlertTriggerHistory } from '../components/alerts/AlertTriggerHistory';
 import { EventFactList } from '../components/alerts/EventFactList';
+import { DataQualityCard } from '../components/alerts/DataQualityCard';
+import { NotificationDeliveryCard } from '../components/alerts/NotificationDeliveryCard';
 import { filterEventTriggers } from '../components/alerts/eventFacts';
 import { ApiErrorAlert, AppPage, Dialog, EmptyState, Loading, Pagination, useToastSync } from '../components/common';
 import { DashboardPanelHeader } from '../components/dashboard';
@@ -123,10 +125,41 @@ function formatNotificationStatus(notification: AlertNotificationItem, labels: R
   return labels.failed ?? 'Failed';
 }
 
-type AlertsTabKey = 'rules' | 'history' | 'events' | 'notifications';
+type AlertsTabKey = 'rules' | 'history' | 'events' | 'notifications' | 'deliveries' | 'data-quality';
+type NotificationView = 'attempts' | 'deliveries';
+
+const ALERTS_TAB_KEYS: AlertsTabKey[] = [
+  'rules',
+  'history',
+  'events',
+  'notifications',
+  'deliveries',
+  'data-quality',
+];
+
+/**
+ * `?tab=deliveries` is kept as an alias for old links (settings / bookmarks):
+ * it now opens the merged "通知记录" tab on the all-deliveries subview.
+ */
+function resolveInitialAlertsState(): { tab: AlertsTabKey; notificationView: NotificationView } {
+  if (typeof window === 'undefined') {
+    return { tab: 'rules', notificationView: 'attempts' };
+  }
+  const requested = new URLSearchParams(window.location.search).get('tab');
+  if (requested === 'deliveries') {
+    return { tab: 'notifications', notificationView: 'deliveries' };
+  }
+  return {
+    tab: ALERTS_TAB_KEYS.includes(requested as AlertsTabKey)
+      ? (requested as AlertsTabKey)
+      : 'rules',
+    notificationView: 'attempts',
+  };
+}
+
 
 const AlertsPage: React.FC = () => {
-  const { language } = useUiLanguage();
+  const { language, t } = useUiLanguage();
   const text = ALERT_PAGE_TEXT[language];
   const dryRunLabels = ALERT_DRY_RUN_STATUS_LABELS[language];
   const recordLabels = ALERT_TRIGGER_STATUS_LABELS[language];
@@ -137,7 +170,8 @@ const AlertsPage: React.FC = () => {
     { key: 'rules', label: text.tabsRules },
     { key: 'history', label: text.tabsHistory },
     { key: 'events', label: text.tabsEvents },
-    { key: 'notifications', label: text.tabsNotifications },
+    { key: 'notifications', label: text.tabsNotificationRecords },
+    { key: 'data-quality', label: text.tabsDataQuality },
   ];
 
   useEffect(() => {
@@ -175,7 +209,11 @@ const AlertsPage: React.FC = () => {
   const [editingRule, setEditingRule] = useState<AlertRuleItem | null>(null);
   const [busyRule, setBusyRule] = useState<AlertRuleBusyState | null>(null);
   const [testResult, setTestResult] = useState<AlertRuleTestResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<AlertsTabKey>('rules');
+  const [initialAlertsState] = useState(resolveInitialAlertsState);
+  const [activeTab, setActiveTab] = useState<AlertsTabKey>(initialAlertsState.tab);
+  const [notificationView, setNotificationView] = useState<NotificationView>(
+    initialAlertsState.notificationView,
+  );
 
   // 页面级提示统一走全局右上角通道：状态在就弹出，状态清了（或页面卸载）自动撤下。
   // 页面自己不再渲染浮层，于是外形和关闭/自动消失语义不必在这里重复一遍。
@@ -345,10 +383,14 @@ const AlertsPage: React.FC = () => {
   }, [activeTab, loadTriggers]);
 
   useEffect(() => {
-    if (activeTab !== 'notifications' || notificationsLoadedRef.current) return;
+    if (
+      activeTab !== 'notifications'
+      || notificationView !== 'attempts'
+      || notificationsLoadedRef.current
+    ) return;
     notificationsLoadedRef.current = true;
     void loadNotifications(1);
-  }, [activeTab, loadNotifications]);
+  }, [activeTab, loadNotifications, notificationView]);
 
   useEffect(() => {
     if (activeTab !== 'events' || eventsLoadedRef.current) return;
@@ -412,7 +454,7 @@ const AlertsPage: React.FC = () => {
   return (
     <AppPage className="space-y-5">
       <div className="flex min-h-full flex-col gap-4">
-        <div className="grid grid-cols-4 gap-1 rounded-xl border border-subtle bg-base/40 p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-xl border border-subtle bg-base/40 p-1 sm:grid-cols-3 lg:grid-cols-6">
           {tabs.map((tab) => {
             const selected = activeTab === tab.key;
             return (
@@ -484,6 +526,39 @@ const AlertsPage: React.FC = () => {
 
         {activeTab === 'notifications' ? (
           <>
+            <div
+              role="group"
+              aria-label={text.tabsNotificationRecords}
+              className="mb-3 inline-flex items-center gap-1 rounded-xl border border-border/60 bg-elevated p-0.5"
+            >
+              <button
+                type="button"
+                aria-pressed={notificationView === 'attempts'}
+                onClick={() => setNotificationView('attempts')}
+                className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                  notificationView === 'attempts'
+                    ? 'bg-primary/15 font-medium text-primary'
+                    : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                }`}
+              >
+                {text.notificationViewAttempts}
+              </button>
+              <button
+                type="button"
+                aria-pressed={notificationView === 'deliveries'}
+                onClick={() => setNotificationView('deliveries')}
+                className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                  notificationView === 'deliveries'
+                    ? 'bg-primary/15 font-medium text-primary'
+                    : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                }`}
+              >
+                {text.notificationViewDeliveries}
+              </button>
+            </div>
+            {notificationView === 'deliveries' ? (
+              <NotificationDeliveryCard t={t} language={language} disabled={false} />
+            ) : (
             <section className="flex flex-1 flex-col glass-card !border-transparent p-4 md:p-5">
               <DashboardPanelHeader
                 className="mb-3"
@@ -537,8 +612,11 @@ const AlertsPage: React.FC = () => {
                 </>
               ) : null}
             </section>
+            )}
           </>
         ) : null}
+
+        {activeTab === 'data-quality' ? <DataQualityCard t={t} disabled={false} /> : null}
       </div>
 
       <Dialog

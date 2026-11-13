@@ -182,6 +182,43 @@ def test_litellm_multi_chat_keeps_existing_orchestrator_factory() -> None:
     build_existing.assert_called_once()
 
 
+def test_multi_chat_with_intent_routing_wraps_single_and_multi_executors() -> None:
+    multi = object()
+    single = object()
+    config = SimpleNamespace(
+        agent_backend="auto",
+        agent_arch="multi",
+        agent_chat_intent_routing_enabled=True,
+        agent_orchestrator_timeout_s=600,
+    )
+    with patch("src.agent.factory.build_agent_executor", return_value=multi), \
+         patch("src.agent.factory._build_single_agent_chat_executor", return_value=single):
+        from src.agent.factory import build_routed_chat_executor
+        from src.agent.routed_chat_executor import RoutedAgentChatExecutor
+
+        executor = build_routed_chat_executor(config, skills=["bull_trend"])
+
+    assert isinstance(executor, RoutedAgentChatExecutor)
+    assert executor.multi_executor is multi
+    assert executor.single_executor is single
+
+
+def test_multi_chat_without_intent_routing_keeps_existing_orchestrator() -> None:
+    sentinel = object()
+    config = SimpleNamespace(
+        agent_backend="auto",
+        agent_arch="multi",
+        agent_chat_intent_routing_enabled=False,
+    )
+    with patch("src.agent.factory.build_agent_chat_executor", return_value=sentinel) as build_existing:
+        from src.agent.factory import build_routed_chat_executor
+
+        result = build_routed_chat_executor(config)
+
+    assert result is sentinel
+    build_existing.assert_called_once()
+
+
 def test_litellm_backend_matches_existing_runner_result() -> None:
     registry = ToolRegistry()
     direct_events = []
@@ -346,6 +383,10 @@ def test_production_codex_preparation_matches_the_three_phase6_tools(monkeypatch
         "get_portfolio_ledger_view",
         "get_intelligence_view",
         "get_scheduler_view",
+        "get_usage_view",
+        "get_data_quality_view",
+        "get_notification_delivery_view",
+        "get_scheduled_tasks_view",
     ]
     # Task tools submit background jobs and are deliberately not
     # cancellation_safe, so Codex must never see them.
@@ -359,6 +400,9 @@ def test_production_codex_preparation_matches_the_three_phase6_tools(monkeypatch
         "run_fund_nav_reviews",
         "run_signal_outcomes",
         "backfill_paper_signals",
+        "create_scheduled_task",
+        "set_scheduled_task_enabled",
+        "run_scheduled_task_now",
     ):
         assert task_tool not in _FakeTransport.last.thread_kwargs["tool_names"]
     instructions = _FakeTransport.last.thread_kwargs["developer_instructions"]

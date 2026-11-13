@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Badge, Card, JsonViewer, Tooltip } from '../common';
+import { Badge, Button, Card, JsonViewer, Tooltip } from '../common';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiLanguage, UiTextKey } from '../../i18n/uiText';
 import type {
@@ -478,22 +478,26 @@ export const DecisionSignalDetails: React.FC<DecisionSignalDetailsProps> = ({
           </div>
           {onFeedbackSubmit ? (
             <div className="flex flex-wrap gap-2">
-              <button
+              <Button
                 type="button"
-                className="btn-secondary !px-3 !py-1.5 !text-xs"
+                variant="secondary"
+                size="xsm"
+                className="text-xs"
                 disabled={feedbackSaving}
                 onClick={() => onFeedbackSubmit('useful')}
               >
                 {t('decisionSignals.feedback.useful')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn-secondary !px-3 !py-1.5 !text-xs"
+                variant="secondary"
+                size="xsm"
+                className="text-xs"
                 disabled={feedbackSaving}
                 onClick={() => onFeedbackSubmit('not_useful')}
               >
                 {t('decisionSignals.feedback.not_useful')}
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>

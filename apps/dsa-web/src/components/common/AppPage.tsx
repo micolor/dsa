@@ -9,7 +9,7 @@ interface AppPageProps {
 export const AppPage: React.FC<AppPageProps> = ({ children, className = '' }) => {
   return (
     <main className="h-full w-full">
-      <div className={cn('h-full overflow-y-auto px-4 pb-6 pt-4 md:px-6', className)}>
+      <div className={cn('h-full overflow-y-auto px-3 pb-4 pt-4 md:px-4', className)}>
         {children}
       </div>
     </main>

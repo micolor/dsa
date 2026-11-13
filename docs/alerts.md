@@ -183,7 +183,9 @@ P3 在 WebUI 中新增 `/alerts` 告警中心入口，让用户不需要直接�
 - 规则操作支持启用、停用、删除和一次性 dry-run 测试。
 - dry-run 测试只展示 `AlertRuleTestResponse` 已声明字段：规则 ID、状态、是否触发、观察值和消息；`threshold`、`data_source`、`data_timestamp` 等扩展诊断字段需要后端 schema 明确暴露后再展示。
 - 触发历史展示 P2 worker 已写入的 `triggered`、`skipped`、`degraded`、`failed` 记录；正常 `not_triggered` 仍不会写入历史。
-- 通知尝试区域只查询现有 `GET /api/v1/alerts/notifications`；由于 P2 运行时不写 per-channel notification attempt，当前通常显示“暂无通知尝试记录”空态，不把触发状态推断为通知投递结果。
+- “通知记录”页签内部分为「告警通知 / 全部投递」两个子视图：前者只查询 `GET /api/v1/alerts/notifications`；由于 P2 运行时不写 per-channel notification attempt，当前通常显示“暂无通知尝试记录”空态，不把触发状态推断为通知投递结果。
+- 「全部投递」子视图展示报告 / 系统错误等非告警路由的送达回执，可查询 `GET /api/v1/notifications/deliveries` 并按路由、状态、渠道筛选。旧链接 `/alerts?tab=deliveries` 仍可直达该子视图，系统设置页的「查看投递记录」继续使用它。
+- “数据质量”页签展示跨源一致性对账异常（价差、交易日、字段缺失），可查询 `GET /api/v1/data-quality/discrepancies` 并按市场、异常类型筛选；该列表已从系统设置迁出，`/alerts?tab=data-quality` 可直接打开。
 - Web 页面不暴露 `AGENT_EVENT_ALERT_RULES_JSON` 编辑入口，不自动迁移、删除或改写 legacy 配置。
 
 P3 不做：

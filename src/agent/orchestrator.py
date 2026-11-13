@@ -440,6 +440,37 @@ class AgentOrchestrator:
         return agent.run(ctx, **run_kwargs)
 
     @staticmethod
+    def _stage_summary_fields(agent_name: str, result: StageResult) -> Dict[str, Any]:
+        """Build the compact human-readable summary attached to ``stage_done``.
+
+        The chat UI shows each finished stage's conclusion while the remaining
+        stages are still running, so a user waiting on a long pipeline sees the
+        technical / intel / risk verdicts arrive one by one instead of nothing
+        until the final answer.  Only the parsed opinion is exposed here — the
+        raw model text is still never streamed to the answer bubble.
+
+        The decision stage is skipped on purpose: in chat mode its opinion
+        reasoning *is* the final answer, so echoing it here would duplicate the
+        reply inside the progress panel.
+        """
+        if agent_name in FINAL_ANSWER_STAGES:
+            return {}
+        opinion = getattr(result, "opinion", None)
+        if opinion is None:
+            return {}
+        fields: Dict[str, Any] = {}
+        signal = str(getattr(opinion, "signal", "") or "").strip()
+        if signal:
+            fields["signal"] = signal
+        confidence = getattr(opinion, "confidence", None)
+        if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+            fields["confidence"] = round(float(confidence), 2)
+        reasoning = str(getattr(opinion, "reasoning", "") or "").strip()
+        if reasoning:
+            fields["summary"] = reasoning[:400]
+        return fields
+
+    @staticmethod
     def _stage_progress_callback(
         agent_name: str,
         progress_callback: Optional[Callable],
@@ -836,6 +867,7 @@ class AgentOrchestrator:
                     status=result.status.value,
                     message=stage_done_message(agent.agent_name, result.status.value),
                     duration=result.duration_s,
+                    **self._stage_summary_fields(agent.agent_name, result),
                 ))
 
             if ctx.meta.get("response_mode") == "chat" and agent.agent_name == "decision":
@@ -1072,6 +1104,7 @@ class AgentOrchestrator:
                     status=result.status.value,
                     message=stage_done_message(result.stage_name, result.status.value),
                     duration=result.duration_s,
+                    **self._stage_summary_fields(result.stage_name, result),
                 ))
         return batch
 

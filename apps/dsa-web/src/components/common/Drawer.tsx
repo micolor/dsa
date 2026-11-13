@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { useEscTopLayer } from '../../hooks/useEscTopLayer';
 import { cn } from '../../utils/cn';
@@ -10,8 +11,11 @@ interface DrawerProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  eyebrow?: string;
   children: React.ReactNode;
   width?: string;
+  /** Extra classes for the panel, e.g. an opaque background in full-screen mode. */
+  panelClassName?: string;
   zIndex?: number;
   side?: 'left' | 'right';
   backdropClassName?: string;
@@ -24,8 +28,10 @@ export const Drawer: React.FC<DrawerProps> = ({
   isOpen,
   onClose,
   title,
+  eyebrow = 'DETAIL VIEW',
   children,
   width = 'max-w-2xl',
+  panelClassName,
   zIndex = 50,
   side = 'right',
   backdropClassName,
@@ -67,7 +73,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   const sidePositionClass = side === 'left' ? 'left-0 justify-start' : 'right-0 justify-end';
   const borderClass = side === 'left' ? 'border-r' : 'border-l';
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 overflow-hidden" style={{ zIndex }} role="presentation">
       {/* Backdrop */}
       <div
@@ -88,13 +94,14 @@ export const Drawer: React.FC<DrawerProps> = ({
             'relative flex w-full flex-col glass-surface-strong',
             borderClass,
             side === 'right' ? 'border-border/80' : 'border-border/70 shadow-2xl',
-            side === 'left' ? 'animate-slide-in-left' : 'animate-slide-in-right'
+            side === 'left' ? 'animate-slide-in-left' : 'animate-slide-in-right',
+            panelClassName,
           )}
         >
           <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
             {title ? (
               <div>
-                <span className="label-uppercase">DETAIL VIEW</span>
+                <span className="label-uppercase">{eyebrow}</span>
                 <h2 id={titleId} className="mt-1 text-lg font-semibold text-foreground">{title}</h2>
               </div>
             ) : <div />}
@@ -114,6 +121,7 @@ export const Drawer: React.FC<DrawerProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

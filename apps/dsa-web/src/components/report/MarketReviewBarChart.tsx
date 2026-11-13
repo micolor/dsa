@@ -8,7 +8,8 @@ import { cn } from '../../utils/cn';
  * - 无需 JS 测量尺寸，天然自适应容器，规避 recharts 首帧 null 导致的"弹开"闪烁；
  * - 小尺寸、多实例场景下比引入整套图表库更轻、更稳。
  *
- * 颜色统一使用项目语义 token：涨=`text-success`、跌=`text-danger`。
+ * 颜色遵循中文市场惯例：涨=红（`danger`）、跌=绿（`success`）。
+ * 与选股页的涨跌着色保持一致；不要用 success/danger 的英文语义去理解。
  */
 
 export interface MarketBarRow {
@@ -23,7 +24,7 @@ const clampPercent = (value: number): number => Math.min(Math.max(value, 0), 100
 
 /**
  * 上涨 / 下跌家数对比双段占比条。
- * 左段绿色（上涨）、右段红色（下跌），长度按两者之和归一化。
+ * 左段红色（上涨）、右段绿色（下跌），长度按两者之和归一化。
  */
 export const BreadthBar: React.FC<{
   upCount: number;
@@ -43,12 +44,12 @@ export const BreadthBar: React.FC<{
     >
       <div
         data-direction="up"
-        className="h-full bg-success transition-[width] duration-500"
+        className="h-full bg-danger transition-[width] duration-500"
         style={{ width: `${upPercent}%` }}
       />
       <div
         data-direction="down"
-        className="h-full bg-danger transition-[width] duration-500"
+        className="h-full bg-success transition-[width] duration-500"
         style={{ width: `${clampPercent(100 - upPercent)}%` }}
       />
     </div>
@@ -57,7 +58,7 @@ export const BreadthBar: React.FC<{
 
 /**
  * 指数涨跌幅迷你横向条（内嵌到表格"涨跌幅"单元格使用）。
- * 以中线 0 为原点：正向绿、负向红，长度按给定最大绝对值归一化。
+ * 以中线 0 为原点：正向红、负向绿，长度按给定最大绝对值归一化。
  * 紧凑条形，不重复渲染名称 / 百分比文本（由调用方表格已有文本承载，避免重复节点）。
  */
 export const MiniChangeBar: React.FC<{
@@ -76,7 +77,7 @@ export const MiniChangeBar: React.FC<{
         {value !== null && (
           <span
             data-direction={isNegative ? 'down' : 'up'}
-            className={cn('absolute inset-y-0 bg-success', isNegative && 'bg-danger')}
+            className={cn('absolute inset-y-0 bg-danger', isNegative && 'bg-success')}
             style={
               isNegative
                 ? { right: '50%', width: `${Math.max(width, 2)}%` }
@@ -92,7 +93,7 @@ export const MiniChangeBar: React.FC<{
 /**
  * 板块 / 概念 Top5 横向条组。
  * 每行：名称 + 按 `|changePct|` 归一化的条 + 涨跌幅文本。
- * `direction` 决定整组配色（top 组绿、bottom 组红），长度组内归一化。
+ * `direction` 决定整组配色（top 组红、bottom 组绿），长度组内归一化。
  */
 export const SectorBarList: React.FC<{
   rows: MarketBarRow[];
@@ -120,8 +121,8 @@ export const SectorBarList: React.FC<{
               <div
                 data-direction={direction}
                 className={cn(
-                  'absolute inset-y-0 left-0 bg-success transition-[width] duration-500',
-                  direction === 'down' && 'bg-danger',
+                  'absolute inset-y-0 left-0 bg-danger transition-[width] duration-500',
+                  direction === 'down' && 'bg-success',
                 )}
                 style={{ width: `${width}%` }}
               />
@@ -129,7 +130,7 @@ export const SectorBarList: React.FC<{
             <span
               className={cn(
                 'w-16 shrink-0 text-right tabular-nums text-secondary-text',
-                direction === 'up' ? 'text-success' : 'text-danger',
+                direction === 'up' ? 'text-danger' : 'text-success',
               )}
             >
               {row.label}

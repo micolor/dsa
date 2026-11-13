@@ -40,6 +40,7 @@ Web 展示必须把这些 wire value 映射为当前 UI 语言的用户可读标
 个股分析、技术评分 fallback、报告展示 fallback 与 `DecisionSignal` 提取共用 `decision-scale-v1` 口径。`decision_type` 只保留 `buy|hold|sell` 兼容统计；更细的可执行语义以八态 `action` 为准。
 
 - 用户侧可见面存在两类字段：`operation_advice` 保留文本口径（如“持有观察”），`action` 作为统一 8 态决策口径（如 `hold/watch/reduce`）用于风控、回测与列表展示。新生成或最终保存前重算的个股报告应优先让两者保持一致；历史记录或兼容载荷仍出现语义冲突时，默认以 `action` 为列表、回测、DecisionSignal 等结构化展示的优先字段，`operation_advice` 仅作说明文本保留。
+- 同一方向但粒度不同的复合建议按更温和的可执行动作解析：风控下调生成的「减仓/卖出（原建议已被风控下调）」解析为 `reduce`，`hold/watch` 组合解析为 `watch`；跨方向组合（如「买入或卖出」）仍返回空 `action`，不生成 DecisionSignal。
 
 | score | signal key | `action` | legacy `decision_type` | 语义 |
 | --- | --- | --- | --- | --- |

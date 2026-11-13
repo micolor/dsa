@@ -74,6 +74,9 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "get_intelligence_view": "读取情报视图",
     "get_config_view": "读取系统配置",
     "get_scheduler_view": "读取调度状态",
+    "get_usage_view": "读取 Token 用量",
+    "get_data_quality_view": "读取数据质量异常",
+    "get_notification_delivery_view": "读取通知投递记录",
     "manage_watchlist": "管理自选",
     "set_alert_rule_enabled": "启停告警规则",
     "dry_run_alert_rule": "预览告警规则",
@@ -91,6 +94,12 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "run_fund_nav_reviews": "评估基金复盘",
     "run_signal_outcomes": "评估信号后验",
     "backfill_paper_signals": "回填模拟盘信号",
+    "get_scheduled_tasks_view": "读取定时任务",
+    "create_scheduled_task": "创建定时任务",
+    "update_scheduled_task": "修改定时任务",
+    "set_scheduled_task_enabled": "启停定时任务",
+    "run_scheduled_task_now": "执行定时任务",
+    "propose_scheduled_task_delete": "生成定时任务删除提案",
 }
 
 logger = logging.getLogger(__name__)
@@ -494,9 +503,9 @@ async def send_chat_to_notification(request: SendChatRequest):
 
 def _build_executor(config, skills: Optional[List[str]] = None):
     """Build and return the backend-neutral Chat executor (sync helper)."""
-    from src.agent.factory import build_agent_chat_executor
+    from src.agent.factory import build_routed_chat_executor
 
-    return build_agent_chat_executor(config, skills=skills)
+    return build_routed_chat_executor(config, skills=skills)
 
 
 def _get_agent_chat_status(config) -> Dict[str, Any]:

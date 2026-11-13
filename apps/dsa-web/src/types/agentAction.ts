@@ -14,6 +14,10 @@ export const ACTION_EXECUTED_KINDS = [
   'paper_refresh',
   'intel_source_test',
   'llm_channel_test',
+  'scheduled_task_create',
+  'scheduled_task_update',
+  'scheduled_task_enable',
+  'scheduled_task_run',
 ] as const;
 
 export type ActionExecutedKind = (typeof ACTION_EXECUTED_KINDS)[number];

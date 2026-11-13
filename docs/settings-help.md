@@ -19,6 +19,25 @@
 - 英文文案保留同样结构，便于后续扩展语言切换。
 - 文案应解释用途、取值说明、影响范围、注意事项和相关文档，不应复制完整专题文档。
 
+## 基础 / 全部设置视图
+
+设置页默认只渲染 `tier=basic` 的字段，其他字段仍保留在 schema 和保存链路中，只是收进「全部设置」视图：
+
+- 后端 `src/core/config_registry.py` 的 `_BASIC_SETTING_KEYS` 是基础字段的唯一清单；未列入的注册字段和所有自动推断字段默认 `tier=advanced`。
+- `/api/v1/system/config/schema` 与配置项 schema 会返回 `tier`，前端 `SettingsPage` 按它过滤通用字段。
+- 通知渠道字段已由渠道选择器收窄，不参与 tier 过滤；这样基础视图下仍能填写当前选中渠道的凭据。
+- 搜索会越过 tier 直接命中字段；选择「全部设置」后会写入浏览器本地偏好 `dsa.settings.viewMode`。
+- 新增高频、普通用户必须配置的字段时，应同步评估是否加入 `_BASIC_SETTING_KEYS`；纯运维/调试字段不要加入。
+
+## 遗留配置别名的展示策略
+
+设置页对历史兼容键只保留一个可编辑入口，但**不删除、不改写运行时的优先级**：
+
+- 模型提供商 Key：每个 provider 只显示一个字段。`*_API_KEYS`（多 Key）优先；仅当多 Key 为空、旧版 `*_API_KEY` 已配置时才显示单 Key。运行时仍是多 Key > 单 Key，旧 `.env`、Docker secrets、GitHub Actions secrets 不受影响。
+- `SCHEDULE_TIME` / `SCHEDULE_TIMES` / `SCHEDULE_RUN_IMMEDIATELY` / `RUN_IMMEDIATELY`：由“定时任务”卡片统一维护，不在通用字段区重复展示。
+- `AGENT_GENERATION_BACKEND` 等历史生成后端别名：保留读取兼容，设置页不再平铺。
+- 删除或重命名这些 key 需要单独做 `.env` / Actions secrets / Docker 迁移，不能在 UI 改动里直接下线。
+
 ## WebUI 语言说明（非配置项）
 
 本项目新增独立的 WebUI 界面语言能力（`zh` / `en`），用于静态页面文案、导航与通用控件文案。该状态与 `REPORT_LANGUAGE` 解耦，不改写报告语言语义。

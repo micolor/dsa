@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { paperApi } from '../api/paper';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
-import { Badge, DatePicker, EmptyState, useToastSync } from '../components/common';
+import { Badge, Button, DatePicker, EmptyState, useToastSync } from '../components/common';
 import { EquityCurveChart } from '../components/paper/EquityCurveChart';
 import { PaperMetricsCards } from '../components/paper/PaperMetricsCards';
 import { PaperRecordsList } from '../components/paper/PaperRecordsList';
@@ -16,7 +16,7 @@ import type { PaperAccount, PaperPosition, PaperSignalRecord, PaperSnapshot, Pap
 const PAGE_SIZE = 20;
 
 export const PaperTradingPage: React.FC = () => {
-  const { language } = useUiLanguage();
+  const { language, t } = useUiLanguage();
   const text = PAPER_TRADING_TEXT[language];
 
   const [snapshot, setSnapshot] = useState<PaperSnapshot | null>(null);
@@ -150,6 +150,21 @@ export const PaperTradingPage: React.FC = () => {
     }
   }, [backfillFrom, loadStatic, loadList, activeSection, page, text.backfillDone, text.backfillSkipped]);
 
+  const handleAutoTrade = useCallback(async () => {
+    setIsActioning(true);
+    setError(null);
+    try {
+      const result = await paperApi.autoTrade();
+      setToast(formatUiText(text.autoTradeDone, { count: result.processed }));
+      await loadStatic();
+      await loadList(activeSection, page);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setIsActioning(false);
+    }
+  }, [loadStatic, loadList, activeSection, page, text.autoTradeDone]);
+
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
   const closedStats = (() => {
@@ -183,7 +198,7 @@ export const PaperTradingPage: React.FC = () => {
   }));
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
+    <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden px-3 pb-4 pt-4 sm:h-[calc(100vh-4.5rem)] md:px-4">
       <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 pt-1.5">
         <div className="min-w-0">
@@ -206,15 +221,34 @@ export const PaperTradingPage: React.FC = () => {
           >
             {isActioning ? text.backfilling : text.backfill}
           </button>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => window.location.assign('/decision-signals')}
+          >
+            {t('layout.nav.decisionSignals')}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleAutoTrade()}
+            disabled={isActioning}
+          >
+            {isActioning ? text.autoTrading : text.autoTrade}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
             onClick={handleRefresh}
             disabled={isActioning}
-            className="btn-primary inline-flex h-9 items-center gap-1.5 rounded-lg px-3"
+            className="gap-1.5"
           >
             <RefreshCw className={`h-4 w-4 ${isActioning ? 'animate-spin' : ''}`} />
             <span>{text.refresh}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -222,6 +256,17 @@ export const PaperTradingPage: React.FC = () => {
         <div className="flex h-64 items-center justify-center">
           <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
         </div>
+      ) : error && !account ? (
+        <EmptyState
+          title={text.loadErrorTitle}
+          description={error.message || text.loadErrorDescription}
+          action={(
+            <Button type="button" variant="secondary" onClick={() => void loadStatic()}>
+              {t('common.retry')}
+            </Button>
+          )}
+          className="bg-elevated border-border/70 border-none bg-transparent shadow-none"
+        />
       ) : (
         <>
           {account ? (

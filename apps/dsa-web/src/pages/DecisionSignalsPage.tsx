@@ -1,6 +1,6 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, BarChart3, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, BarChart3, RefreshCw, Search, ShieldCheck, TrendingUp, X } from 'lucide-react';
 import {
   decisionSignalsApi,
   getDecisionSignalReassessBlockedError,
@@ -10,6 +10,7 @@ import { historyApi } from '../api/history';
 import {
   ApiErrorAlert,
   AppPage,
+  Button,
   Card,
   Checkbox,
   Collapsible,
@@ -17,6 +18,7 @@ import {
   Drawer,
   EmptyState,
   InlineAlert,
+  Loading,
   Pagination,
   Select,
   useToastSync,
@@ -515,10 +517,22 @@ function summarizeSkillStatsProgress(buckets: SkillOpinionPerformanceBucket[]): 
   );
 }
 
+type DecisionSignalsSection = 'signals' | 'backtest';
+
+const BacktestPanel = lazy(() => import('./BacktestPage'));
+
+function resolveInitialSection(): DecisionSignalsSection {
+  if (typeof window === 'undefined') return 'signals';
+  return new URLSearchParams(window.location.search).get('tab') === 'backtest'
+    ? 'backtest'
+    : 'signals';
+}
+
 const DecisionSignalsPage: React.FC = () => {
   const { t } = useUiLanguage();
   const actionLabels = useMemo(() => buildDecisionActionLabelMap(t), [t]);
   const { index: stockIndex } = useStockIndex();
+  const [activeSection, setActiveSection] = useState<DecisionSignalsSection>(resolveInitialSection);
   const [filters, setFilters] = useState<ListFilters>(() => getInitialFilters());
   const [appliedFilters, setAppliedFilters] = useState<ListFilters>(() => getInitialFilters());
   const [page, setPage] = useState(1);
@@ -618,8 +632,56 @@ const DecisionSignalsPage: React.FC = () => {
       : 'empty';
 
   useEffect(() => {
-    document.title = t('decisionSignals.pageTitle');
-  }, [t]);
+    document.title = activeSection === 'backtest'
+      ? t('layout.nav.backtest')
+      : t('decisionSignals.pageTitle');
+  }, [activeSection, t]);
+
+  const selectSection = useCallback((section: DecisionSignalsSection) => {
+    setActiveSection(section);
+    const url = new URL(window.location.href);
+    if (section === 'backtest') {
+      url.searchParams.set('tab', 'backtest');
+    } else {
+      url.searchParams.delete('tab');
+    }
+    window.history.replaceState({}, '', url);
+  }, []);
+
+  const renderSectionTabs = () => (
+    <div
+      role="tablist"
+      aria-label={t('layout.nav.decisionSignals')}
+      className="inline-flex items-center gap-1 rounded-xl border border-border/60 bg-elevated p-0.5"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeSection === 'signals'}
+        onClick={() => selectSection('signals')}
+        className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+          activeSection === 'signals'
+            ? 'bg-primary/15 font-medium text-primary'
+            : 'text-secondary-text hover:bg-hover hover:text-foreground'
+        }`}
+      >
+        {t('layout.nav.decisionSignals')}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeSection === 'backtest'}
+        onClick={() => selectSection('backtest')}
+        className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+          activeSection === 'backtest'
+            ? 'bg-primary/15 font-medium text-primary'
+            : 'text-secondary-text hover:bg-hover hover:text-foreground'
+        }`}
+      >
+        {t('layout.nav.backtest')}
+      </button>
+    </div>
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -1374,15 +1436,15 @@ const DecisionSignalsPage: React.FC = () => {
               placeholder={t('decisionSignals.reassessProfile')}
               disabled={!reassessSourceReportId || reassessLoading || reassessPersisting}
             />
-            <button
+            <Button
               type="button"
-              className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
+              variant="secondary"
               onClick={() => void handleReassess()}
               disabled={!reassessSourceReportId || reassessLoading || reassessPersisting}
             >
               <RefreshCw className={cn('h-4 w-4', reassessLoading ? 'animate-spin' : '')} />
               {t('decisionSignals.reassessPreview')}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -1495,9 +1557,9 @@ const DecisionSignalsPage: React.FC = () => {
             ) : null}
             {passed === true ? (
               <div className="flex justify-end">
-                <button
+                <Button
                   type="button"
-                  className="btn-primary inline-flex h-10 items-center justify-center gap-2"
+                  variant="primary"
                   onClick={() => setReassessPersistConfirm(true)}
                   disabled={reassessLoading || reassessPersisting}
                 >
@@ -1505,7 +1567,7 @@ const DecisionSignalsPage: React.FC = () => {
                   {reassessPersisting
                     ? t('decisionSignals.reassessPersisting')
                     : t('decisionSignals.reassessPersist')}
-                </button>
+                </Button>
               </div>
             ) : null}
           </div>
@@ -1570,15 +1632,45 @@ const DecisionSignalsPage: React.FC = () => {
     message: t('decisionSignals.confirmStatusTitle'),
   }));
 
+  if (activeSection === 'backtest') {
+    return (
+      <AppPage>
+        <div className="space-y-5">
+          {renderSectionTabs()}
+          <Suspense fallback={<Loading label={t('layout.nav.backtest')} />}>
+            <BacktestPanel />
+          </Suspense>
+        </div>
+      </AppPage>
+    );
+  }
+
   return (
     <AppPage>
       <div className="space-y-5">
+        {renderSectionTabs()}
         <div className="flex items-start justify-between gap-3">
           <p className="max-w-2xl text-sm text-secondary-text">{t('decisionSignals.pagePurpose')}</p>
-          <div className="flex shrink-0 justify-end">
-            <button
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <Button
               type="button"
-              className="btn-secondary inline-flex items-center justify-center gap-2"
+              variant="secondary"
+              onClick={() => selectSection('backtest')}
+            >
+              <BarChart3 className="h-4 w-4" aria-hidden="true" />
+              <span>{t('decisionSignals.openBacktest')}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => window.location.assign('/paper')}
+            >
+              <TrendingUp className="h-4 w-4" aria-hidden="true" />
+              <span>{t('decisionSignals.openPaper')}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
               onClick={() => {
                 void loadSignals();
                 void loadQueue();
@@ -1608,7 +1700,7 @@ const DecisionSignalsPage: React.FC = () => {
             >
               <RefreshCw className={cn('h-4 w-4', pageRefreshing ? 'animate-spin' : '')} />
               <span>{t('decisionSignals.refresh')}</span>
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -1619,16 +1711,17 @@ const DecisionSignalsPage: React.FC = () => {
               checked={holdingOnly}
               onChange={(event) => setHoldingOnly(event.target.checked)}
             />
-            <button
+            <Button
               type="button"
-              className="btn-secondary inline-flex h-9 items-center justify-center gap-2"
+              variant="secondary"
+              size="sm"
               onClick={refreshQueue}
               disabled={queueLoading}
               aria-label={t('decisionSignals.queueRefreshAria')}
             >
               <RefreshCw className={cn('h-4 w-4', queueLoading ? 'animate-spin' : '')} />
               {t('decisionSignals.queueRefresh')}
-            </button>
+            </Button>
           </div>
           <DecisionSignalActionQueue
             items={queueItems}
@@ -1723,17 +1816,18 @@ const DecisionSignalsPage: React.FC = () => {
                   placeholder={t('decisionSignals.status')}
                   className="w-full"
                 />
-                <button type="submit" className="btn-primary inline-flex h-11 items-center justify-center gap-2">
+                <Button type="submit" variant="primary" size="lg">
                   <Search className="h-4 w-4" />
                   {t('decisionSignals.filter')}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+                  variant="secondary"
+                  size="lg"
                   onClick={resetFilters}
                 >
                   {t('decisionSignals.resetFilter')}
-                </button>
+                </Button>
               </form>
               <label className="mt-3 inline-flex cursor-pointer items-center gap-2">
                 <input
@@ -1832,22 +1926,24 @@ const DecisionSignalsPage: React.FC = () => {
                 ariaLabel={t('decisionSignals.stockContextInput')}
               />
             </div>
-            <button
+            <Button
               type="submit"
-              className="btn-primary inline-flex h-11 items-center justify-center gap-2"
+              variant="primary"
+              size="lg"
               disabled={!stockDraft.trim()}
             >
               <Search className="h-4 w-4" />
               {t('decisionSignals.stockContextApply')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+              variant="secondary"
+              size="lg"
               onClick={handleClearStockContext}
               disabled={!activeStockContext && !stockDraft}
             >
               {t('decisionSignals.stockContextClear')}
-            </button>
+            </Button>
           </form>
 
           {activeStockLabel ? (
@@ -1974,14 +2070,15 @@ const DecisionSignalsPage: React.FC = () => {
               placeholder={t('decisionSignals.timelineProfile')}
               className="w-full"
             />
-            <button
+            <Button
               type="submit"
-              className="btn-secondary inline-flex h-11 items-center justify-center gap-2"
+              variant="secondary"
+              size="lg"
               disabled={timelineLoading || !activeStockContext?.code}
             >
               <Search className="h-4 w-4" />
               {t('decisionSignals.timelineSearch')}
-            </button>
+            </Button>
           </form>
           <div className="mt-4">
             {!activeStockContext ? (
@@ -2122,16 +2219,17 @@ const DecisionSignalsPage: React.FC = () => {
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-text">
                       {t('decisionSignals.ledgerMonthTitle')}
                     </p>
-                    <button
+                    <Button
                       type="button"
-                      className="btn-secondary inline-flex h-9 items-center justify-center gap-2"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => void loadOutcomeLedger()}
                       disabled={ledgerLoading}
                       aria-label={t('decisionSignals.ledgerRefreshAria')}
                     >
                       <RefreshCw className={cn('h-4 w-4', ledgerLoading ? 'animate-spin' : '')} />
                       {t('decisionSignals.ledgerRefresh')}
-                    </button>
+                    </Button>
                   </div>
 
                   {monthlyBuckets.length > 0 ? (
@@ -2281,19 +2379,19 @@ const DecisionSignalsPage: React.FC = () => {
                       {t('decisionSignals.skillStatsSampleSize')}: {skillStats?.minimumEvaluatedSampleSize ?? '-'}
                     </p>
                     <div className="flex shrink-0 gap-2">
-                      <button
+                      <Button
                         type="button"
-                        className="btn-secondary inline-flex h-10 items-center justify-center gap-2"
+                        variant="secondary"
                         onClick={() => void loadSkillOutcomeStats()}
                         disabled={skillStatsLoading}
                         aria-label={t('decisionSignals.skillStatsRefreshAria')}
                       >
                         <RefreshCw className={cn('h-4 w-4', skillStatsLoading ? 'animate-spin' : '')} />
                         {t('decisionSignals.skillStatsRefresh')}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="btn-primary inline-flex h-10 items-center justify-center gap-2"
+                        variant="primary"
                         onClick={() => void handleRunSkillOutcomes()}
                         disabled={skillStatsLoading || skillStatsRunning}
                       >
@@ -2301,7 +2399,7 @@ const DecisionSignalsPage: React.FC = () => {
                         {skillStatsRunning
                           ? t('common.loading')
                           : t('decisionSignals.skillStatsRun')}
-                      </button>
+                      </Button>
                     </div>
                   </div>
 
@@ -2417,10 +2515,12 @@ const DecisionSignalsPage: React.FC = () => {
               feedbackError={selectedFeedbackError?.message ?? null}
               onFeedbackSubmit={handleFeedbackSubmit}
               actions={STATUS_ACTIONS.map((status) => (
-                <button
+                <Button
                   key={status}
                   type="button"
-                  className="btn-secondary !px-3 !py-1.5 !text-xs"
+                  variant="secondary"
+                  size="xsm"
+                  className="text-xs"
                   onClick={() => setPendingStatus({
                     item: selected.item,
                     status,
@@ -2429,7 +2529,7 @@ const DecisionSignalsPage: React.FC = () => {
                   disabled={statusUpdating || selected.item.status === status}
                 >
                   {t(STATUS_ACTION_LABEL_KEYS[status])}
-                </button>
+                </Button>
               ))}
             />
           </div>

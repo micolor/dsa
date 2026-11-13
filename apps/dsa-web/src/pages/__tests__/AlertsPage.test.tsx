@@ -12,6 +12,8 @@ const {
   testRule,
   listTriggers,
   listNotifications,
+  getNotificationDeliveries,
+  getDiscrepancies,
 } = vi.hoisted(() => ({
   listRules: vi.fn(),
   createRule: vi.fn(),
@@ -21,6 +23,8 @@ const {
   testRule: vi.fn(),
   listTriggers: vi.fn(),
   listNotifications: vi.fn(),
+  getNotificationDeliveries: vi.fn(),
+  getDiscrepancies: vi.fn(),
 }));
 
 vi.mock('../../api/alerts', () => ({
@@ -34,6 +38,14 @@ vi.mock('../../api/alerts', () => ({
     listTriggers,
     listNotifications,
   },
+}));
+
+vi.mock('../../api/notifications', () => ({
+  notificationsApi: { getNotificationDeliveries },
+}));
+
+vi.mock('../../api/dataQuality', () => ({
+  dataQualityApi: { getDiscrepancies },
 }));
 
 vi.mock('../../api/portfolio', () => ({
@@ -95,6 +107,8 @@ beforeEach(() => {
     pageSize: 20,
   });
   listNotifications.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  getNotificationDeliveries.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  getDiscrepancies.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
   testRule.mockResolvedValue({
     ruleId: 1,
     status: 'triggered',
@@ -117,8 +131,17 @@ describe('AlertsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '触发历史' }));
     expect(await screen.findByText('600519 price above 1800')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '通知尝试记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '通知记录' }));
     expect(await screen.findByText('暂无通知尝试记录')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '数据质量' }));
+    expect(await screen.findByText('暂无数据质量异常')).toBeInTheDocument();
+    expect(getDiscrepancies).toHaveBeenCalledWith({
+      market: undefined,
+      issueType: undefined,
+      page: 1,
+      pageSize: 20,
+    });
 
     expect(listRules).toHaveBeenCalledWith({
       enabled: undefined,
@@ -128,6 +151,36 @@ describe('AlertsPage', () => {
     });
     expect(listTriggers).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
     expect(listNotifications).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+  });
+
+  it('switches between alert notifications and all deliveries in the merged tab', async () => {
+    render(<AlertsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '通知记录' }));
+    expect(await screen.findByText('暂无通知尝试记录')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '全部投递' }));
+    expect(await screen.findByText('暂无投递记录')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '告警通知' }));
+    expect(await screen.findByText('暂无通知尝试记录')).toBeInTheDocument();
+  });
+
+  it('opens the delivery records tab directly from ?tab=deliveries', async () => {
+    window.history.replaceState(null, '', '/alerts?tab=deliveries');
+    try {
+      render(<AlertsPage />);
+
+      expect(await screen.findByText('暂无投递记录')).toBeInTheDocument();
+      expect(getNotificationDeliveries).toHaveBeenCalledWith({
+        routeType: undefined,
+        success: undefined,
+        page: 1,
+        pageSize: 20,
+      });
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
   });
 
   it('does not leave the history tab stuck loading when events load at the same time', async () => {

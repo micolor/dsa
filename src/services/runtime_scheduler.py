@@ -9,6 +9,7 @@ import threading
 import _thread
 from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -23,6 +24,10 @@ RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV = "DSA_RUNTIME_SCHEDULER_RUN_IMMEDIATELY"
 RUNTIME_SCHEDULER_SUPPRESS_START_ENV = "DSA_RUNTIME_SCHEDULER_SUPPRESS_START"
 RUNTIME_SCHEDULER_ARGS_ENV = "DSA_RUNTIME_SCHEDULER_ARGS"
 _RUNTIME_ANALYSIS_LOCK = threading.Lock()
+_PAPER_AUTO_TRADE_TZ = ZoneInfo("Asia/Shanghai")
+# Process-local guard so the 30-minute tick runs the daily pass once. A restart
+# may run it again; PaperService.process_signal is idempotent per signal.
+_paper_auto_trade_last_date: Optional[date] = None
 
 # Bounded retry for a scheduled analysis run that failed outright (e.g. an LLM
 # key that was briefly down). Prevents a single failure silently dropping the
@@ -464,7 +469,15 @@ class RuntimeSchedulerService:
         if self._background_tasks_provider is not None:
             return self._background_tasks_provider(config)
         tasks = list(self._current_agent_event_monitor_background_tasks(config))
+        tasks.extend(self._current_proactive_brief_background_tasks(config))
+        tasks.extend(self._current_event_analysis_background_tasks(config))
+        tasks.extend(self._current_weekly_review_background_tasks(config))
+        tasks.extend(self._current_opportunity_scan_background_tasks(config))
+        tasks.extend(self._current_proactive_retention_background_tasks(config))
+        tasks.extend(self._current_data_refresh_background_tasks(config))
+        tasks.extend(self._current_user_scheduled_tasks(config))
         tasks.extend(self._current_paper_valuation_background_tasks(config))
+        tasks.extend(self._current_paper_auto_trade_background_tasks(config))
         tasks.extend(self._current_signal_outcome_background_tasks(config))
         tasks.extend(self._current_fund_nav_review_background_tasks(config))
         tasks.extend(self._current_fund_nav_restore_background_tasks(config))
@@ -499,6 +512,71 @@ class RuntimeSchedulerService:
                     logger.warning("paper daily valuation failed: %s", exc)
 
             cached = {"task": paper_valuation_task, "interval_seconds": interval_seconds}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_paper_auto_trade_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "paper_auto_trade"
+        if not (
+            getattr(config, "paper_trading_enabled", False)
+            and getattr(config, "paper_auto_trade_enabled", False)
+        ):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.paper_service import PaperService
+
+            interval_seconds = 1800
+
+            def paper_auto_trade_task() -> None:
+                global _paper_auto_trade_last_date
+                now = datetime.now(_PAPER_AUTO_TRADE_TZ)
+                try:
+                    if get_effective_trading_date("cn") != now.date():
+                        return
+                    current_config = get_config()
+                    configured = str(
+                        getattr(current_config, "paper_auto_trade_time", "16:30") or "16:30"
+                    )
+                    try:
+                        target = datetime.strptime(configured, "%H:%M").time()
+                    except ValueError:
+                        target = datetime.strptime("16:30", "%H:%M").time()
+                    if now.time() < target:
+                        return
+                    if _paper_auto_trade_last_date == now.date():
+                        return
+                    service = PaperService()
+                    account = service.get_or_create_account()
+                    result = service.auto_trade_once(
+                        account_id=account["account_id"],
+                        lookback_days=int(
+                            getattr(current_config, "paper_auto_trade_lookback_days", 7) or 7
+                        ),
+                    )
+                    _paper_auto_trade_last_date = now.date()
+                    logger.info(
+                        "paper auto trade: account=%s seen=%s processed=%s unavailable=%s",
+                        result.get("account_id"),
+                        result.get("signals_seen"),
+                        result.get("processed"),
+                        result.get("unavailable"),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("paper auto trade failed: %s", exc)
+
+            cached = {"task": paper_auto_trade_task, "interval_seconds": interval_seconds}
             self._background_task_cache[name] = cached
 
         run_immediately = name not in self._background_task_registered_names
@@ -616,6 +694,237 @@ class RuntimeSchedulerService:
         return [{
             "task": cached["task"],
             "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_proactive_brief_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "proactive_daily_brief"
+        if not getattr(config, "agent_proactive_brief_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.proactive_brief_service import ProactiveBriefService
+
+            def proactive_brief_task() -> None:
+                try:
+                    service = ProactiveBriefService(self._reload_config())
+                    result = service.run_due()
+                    if result is not None and not result.skipped:
+                        logger.info(
+                            "[ProactiveBrief] generated slot=%s",
+                            result.brief.slot if result.brief is not None else "",
+                        )
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[ProactiveBrief] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": proactive_brief_task, "interval_seconds": 300}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": int(cached["interval_seconds"]),
+            "run_immediately": run_immediately,
+            "name": name,
+        }]
+
+    def _current_event_analysis_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "event_driven_agent"
+        if not getattr(config, "agent_event_analysis_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.event_analysis_service import EventAnalysisService
+
+            def event_analysis_task() -> None:
+                try:
+                    service = EventAnalysisService(self._reload_config())
+                    results = service.run_once()
+                    if results:
+                        logger.info("[EventAnalysis] generated %d event analysis result(s)", len(results))
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[EventAnalysis] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": event_analysis_task}
+            self._background_task_cache[name] = cached
+
+        interval_minutes = int(getattr(config, "agent_event_analysis_interval_minutes", 10) or 10)
+        interval_seconds = max(60, interval_minutes * 60)
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": interval_seconds,
+            # Wait one interval instead of firing an LLM call during startup.
+            "run_immediately": False,
+            "name": name,
+        }]
+
+    def _current_weekly_review_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "weekly_review"
+        if not getattr(config, "agent_weekly_review_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.weekly_review_service import WeeklyReviewService
+
+            def weekly_review_task() -> None:
+                try:
+                    service = WeeklyReviewService(self._reload_config())
+                    review = service.run_due()
+                    if review is not None:
+                        logger.info("[WeeklyReview] generated %s", review.week_key)
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[WeeklyReview] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": weekly_review_task}
+            self._background_task_cache[name] = cached
+
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": 300,
+            "run_immediately": False,
+            "name": name,
+        }]
+
+    def _current_opportunity_scan_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "opportunity_scan"
+        if not getattr(config, "agent_opportunity_scan_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.opportunity_scan_service import OpportunityScanService
+
+            def opportunity_scan_task() -> None:
+                try:
+                    service = OpportunityScanService(self._reload_config())
+                    scan = service.run_due()
+                    if scan is not None:
+                        logger.info("[OpportunityScan] generated %s", scan.generated_at)
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[OpportunityScan] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": opportunity_scan_task}
+            self._background_task_cache[name] = cached
+
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": 300,
+            "run_immediately": False,
+            "name": name,
+        }]
+
+    def _current_proactive_retention_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "proactive_retention"
+        days = int(getattr(config, "agent_proactive_retention_days", 90) or 0)
+        if days <= 0:
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.storage import DatabaseManager
+            from datetime import datetime, timedelta
+
+            def retention_task() -> None:
+                try:
+                    cutoff = datetime.now() - timedelta(days=days)
+                    stats = DatabaseManager.get_instance().prune_proactive_records(cutoff)
+                    logger.info("[ProactiveRetention] pruned %s", stats)
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[ProactiveRetention] failed: %s", exc, exc_info=True)
+
+            cached = {"task": retention_task}
+            self._background_task_cache[name] = cached
+
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": 86400,
+            "run_immediately": False,
+            "name": name,
+        }]
+
+    def _current_data_refresh_background_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        name = "proactive_data_refresh"
+        if not getattr(config, "agent_data_refresh_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.proactive_data_refresh_service import ProactiveDataRefreshService
+
+            def data_refresh_task() -> None:
+                try:
+                    result = ProactiveDataRefreshService(self._reload_config()).run_due()
+                    if result and result.get("status") == "ok":
+                        logger.info(
+                            "[DataRefresh] candidates=%s hotspots=%s",
+                            result.get("candidates"),
+                            result.get("hotspots"),
+                        )
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[DataRefresh] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": data_refresh_task}
+            self._background_task_cache[name] = cached
+
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": 300,
+            "run_immediately": False,
+            "name": name,
+        }]
+
+    def _current_user_scheduled_tasks(self, config: Config) -> List[Dict[str, Any]]:
+        """Poll user-defined calendar tasks once a minute.
+
+        ``getattr`` defaults to False so partial test configs stay unchanged;
+        the real ``Config`` defaults to True.
+        """
+        name = "user_scheduled_tasks"
+        if not getattr(config, "scheduled_tasks_enabled", False):
+            self._background_task_cache.pop(name, None)
+            self._background_task_registered_names.discard(name)
+            return []
+
+        cached = self._background_task_cache.get(name)
+        if cached is None:
+            from src.services.scheduled_task_service import ScheduledTaskService
+
+            def scheduled_tasks_task() -> None:
+                try:
+                    ScheduledTaskService(self._reload_config()).run_due()
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    logger.warning("[ScheduledTasks] background task failed: %s", exc, exc_info=True)
+
+            cached = {"task": scheduled_tasks_task}
+            self._background_task_cache[name] = cached
+
+        run_immediately = name not in self._background_task_registered_names
+        self._background_task_registered_names.add(name)
+        return [{
+            "task": cached["task"],
+            "interval_seconds": 60,
             "run_immediately": run_immediately,
             "name": name,
         }]

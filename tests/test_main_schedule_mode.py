@@ -127,6 +127,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
             "agent_event_monitor_enabled": False,
             "agent_event_alert_rules_json": "",
             "agent_event_monitor_interval_minutes": 5,
+            "agent_proactive_retention_days": 0,
             "daily_market_context_enabled": True,
         }
         defaults.update(overrides)

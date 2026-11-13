@@ -4,7 +4,7 @@ import { Check, Download, Info, Minus, X } from 'lucide-react';
 import { backtestApi } from '../api/backtest';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { Card, Badge, DatePicker, EmptyState, Loading, Pagination, Tooltip, useToastSync } from '../components/common';
+import { Badge, Button, Card, DatePicker, EmptyState, Loading, Pagination, Tooltip, useToastSync } from '../components/common';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { formatUiText, type UiLanguage } from '../i18n/uiText';
@@ -560,9 +560,9 @@ const BacktestPage: React.FC = () => {
   useToastSync('backtest-page-error', pageError, (err) => ({ error: err }));
 
   return (
-    <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-4 pb-6 pt-4 md:px-6">
+    <div className="flex h-full w-full flex-col rounded-[1.5rem] bg-transparent px-3 pb-4 pt-4 md:px-4">
       {/* Header */}
-      <header className="flex-shrink-0 border-b border-border/40 px-3 py-3 sm:px-4">
+      <header className="flex-shrink-0 border-b border-border/40 py-3">
         <div className="flex w-full flex-col gap-3">
           {/* 顶部用途说明 */}
           <p className="text-xs text-secondary-text">{text.purpose}</p>
@@ -589,11 +589,12 @@ const BacktestPage: React.FC = () => {
                 </button>
               ) : null}
             </div>
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={handleRun}
               disabled={isRunning}
-              className="btn-primary flex h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap md:flex-none"
+              className="flex-1 whitespace-nowrap md:flex-none"
             >
               {isRunning ? (
                 <>
@@ -606,7 +607,7 @@ const BacktestPage: React.FC = () => {
               ) : (
                 text.runBacktest
               )}
-            </button>
+            </Button>
           </div>
 
           {/* 参数行：评估窗口/1日验证 · 日期 · 阶段 · 最小天龄/强制重跑 · 筛选结果 */}
@@ -702,17 +703,18 @@ const BacktestPage: React.FC = () => {
             >
               {text.forceRerun}
             </button>
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleFilter}
               disabled={isLoadingResults || isRunning}
-              className="btn-secondary flex h-10 items-center gap-1.5 whitespace-nowrap"
+              className="whitespace-nowrap"
             >
               {isLoadingResults ? (
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
               ) : null}
               {text.filter}
-            </button>
+            </Button>
           </div>
 
           {/* 说明「运行回测」与「筛选结果」的区别（常驻可见，避免仅悬停才发现） */}
@@ -755,6 +757,17 @@ const BacktestPage: React.FC = () => {
         <section className="min-h-0 flex-1 overflow-y-auto">
           {isLoadingResults ? (
             <Loading label={text.loadingResults} className="h-64" />
+          ) : pageError && results.length === 0 ? (
+            <EmptyState
+              title={text.loadErrorTitle}
+              description={pageError.message || text.loadErrorDescription}
+              className="flex h-full min-h-[16rem] flex-col items-center justify-center border-dashed bg-card/45 shadow-none"
+              action={(
+                <Button type="button" variant="secondary" onClick={handleFilter}>
+                  {t('common.retry')}
+                </Button>
+              )}
+            />
           ) : results.length === 0 ? (
             <EmptyState
               title={text.noResultsTitle}
@@ -780,15 +793,17 @@ const BacktestPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="xsm"
                     onClick={() => exportResultsCsv(results, actionLabels, text, language)}
                     disabled={results.length === 0 || isRunning}
-                    className="btn-secondary inline-flex items-center gap-1.5 !px-3 !py-1.5 !text-xs"
+                    className="gap-1.5 text-xs"
                   >
                     <Download className="h-3.5 w-3.5" />
                     {text.exportCsv}
-                  </button>
+                  </Button>
                   <span className="text-[11px] text-muted-text">{text.scrollHint}</span>
                 </div>
               </div>

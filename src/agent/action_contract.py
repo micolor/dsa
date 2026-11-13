@@ -16,6 +16,7 @@ ACTION_PROPOSAL_KINDS = frozenset({
     "config_update",
     "scheduler_run",
     "notification_test",
+    "scheduled_task_delete",
 })
 
 ACTION_EXECUTED_KINDS = frozenset({
@@ -26,6 +27,10 @@ ACTION_EXECUTED_KINDS = frozenset({
     "paper_refresh",
     "intel_source_test",
     "llm_channel_test",
+    "scheduled_task_create",
+    "scheduled_task_update",
+    "scheduled_task_enable",
+    "scheduled_task_run",
 })
 
 ACTION_TASK_KINDS = frozenset({
@@ -57,4 +62,5 @@ SITE_OPERATION_PROPOSAL_TOOL_NAMES = frozenset({
     "propose_paper_reset",
     "propose_portfolio_ledger_entry",
     "propose_portfolio_account_change",
+    "propose_scheduled_task_delete",
 })

@@ -477,3 +477,31 @@
 **若将来要做，正确的形态是什么**
 
 不是自动改 `decision_signals.status`，而是**把模拟盘侧的结论透出到信号上**：例如在信号列表/详情里显示「模拟盘：已止损退出（2026-09-13）」这类**只读**关联信息（数据取 `paper_signals` + `open_signal_id`，可查询即可得出），或提供 `closed_by` 之类的来源字段区分「用户关闭」与「系统关闭」。两者都需要 API 字段与 Web 展示的设计评审，属新增能力，应另立改动。
+
+## 18. 每日自动交易（已实施）
+
+**目标**：让模拟盘不依赖“分析恰好发生在当前进程”才消费信号。运行 `--serve` / `--schedule` 的后端会在每个交易日固定时间自动跑一轮，把最近仍有效的 AI 信号转成模拟成交。
+
+**执行语义**
+
+- 开关：`PAPER_AUTO_TRADE_ENABLED`（默认 true），仍受 `PAPER_TRADING_ENABLED` 总开关约束。
+- 时间：`PAPER_AUTO_TRADE_TIME`（Asia/Shanghai，默认 `16:30`）；只在交易日、且当前时间不早于配置时间时执行，进程内每天最多一轮。
+- 回看：`PAPER_AUTO_TRADE_LOOKBACK_DAYS`（默认 7 天，1–365），只处理这段时间内创建、状态仍为 `active` 的信号。
+- 顺序：先处理 `sell` / `reduce`（释放现金），再按 `score` 从高到低处理 `buy` / `add`；`hold` / `watch` / `avoid` / `alert` 不产生交易。
+- 幂等：复用 `PaperService.process_signal` 的 `account_id + signal_id` 去重；同一天重复执行不会重复成交。
+- 行情缺失：`data_unavailable` 不落“已消费”，下一次自动交易或手动回填会重试。
+- 现金不足：按 score 排序后排名靠后的 buy/add 会记 `no_cash` 并视为已处理；不会在后续现金释放后自动补单。
+- 手动入口：`POST /api/v1/paper/auto-trade?lookback_days=7`，模拟盘页也有「自动交易」按钮。
+
+**边界**
+
+- 自动交易执行的是既有信号，不额外调用 LLM 决定“买哪只”；排序只是按信号自带的 `score`，不是新的策略。
+- 使用信号对应交易日的日线价格，不保证与真实盘中成交一致。
+- 进程内日期去重，多进程部署可能各跑一轮；`process_signal` 仍能防止重复成交。需要严格单实例时，应使用单进程部署或外部锁。
+- 首次开启且回看窗口较长时，可能一次性补较多历史信号；建议先用 `PAPER_AUTO_TRADE_LOOKBACK_DAYS=1` 观察。
+
+## 19. 卖出侧行情缺失与空仓快照修正（已实施）
+
+- `_reduce_position` 不再在缺当日 bar 时回退到 `position.current_price`；与买入侧一致返回 `data_unavailable`，不落已消费，下一次自动交易或手动回填重试。这样卖出价不会停留在几天前的估值价。
+- `resolve_valuation_date` 在账户空仓时改按 A 股交易日历取最近一个已收盘交易日，而不是直接返回自然日，避免周末/节假日写无意义快照。
+- 验证：`tests/test_paper_service.py` 新增“卖出缺 bar 可重试”和“空仓估值日期按交易日历”用例。

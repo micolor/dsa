@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Card } from '../common/Card';
+import { StatCard } from '../common';
 import type { PaperSnapshot } from '../../types/paper';
 import type { UiLanguage } from '../../i18n/uiText';
 import { PAPER_TRADING_TEXT } from '../../locales/featureText';
@@ -32,10 +32,7 @@ export const PaperMetricsCards: React.FC<Props> = ({ snapshot, language }) => {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {items.map((item) => (
-        <Card key={item.label} variant="gradient" className="p-4">
-          <p className="text-xs text-secondary-text">{item.label}</p>
-          <p className="mt-2 truncate text-lg font-semibold text-foreground">{item.value}</p>
-        </Card>
+        <StatCard key={item.label} label={item.label} value={item.value} />
       ))}
     </div>
   );

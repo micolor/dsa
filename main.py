@@ -1592,6 +1592,146 @@ def main() -> int:
                     "name": "agent_event_monitor",
                 })
 
+            if getattr(config, 'agent_proactive_brief_enabled', False):
+                from src.services.proactive_brief_service import ProactiveBriefService
+
+                def proactive_brief_task():
+                    try:
+                        service = ProactiveBriefService(_reload_runtime_config())
+                        result = service.run_due()
+                        if result is not None and not result.skipped:
+                            logger.info(
+                                "[ProactiveBrief] 已生成 %s",
+                                result.brief.slot if result.brief is not None else "",
+                            )
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[ProactiveBrief] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": proactive_brief_task,
+                    "interval_seconds": 300,
+                    "run_immediately": True,
+                    "name": "proactive_daily_brief",
+                })
+
+            if getattr(config, 'agent_event_analysis_enabled', False):
+                from src.services.event_analysis_service import EventAnalysisService
+
+                def event_analysis_task():
+                    try:
+                        service = EventAnalysisService(_reload_runtime_config())
+                        results = service.run_once()
+                        if results:
+                            logger.info("[EventAnalysis] 已生成 %d 条事件分析", len(results))
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[EventAnalysis] 后台任务失败: %s", exc, exc_info=True)
+
+                event_interval = max(
+                    1,
+                    int(getattr(config, 'agent_event_analysis_interval_minutes', 10) or 10),
+                )
+                background_tasks.append({
+                    "task": event_analysis_task,
+                    "interval_seconds": event_interval * 60,
+                    "run_immediately": False,
+                    "name": "event_driven_agent",
+                })
+
+            if getattr(config, 'agent_weekly_review_enabled', False):
+                from src.services.weekly_review_service import WeeklyReviewService
+
+                def weekly_review_task():
+                    try:
+                        review = WeeklyReviewService(_reload_runtime_config()).run_due()
+                        if review is not None:
+                            logger.info("[WeeklyReview] 已生成 %s", review.week_key)
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[WeeklyReview] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": weekly_review_task,
+                    "interval_seconds": 300,
+                    "run_immediately": False,
+                    "name": "weekly_review",
+                })
+
+            if getattr(config, 'agent_opportunity_scan_enabled', False):
+                from src.services.opportunity_scan_service import OpportunityScanService
+
+                def opportunity_scan_task():
+                    try:
+                        scan = OpportunityScanService(_reload_runtime_config()).run_due()
+                        if scan is not None:
+                            logger.info("[OpportunityScan] 已生成 %s", scan.generated_at)
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[OpportunityScan] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": opportunity_scan_task,
+                    "interval_seconds": 300,
+                    "run_immediately": False,
+                    "name": "opportunity_scan",
+                })
+
+            if int(getattr(config, 'agent_proactive_retention_days', 90) or 0) > 0:
+                from src.storage import DatabaseManager
+
+                retention_days = int(getattr(config, 'agent_proactive_retention_days', 90) or 0)
+
+                def proactive_retention_task():
+                    try:
+                        stats = DatabaseManager.get_instance().prune_proactive_records(
+                            datetime.now() - timedelta(days=retention_days)
+                        )
+                        logger.info("[ProactiveRetention] 已清理 %s", stats)
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[ProactiveRetention] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": proactive_retention_task,
+                    "interval_seconds": 86400,
+                    "run_immediately": False,
+                    "name": "proactive_retention",
+                })
+
+            if getattr(config, 'agent_data_refresh_enabled', False):
+                from src.services.proactive_data_refresh_service import ProactiveDataRefreshService
+
+                def data_refresh_task():
+                    try:
+                        result = ProactiveDataRefreshService(_reload_runtime_config()).run_due()
+                        if result and result.get("status") == "ok":
+                            logger.info(
+                                "[DataRefresh] 候选 %s，热点 %s",
+                                result.get("candidates"),
+                                result.get("hotspots"),
+                            )
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[DataRefresh] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": data_refresh_task,
+                    "interval_seconds": 300,
+                    "run_immediately": False,
+                    "name": "proactive_data_refresh",
+                })
+
+            if getattr(config, 'scheduled_tasks_enabled', False):
+                from src.services.scheduled_task_service import ScheduledTaskService
+
+                def user_scheduled_tasks_task():
+                    try:
+                        ScheduledTaskService(_reload_runtime_config()).run_due()
+                    except Exception as exc:  # pragma: no cover - defensive branch
+                        logger.warning("[ScheduledTasks] 后台任务失败: %s", exc, exc_info=True)
+
+                background_tasks.append({
+                    "task": user_scheduled_tasks_task,
+                    "interval_seconds": 60,
+                    "run_immediately": True,
+                    "name": "user_scheduled_tasks",
+                })
+
             schedule_kwargs = {
                 "task": scheduled_task,
                 "schedule_time": config.schedule_time,

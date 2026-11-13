@@ -353,6 +353,11 @@ def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
         return next(iter(matches))
     if matches and matches <= {"hold", "watch"}:
         return "watch" if "watch" in matches else "hold"
+    if matches and matches <= {"reduce", "sell"}:
+        # 风控下调会把 sell 信号写成「减仓/卖出」这类同方向复合建议。
+        # 两个动作都属于降低暴露，按更温和的 reduce 解析，避免把一次
+        # 可自主决定的减仓误判成清仓；反方向组合仍按歧义丢弃。
+        return "reduce"
     return None
 
 

@@ -4,6 +4,7 @@ import { historyApi } from '../api/history';
 import { intelligenceApi } from '../api/intelligence';
 import { paperApi } from '../api/paper';
 import { portfolioApi } from '../api/portfolio';
+import { scheduledTasksApi } from '../api/scheduledTasks';
 import { systemConfigApi } from '../api/systemConfig';
 import { toCamelCase } from '../api/utils';
 import type { AlertRuleCreateRequest } from '../types/alerts';
@@ -69,6 +70,27 @@ function toSignalCreateRequest(payload: unknown): DecisionSignalCreateRequest {
     metadata: source.metadata as DecisionSignalCreateRequest['metadata'],
     reportLanguage: source.report_language as DecisionSignalCreateRequest['reportLanguage'],
   };
+}
+
+export interface ConfigUpdatePreviewItem {
+  key: string;
+  from: string;
+  to: string;
+}
+
+/** Read the display-only old→new preview from a config_update proposal. */
+export function getConfigUpdatePreview(proposal: ActionProposal): ConfigUpdatePreviewItem[] {
+  if (proposal.kind !== 'config_update') return [];
+  const source = (proposal.proposal ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(source.preview)) return [];
+  return source.preview.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const item = entry as Record<string, unknown>;
+    if (typeof item.key !== 'string' || typeof item.from !== 'string' || typeof item.to !== 'string') {
+      return [];
+    }
+    return [{ key: item.key, from: item.from, to: item.to }];
+  });
 }
 
 /**
@@ -189,8 +211,11 @@ export async function applyActionProposal(proposal: ActionProposal): Promise<voi
       await intelligenceApi.createDefaults();
       return;
     case 'config_update': {
+      // `preview` 只用于确认卡展示，不能作为更新请求体发给后端。
+      const updatePayload = { ...(proposal.proposal as Record<string, unknown>) };
+      delete updatePayload.preview;
       const result = await systemConfigApi.update(
-        toCamelCase<UpdateSystemConfigRequest>(proposal.proposal),
+        toCamelCase<UpdateSystemConfigRequest>(updatePayload),
       );
       // 该端点用 200 表示「请求已处理」，写入失败通过 success=false 表达；
       // 不检查的话卡片会显示「已提交」，把真实失败藏起来。
@@ -202,6 +227,9 @@ export async function applyActionProposal(proposal: ActionProposal): Promise<voi
     case 'scheduler_run':
       // run-now 在未接受时返回 409（scheduler_busy），2xx 一定是已接受。
       await systemConfigApi.runSchedulerNow();
+      return;
+    case 'scheduled_task_delete':
+      await scheduledTasksApi.remove(Number((proposal.proposal as { task_id: number }).task_id));
       return;
     case 'notification_test': {
       const result = await systemConfigApi.testNotificationChannel(

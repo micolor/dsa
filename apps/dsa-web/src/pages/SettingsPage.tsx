@@ -1,15 +1,13 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, FlaskConical, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CircleAlert, CircleDashed, Clock, ExternalLink, FlaskConical, MessageSquareQuote, Play, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
-import { dataQualityApi } from '../api/dataQuality';
-import { notificationsApi } from '../api/notifications';
 import { screeningApi, notifyScreeningConfigChanged, notifySystemConfigChanged } from '../api/screening';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, ConfirmDialog, Dialog, EmptyState, Loading, Pagination, Select, useToastSync } from '../components/common';
+import { ApiErrorAlert, Button, ConfirmDialog, Dialog, EmptyState, Input, Select, useToastSync } from '../components/common';
 import { UiLanguageToggle } from '../components/i18n/UiLanguageToggle';
 import { ThemeTabs } from '../components/theme/ThemeTabs';
 import {
@@ -28,11 +26,10 @@ import {
   SettingsSectionCard,
 } from '../components/settings';
 import { NOTIFICATION_CHANNEL_OPTIONS } from '../components/settings/notificationChannels';
-import { ALERT_CHANNEL_LABELS, ALERT_NOTIFICATION_STATUS_LABELS } from '../locales/featureText';
 import { WEB_BUILD_INFO } from '../utils/constants';
-import { formatDateTime } from '../utils/format';
 import { parseStockListValue } from '../utils/stockList';
 import { getCategoryDescription, getCategoryTitle } from '../utils/systemConfigI18n';
+import { groupConfigItems, type SettingsFieldGroup } from '../utils/systemConfigGroups';
 import type {
   ConfigValidationIssue,
   NotificationTestChannel,
@@ -43,8 +40,6 @@ import type {
   SystemConfigItem,
   SystemConfigUpdateItem,
 } from '../types/systemConfig';
-import type { DataQualityDiscrepancyItem } from '../types/dataQuality';
-import type { NotificationDeliveryItem } from '../types/notifications';
 import type { UiLanguage, UiTextKey } from '../i18n/uiText';
 
 // 通知分类下各渠道对应的配置字段。字段 key 取自后端 config_registry 的
@@ -970,368 +965,17 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
   );
 };
 
-const DELIVERY_PAGE_SIZE = 20;
+type SettingsViewMode = 'basic' | 'all';
 
-type DeliveryRouteFilter = 'all' | 'report' | 'system_error' | 'default';
-type DeliveryStatusFilter = 'all' | 'success' | 'failed';
+const SETTINGS_VIEW_MODE_KEY = 'dsa.settings.viewMode';
 
-type NotificationDeliveryCardProps = {
-  t: (key: UiTextKey, params?: Record<string, string | number>) => string;
-  language: UiLanguage;
-  disabled: boolean;
-};
-
-/** 渠道中文名优先取 NOTIFICATION_CHANNEL_OPTIONS（真实渠道），伪渠道（冷却/降噪等）回退 ALERT_CHANNEL_LABELS。 */
-function buildDeliveryChannelLabels(language: UiLanguage): Record<string, string> {
-  const labels: Record<string, string> = {};
-  for (const option of NOTIFICATION_CHANNEL_OPTIONS) {
-    labels[option.value] = language === 'en' ? option.labelEn : option.labelZh;
+function readSettingsViewMode(): SettingsViewMode {
+  try {
+    return window.localStorage.getItem(SETTINGS_VIEW_MODE_KEY) === 'all' ? 'all' : 'basic';
+  } catch {
+    return 'basic';
   }
-  Object.assign(labels, ALERT_CHANNEL_LABELS[language]);
-  return labels;
 }
-
-function deliveryRouteText(
-  routeType: string,
-  t: (key: UiTextKey, params?: Record<string, string | number>) => string,
-): string {
-  if (routeType === 'report') return t('settings.deliveryRouteReport');
-  if (routeType === 'system_error') return t('settings.deliveryRouteSystemError');
-  if (routeType === 'default') return t('settings.deliveryRouteDefault');
-  return routeType;
-}
-
-const NotificationDeliveryCard: React.FC<NotificationDeliveryCardProps> = ({ t, language, disabled }) => {
-  const channelLabels = buildDeliveryChannelLabels(language);
-  const statusLabels = ALERT_NOTIFICATION_STATUS_LABELS[language];
-  const [items, setItems] = useState<NotificationDeliveryItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [routeFilter, setRouteFilter] = useState<DeliveryRouteFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<DeliveryStatusFilter>('all');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ParsedApiError | null>(null);
-  const requestIdRef = useRef(0);
-  const pageRef = useRef(1);
-
-  const load = useCallback(async (pageOverride?: number) => {
-    const requestedPage = pageOverride ?? pageRef.current;
-    pageRef.current = requestedPage;
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    const isLatestRequest = () => requestIdRef.current === requestId;
-    setLoading(true);
-    try {
-      const response = await notificationsApi.getNotificationDeliveries({
-        routeType: routeFilter === 'all' ? undefined : routeFilter,
-        success: statusFilter === 'all' ? undefined : statusFilter === 'success',
-        page: requestedPage,
-        pageSize: DELIVERY_PAGE_SIZE,
-      });
-      if (!isLatestRequest()) return;
-      setItems(response.items);
-      setTotal(response.total);
-      setPage(requestedPage);
-      setError(null);
-    } catch (err) {
-      if (!isLatestRequest()) return;
-      setError(getParsedApiError(err));
-    } finally {
-      if (isLatestRequest()) setLoading(false);
-    }
-  }, [routeFilter, statusFilter]);
-
-  useEffect(() => {
-    void load(1);
-  }, [load]);
-
-  const refresh = () => void load();
-
-  const routeOptions = [
-    { value: 'all', label: t('settings.deliveryRouteAll') },
-    { value: 'report', label: t('settings.deliveryRouteReport') },
-    { value: 'system_error', label: t('settings.deliveryRouteSystemError') },
-    { value: 'default', label: t('settings.deliveryRouteDefault') },
-  ];
-  const statusOptions = [
-    { value: 'all', label: t('settings.deliveryStatusAll') },
-    { value: 'success', label: t('settings.deliveryStatusSuccess') },
-    { value: 'failed', label: t('settings.deliveryStatusFailed') },
-  ];
-
-  const formatChannel = (channel: string): string => channelLabels[channel] ?? channel;
-  const formatStatus = (item: NotificationDeliveryItem): string => {
-    if (item.success) return statusLabels.success ?? t('settings.deliveryStatusSuccess');
-    if (item.errorCode) return statusLabels[item.errorCode] ?? statusLabels.failed ?? t('settings.deliveryStatusFailed');
-    return statusLabels.failed ?? t('settings.deliveryStatusFailed');
-  };
-
-  return (
-    <SettingsSectionCard
-      title={t('settings.deliveryTitle')}
-      description={t('settings.deliveryDescription')}
-      actions={(
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={disabled || loading}
-          isLoading={loading}
-          loadingText={t('settings.deliveryRefreshing')}
-          onClick={refresh}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          <span className="sr-only">{t('settings.deliveryRefresh')}</span>
-        </Button>
-      )}
-    >
-      <div data-testid="notification-delivery-card" className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <Select
-            label={t('settings.deliveryRouteType')}
-            value={routeFilter}
-            options={routeOptions}
-            onChange={(value) => setRouteFilter(value as DeliveryRouteFilter)}
-            disabled={disabled}
-            className="w-44"
-          />
-          <Select
-            label={t('settings.deliveryStatus')}
-            value={statusFilter}
-            options={statusOptions}
-            onChange={(value) => setStatusFilter(value as DeliveryStatusFilter)}
-            disabled={disabled}
-            className="w-40"
-          />
-        </div>
-
-        {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
-        {loading ? <Loading label={t('settings.deliveryLoading')} /> : null}
-        {!loading && items.length === 0 ? (
-          <EmptyState
-            icon={<BellRing className="h-6 w-6" />}
-            title={t('settings.deliveryEmptyTitle')}
-            description={t('settings.deliveryEmptyDescription')}
-            className="flex flex-col items-center justify-center"
-          />
-        ) : null}
-        {!loading && items.length > 0 ? (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-left text-sm">
-                <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColChannel')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColStatus')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColRouteType')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColErrorCode')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColLatency')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColAttempts')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColTime')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.deliveryColDiagnostics')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-3 py-3">{formatChannel(item.channel)}</td>
-                      <td className="px-3 py-3">
-                        <span>{formatStatus(item)}</span>
-                        {!item.success ? (
-                          <span className={`ml-1 text-xs ${item.retryable ? 'text-warning' : 'text-muted-text'}`}>
-                            ({item.retryable ? t('settings.deliveryRetryable') : t('settings.deliveryNotRetryable')})
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-3">{deliveryRouteText(item.routeType, t)}</td>
-                      <td className="px-3 py-3">{item.errorCode ?? '—'}</td>
-                      <td className="px-3 py-3">{item.latencyMs == null ? '—' : `${item.latencyMs}ms`}</td>
-                      <td className="px-3 py-3">{item.attempt}</td>
-                      <td className="px-3 py-3">{formatDateTime(item.createdAt)}</td>
-                      <td className="px-3 py-3">{item.diagnostics ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-muted-text">{t('settings.deliveryTotal', { total })}</p>
-            <Pagination
-              currentPage={page}
-              totalPages={Math.max(1, Math.ceil(total / DELIVERY_PAGE_SIZE))}
-              onPageChange={(next) => void load(next)}
-              className="mt-5"
-            />
-          </>
-        ) : null}
-      </div>
-    </SettingsSectionCard>
-  );
-};
-
-const DATA_QUALITY_PAGE_SIZE = 20;
-
-type DataQualityIssueFilter = 'all' | 'price_discrepancy' | 'date_mismatch' | 'field_missing';
-
-/** issue token -> i18n key；未知类型回退 null，由调用方展示原始 token。 */
-function dataQualityIssueLabelKey(issue: string): UiTextKey | null {
-  if (issue === 'price_discrepancy') return 'settings.dataQualityIssuePrice';
-  if (issue === 'date_mismatch') return 'settings.dataQualityIssueDate';
-  if (issue === 'field_missing') return 'settings.dataQualityIssueField';
-  return null;
-}
-
-const DataQualityCard: React.FC<NotificationDeliveryCardProps> = ({ t, disabled }) => {
-  const [items, setItems] = useState<DataQualityDiscrepancyItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [marketFilter, setMarketFilter] = useState('all');
-  const [issueFilter, setIssueFilter] = useState<DataQualityIssueFilter>('all');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ParsedApiError | null>(null);
-  const requestIdRef = useRef(0);
-  const pageRef = useRef(1);
-
-  const load = useCallback(async (pageOverride?: number) => {
-    const requestedPage = pageOverride ?? pageRef.current;
-    pageRef.current = requestedPage;
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    const isLatestRequest = () => requestIdRef.current === requestId;
-    setLoading(true);
-    try {
-      const response = await dataQualityApi.getDiscrepancies({
-        market: marketFilter === 'all' ? undefined : marketFilter,
-        issueType: issueFilter === 'all' ? undefined : issueFilter,
-        page: requestedPage,
-        pageSize: DATA_QUALITY_PAGE_SIZE,
-      });
-      if (!isLatestRequest()) return;
-      setItems(response.items);
-      setTotal(response.total);
-      setPage(requestedPage);
-      setError(null);
-    } catch (err) {
-      if (!isLatestRequest()) return;
-      setError(getParsedApiError(err));
-    } finally {
-      if (isLatestRequest()) setLoading(false);
-    }
-  }, [marketFilter, issueFilter]);
-
-  useEffect(() => {
-    void load(1);
-  }, [load]);
-
-  const refresh = () => void load();
-
-  const marketOptions = [
-    { value: 'all', label: t('settings.dataQualityMarketAll') },
-    { value: 'cn', label: t('settings.dataQualityMarketCn') },
-    { value: 'us', label: t('settings.dataQualityMarketUs') },
-    { value: 'hk', label: t('settings.dataQualityMarketHk') },
-  ];
-  const issueOptions = [
-    { value: 'all', label: t('settings.dataQualityIssueAll') },
-    { value: 'price_discrepancy', label: t('settings.dataQualityIssuePrice') },
-    { value: 'date_mismatch', label: t('settings.dataQualityIssueDate') },
-    { value: 'field_missing', label: t('settings.dataQualityIssueField') },
-  ];
-
-  const issueText = (issue: string): string => {
-    const key = dataQualityIssueLabelKey(issue);
-    return key ? t(key) : issue;
-  };
-  const pct = (v: number | null): string => (v == null ? '—' : `${v.toFixed(2)}%`);
-
-  return (
-    <SettingsSectionCard
-      title={t('settings.dataQualityTitle')}
-      description={t('settings.dataQualityDescription')}
-      actions={(
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={disabled || loading}
-          isLoading={loading}
-          loadingText={t('settings.dataQualityRefreshing')}
-          onClick={refresh}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          <span className="sr-only">{t('settings.dataQualityRefresh')}</span>
-        </Button>
-      )}
-    >
-      <div data-testid="data-quality-card" className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <Select
-            label={t('settings.dataQualityMarket')}
-            value={marketFilter}
-            options={marketOptions}
-            onChange={(value) => setMarketFilter(value)}
-            disabled={disabled}
-            className="w-44"
-          />
-          <Select
-            label={t('settings.dataQualityIssue')}
-            value={issueFilter}
-            options={issueOptions}
-            onChange={(value) => setIssueFilter(value as DataQualityIssueFilter)}
-            disabled={disabled}
-            className="w-44"
-          />
-        </div>
-
-        {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
-        {loading ? <Loading label={t('settings.dataQualityLoading')} /> : null}
-        {!loading && items.length === 0 ? (
-          <EmptyState
-            icon={<AlertTriangle className="h-6 w-6" />}
-            title={t('settings.dataQualityEmptyTitle')}
-            description={t('settings.dataQualityEmptyDescription')}
-            className="flex flex-col items-center justify-center"
-          />
-        ) : null}
-        {!loading && items.length > 0 ? (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColMarket')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColStock')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColIssue')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColSources')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColDiff')}</th>
-                    <th className="px-3 py-2 font-medium">{t('settings.dataQualityColTime')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-3 py-3">{item.market}</td>
-                      <td className="px-3 py-3">{item.stockCode}</td>
-                      <td className="px-3 py-3">{issueText(item.issueType)}</td>
-                      <td className="px-3 py-3">{item.primarySource} ↔ {item.secondarySource}</td>
-                      <td className="px-3 py-3">{pct(item.priceDiffPct)}</td>
-                      <td className="px-3 py-3">{item.createdAt}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination
-              currentPage={page}
-              totalPages={Math.max(1, Math.ceil(total / DATA_QUALITY_PAGE_SIZE))}
-              onPageChange={(next) => void load(next)}
-              className="mt-5"
-            />
-          </>
-        ) : null}
-      </div>
-    </SettingsSectionCard>
-  );
-};
 
 const SettingsPage: React.FC = () => {
   const { authEnabled, passwordChangeable } = useAuth();
@@ -1348,6 +992,8 @@ const SettingsPage: React.FC = () => {
   const [isCheckingDesktopUpdate, setIsCheckingDesktopUpdate] = useState(false);
   const [schedulerStatusRefreshToken, setSchedulerStatusRefreshToken] = useState(0);
   const [activeNotificationChannel, setActiveNotificationChannel] = useState<string>('auto');
+  const [settingsViewMode, setSettingsViewMode] = useState<SettingsViewMode>(readSettingsViewMode);
+  const [settingsQuery, setSettingsQuery] = useState('');
   const [notificationTestOpen, setNotificationTestOpen] = useState(false);
   const [schedulerRuntimeEnabled, setSchedulerRuntimeEnabled] = useState<boolean | null>(null);
   const [schedulerOverrideFromUi, setSchedulerOverrideFromUi] = useState<boolean | null>(null);
@@ -1367,6 +1013,15 @@ const SettingsPage: React.FC = () => {
   );
   const desktopAppVersion = getDesktopAppVersion();
   const shouldShowDesktopVersionCard = Boolean(desktopAppVersion);
+
+  const handleViewModeChange = useCallback((mode: SettingsViewMode) => {
+    setSettingsViewMode(mode);
+    try {
+      window.localStorage.setItem(SETTINGS_VIEW_MODE_KEY, mode);
+    } catch {
+      // 隐私模式或存储被禁用时只影响下次打开时的默认值，不影响本次浏览。
+    }
+  }, []);
 
   // Set page title
   useEffect(() => {
@@ -1399,6 +1054,21 @@ const SettingsPage: React.FC = () => {
     maskToken,
     llmModelProviders,
   } = useSystemConfig();
+
+  const handleCategorySelect = useCallback((category: string) => {
+    setSettingsQuery('');
+    setActiveCategory(category);
+  }, [setActiveCategory]);
+
+  const openAssistant = useCallback(() => {
+    const categoryTitle = getCategoryTitle(
+      activeCategory as SystemConfigCategory,
+      undefined,
+      uiLanguage,
+    );
+    const prompt = t('settings.askAssistantPrompt', { category: categoryTitle });
+    window.location.assign(`/chat?prompt=${encodeURIComponent(prompt)}`);
+  }, [activeCategory, t, uiLanguage]);
 
   // 切换分类时重置通知渠道筛选与测试弹框，避免切走再切回时保留旧状态。
   useEffect(() => {
@@ -1577,6 +1247,8 @@ const SettingsPage: React.FC = () => {
   ]);
   const SYSTEM_HIDDEN_KEYS = new Set([
     'ADMIN_AUTH_ENABLED',
+    // Legacy alias; the scheduler card maintains SCHEDULE_RUN_IMMEDIATELY.
+    'RUN_IMMEDIATELY',
     ...SCHEDULER_SETTING_KEYS,
   ]);
   const BASE_HIDDEN_KEYS = new Set([
@@ -1599,6 +1271,20 @@ const SettingsPage: React.FC = () => {
           }))
           .sort((a, b) => b.configuredCount - a.configuredCount)[0]?.value ?? 'wechat';
 
+  // 每个 provider 只展示一个 Key 字段：多 Key 字段优先；只有旧版单 Key
+  // 已配置时才保留单 Key 字段，避免同一凭据在“全部设置”里出现两份。
+  const PROVIDER_KEY_PAIRS: Array<[canonical: string, legacy: string]> = [
+    ['DEEPSEEK_API_KEYS', 'DEEPSEEK_API_KEY'],
+    ['GEMINI_API_KEYS', 'GEMINI_API_KEY'],
+    ['OPENAI_API_KEYS', 'OPENAI_API_KEY'],
+    ['ANTHROPIC_API_KEYS', 'ANTHROPIC_API_KEY'],
+  ];
+  const hiddenProviderKey = new Set<string>();
+  for (const [canonical, legacy] of PROVIDER_KEY_PAIRS) {
+    const canonicalSet = Boolean((rawActiveItemMap.get(canonical) || '').trim());
+    const legacySet = Boolean((rawActiveItemMap.get(legacy) || '').trim());
+    hiddenProviderKey.add((canonicalSet || !legacySet) ? legacy : canonical);
+  }
   const activeItems =
     activeCategory === 'base'
       ? rawActiveItems.filter((item) => !BASE_HIDDEN_KEYS.has(item.key))
@@ -1608,6 +1294,9 @@ const SettingsPage: React.FC = () => {
           return false;
         }
         if (hasConfiguredChannels && !hasLitellmConfig && AI_MODEL_HIDDEN_KEYS.has(item.key)) {
+          return false;
+        }
+        if (hiddenProviderKey.has(item.key)) {
           return false;
         }
         return true;
@@ -1621,15 +1310,54 @@ const SettingsPage: React.FC = () => {
       : rawActiveItems;
   // 通用 / 报告字段（`NOTIFICATION_*` 路由/去重/静默时段、`REPORT_*`、`SINGLE_STOCK_NOTIFY` 等）不属于任何具体渠道，
   // 从渠道筛选里拆出来，始终在「通用 / 报告」独立分区展示。
+  const normalizedSettingsQuery = settingsQuery.trim().toLowerCase();
+  const matchesSettingsQuery = (item: SystemConfigItem) => (
+    !normalizedSettingsQuery
+    || [item.key, item.schema?.title, item.schema?.description]
+      .some((value) => String(value ?? '').toLowerCase().includes(normalizedSettingsQuery))
+  );
+  const isAdvancedSetting = (item: SystemConfigItem) => item.schema?.tier === 'advanced';
+  // 搜索时越过「基础」层，直接展示匹配项；通知渠道字段已由渠道选择器收窄，
+  // 不再按 tier 过滤，否则基础视图下会看不到刚选中的渠道凭据。
+  const passesTierFilter = (item: SystemConfigItem) => (
+    settingsViewMode === 'all'
+    || !isAdvancedSetting(item)
+    || Boolean(normalizedSettingsQuery)
+  );
+  const tierFilteredActiveItems = activeItems
+    .filter((item) => activeCategory === 'notification' || passesTierFilter(item))
+    .filter(matchesSettingsQuery);
   const generalNotificationItems = activeCategory === 'notification'
-    ? rawActiveItems.filter((item) => NOTIFICATION_CHANNEL_FIELDS.general.has(item.key))
+    ? rawActiveItems
+      .filter((item) => NOTIFICATION_CHANNEL_FIELDS.general.has(item.key))
+      .filter(passesTierFilter)
+      .filter(matchesSettingsQuery)
     : [];
+  const hiddenAdvancedCount = settingsViewMode === 'basic' && !normalizedSettingsQuery
+    ? (activeCategory === 'notification'
+      ? rawActiveItems.filter(
+        (item) => NOTIFICATION_CHANNEL_FIELDS.general.has(item.key) && isAdvancedSetting(item),
+      ).length
+      : activeItems.filter(isAdvancedSetting).length)
+    : 0;
   const promptCacheAdvancedItems = activeCategory === 'ai_model'
-    ? activeItems.filter(isPromptCacheAdvancedSetting)
+    ? tierFilteredActiveItems.filter(isPromptCacheAdvancedSetting)
     : [];
   const visibleActiveItems = activeCategory === 'ai_model'
-    ? activeItems.filter((item) => !isPromptCacheAdvancedSetting(item))
-    : activeItems;
+    ? tierFilteredActiveItems.filter((item) => !isPromptCacheAdvancedSetting(item))
+    : tierFilteredActiveItems;
+  const groupedActiveItems: SettingsFieldGroup[] = groupConfigItems(
+    activeCategory as SystemConfigCategory,
+    visibleActiveItems,
+    activeCategory === 'notification'
+      ? { zh: '渠道配置', en: 'Channel configuration' }
+      : activeCategory === 'base'
+        ? { zh: '其他', en: 'Other' }
+        : undefined,
+  );
+  const groupedGeneralNotificationItems: SettingsFieldGroup[] = activeCategory === 'notification'
+    ? groupConfigItems('notification', generalNotificationItems)
+    : [];
   const hasActiveConfigItems = visibleActiveItems.length > 0 || promptCacheAdvancedItems.length > 0 || generalNotificationItems.length > 0;
   const isEnvBackupAllowed = isDesktopRuntime || authEnabled;
   const envBackupActionDisabled = isLoading || isSaving || isExportingEnv || isImportingEnv || !isEnvBackupAllowed;
@@ -1924,16 +1652,27 @@ const SettingsPage: React.FC = () => {
       title={activeCategoryTitle}
       description={activeCategoryDescription || t('settings.activePanelDescription')}
       actions={activeCategory === 'notification' ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={isSaving || isLoading}
-          onClick={() => setNotificationTestOpen(true)}
-        >
-          <FlaskConical className="h-4 w-4" aria-hidden="true" />
-          {uiLanguage === 'en' ? 'Test' : '测试'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => window.location.assign('/alerts?tab=deliveries')}
+          >
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            {t('settings.viewDeliveryRecords')}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={isSaving || isLoading}
+            onClick={() => setNotificationTestOpen(true)}
+          >
+            <FlaskConical className="h-4 w-4" aria-hidden="true" />
+            {uiLanguage === 'en' ? 'Test' : '测试'}
+          </Button>
+        </div>
       ) : undefined}
     >
       {activeCategory === 'notification' ? (
@@ -1950,32 +1689,55 @@ const SettingsPage: React.FC = () => {
           />
         </div>
       ) : null}
-      {visibleActiveItems.length ? (
-        <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/60 bg-elevated">
-          {visibleActiveItems.map((item) => {
-            const fieldIssues = item.key === 'AGENT_ARCH' && hasCodexArchitectureConflict
-              ? [...(issueByKey[item.key] || []), codexArchitectureIssue]
-              : issueByKey[item.key] || [];
-            return (
-              <SettingsField
-                key={item.key}
-                item={item}
-                value={item.value}
-                disabled={isSaving}
-                onChange={setDraftValue}
-                issues={fieldIssues}
-              />
-            );
-          })}
-        </div>
-      ) : null}
-      {generalNotificationItems.length ? (
-        <section className="mt-4">
-          <h3 className="mb-2 text-sm font-semibold text-foreground">
-            {uiLanguage === 'en' ? 'General / Report' : '通用 / 报告'}
-          </h3>
+      {groupedActiveItems.map((group, index) => (
+        <section key={group.id} className={index === 0 ? '' : 'mt-5'}>
+          {group.titleZh ? (
+            <div className="mb-2">
+              <h3 className="text-sm font-semibold text-foreground">
+                {uiLanguage === 'en' ? group.titleEn : group.titleZh}
+              </h3>
+              {group.descriptionZh || group.descriptionEn ? (
+                <p className="mt-1 text-xs leading-5 text-muted-text">
+                  {uiLanguage === 'en' ? group.descriptionEn : group.descriptionZh}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/60 bg-elevated">
-            {generalNotificationItems.map((item) => (
+            {group.items.map((item) => {
+              const fieldIssues = item.key === 'AGENT_ARCH' && hasCodexArchitectureConflict
+                ? [...(issueByKey[item.key] || []), codexArchitectureIssue]
+                : issueByKey[item.key] || [];
+              return (
+                <SettingsField
+                  key={item.key}
+                  item={item}
+                  value={item.value}
+                  disabled={isSaving}
+                  onChange={setDraftValue}
+                  issues={fieldIssues}
+                />
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      {groupedGeneralNotificationItems.map((group) => (
+        <section key={`general-${group.id}`} className="mt-5">
+          {group.titleZh ? (
+            <div className="mb-2">
+              <h3 className="text-sm font-semibold text-foreground">
+                {uiLanguage === 'en' ? group.titleEn : group.titleZh}
+              </h3>
+              {group.descriptionZh || group.descriptionEn ? (
+                <p className="mt-1 text-xs leading-5 text-muted-text">
+                  {uiLanguage === 'en' ? group.descriptionEn : group.descriptionZh}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/60 bg-elevated">
+            {group.items.map((item) => (
               <SettingsField
                 key={item.key}
                 item={item}
@@ -1987,7 +1749,7 @@ const SettingsPage: React.FC = () => {
             ))}
           </div>
         </section>
-      ) : null}
+      ))}
       {promptCacheAdvancedItems.length ? (
         <details className="group/prompt-cache overflow-hidden rounded-lg border border-border/60 bg-elevated transition-colors duration-200 hover:bg-hover">
           <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-4 [&::-webkit-details-marker]:hidden">
@@ -2016,6 +1778,18 @@ const SettingsPage: React.FC = () => {
         </details>
       ) : null}
     </SettingsSectionCard>
+  ) : normalizedSettingsQuery ? (
+    <EmptyState
+      title={t('settings.searchNoResultsTitle')}
+      description={t('settings.searchNoResultsDescription')}
+      className="bg-elevated border-border/70 border-none bg-transparent shadow-none"
+    />
+  ) : settingsViewMode === 'basic' && hiddenAdvancedCount > 0 ? (
+    <EmptyState
+      title={t('settings.viewAdvancedHidden', { count: hiddenAdvancedCount })}
+      description={t('settings.viewAdvancedHiddenDescription')}
+      className="bg-elevated border-border/70 border-none bg-transparent shadow-none"
+    />
   ) : (
     <EmptyState
       title={t('settings.currentCategoryEmptyTitle')}
@@ -2080,10 +1854,21 @@ const SettingsPage: React.FC = () => {
   }));
 
   return (
-    <div className="settings-page flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden px-4 pb-6 pt-4 sm:h-[calc(100vh-5.5rem)] md:px-6 lg:h-[calc(100vh-2rem)]">
+    <div className="settings-page flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden px-3 pb-4 pt-4 sm:h-[calc(100vh-4.5rem)] md:px-4">
       <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex justify-end">
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="px-2.5"
+              onClick={openAssistant}
+              disabled={isLoading}
+            >
+              <MessageSquareQuote className="h-4 w-4" aria-hidden="true" />
+              {t('settings.askAssistant')}
+            </Button>
           <Button
               type="button"
               variant="secondary"
@@ -2114,6 +1899,57 @@ const SettingsPage: React.FC = () => {
             </Button>
         </div>
       </div>
+      <div className="mt-3 mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-text">{t('settings.viewScopeLabel')}</span>
+          <div
+            role="group"
+            aria-label={t('settings.viewScopeLabel')}
+            className="inline-flex items-center gap-1 rounded-xl border border-border/60 bg-elevated p-0.5"
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant={settingsViewMode === 'basic' ? 'primary' : 'ghost'}
+              aria-pressed={settingsViewMode === 'basic'}
+              onClick={() => handleViewModeChange('basic')}
+            >
+              {t('settings.viewBasic')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={settingsViewMode === 'all' ? 'primary' : 'ghost'}
+              aria-pressed={settingsViewMode === 'all'}
+              onClick={() => handleViewModeChange('all')}
+            >
+              {t('settings.viewAll')}
+            </Button>
+          </div>
+          {hiddenAdvancedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => handleViewModeChange('all')}
+              className="text-xs text-primary underline-offset-4 hover:underline"
+            >
+              {t('settings.viewAdvancedHidden', { count: hiddenAdvancedCount })} · {t('settings.viewShowAll')}
+            </button>
+          ) : null}
+        </div>
+        <div className="relative w-full sm:w-80">
+          <Search
+            className="pointer-events-none absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-text"
+            aria-hidden="true"
+          />
+          <Input
+            aria-label={t('settings.searchLabel')}
+            placeholder={t('settings.searchPlaceholder')}
+            value={settingsQuery}
+            onChange={(event) => setSettingsQuery(event.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
       {isLoading ? (
         <SettingsLoading />
       ) : (
@@ -2123,7 +1959,7 @@ const SettingsPage: React.FC = () => {
               categories={categories}
               itemsByCategory={itemsByCategory}
               activeCategory={activeCategory}
-              onSelect={setActiveCategory}
+              onSelect={handleCategorySelect}
             />
           </aside>
 
@@ -2155,6 +1991,24 @@ const SettingsPage: React.FC = () => {
                 </div>
               </SettingsSectionCard>
             ) : null}
+            {activeCategory === 'system' ? (
+              <SettingsSectionCard
+                title={t('settings.usageCardTitle')}
+                description={t('settings.usageCardDescription')}
+              >
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => window.location.assign('/usage')}
+                  >
+                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    {t('settings.usageCardOpen')}
+                  </Button>
+                </div>
+              </SettingsSectionCard>
+            ) : null}
             {shouldShowFirstRunSetup ? (
               <FirstRunSetupCard
                 status={setupStatus}
@@ -2166,7 +2020,7 @@ const SettingsPage: React.FC = () => {
                 smokeError={setupSmokeError}
                 smokeSuccess={setupSmokeSuccess}
                 onRefresh={refreshSetupStatus}
-                onSelectCategory={setActiveCategory}
+                onSelectCategory={handleCategorySelect}
                 onRunSmoke={handleRunSetupSmoke}
                 listSeparator={uiLanguage === 'en' ? ', ' : '、'}
                 t={t}
@@ -2216,19 +2070,6 @@ const SettingsPage: React.FC = () => {
                 t={t}
                 language={uiLanguage}
               />
-            ) : null}
-            {activeCategory === 'system' ? (
-              <SettingsPanelErrorBoundary
-                title={t('settings.dataQualityTitle')}
-                resetKey={`data-quality:${configVersion}`}
-                diagnosticHint={settingsPanelDiagnosticHint}
-              >
-                <DataQualityCard
-                  t={t}
-                  language={uiLanguage}
-                  disabled={isSaving || isLoading}
-                />
-              </SettingsPanelErrorBoundary>
             ) : null}
             {activeCategory === 'system' ? (
               <SettingsSectionCard
@@ -2371,7 +2212,7 @@ const SettingsPage: React.FC = () => {
               >
                 <IntelligentImport
                   stockListValue={
-                    (activeItems.find((i) => i.key === 'STOCK_LIST')?.value as string) ?? ''
+                    (rawActiveItems.find((i) => i.key === 'STOCK_LIST')?.value as string) ?? ''
                   }
                   configVersion={configVersion}
                   maskToken={maskToken}
@@ -2434,19 +2275,6 @@ const SettingsPage: React.FC = () => {
                     onChannelChange={(c) => setActiveNotificationChannel(c)}
                   />
                 </Dialog>
-              </SettingsPanelErrorBoundary>
-            ) : null}
-            {activeCategory === 'notification' ? (
-              <SettingsPanelErrorBoundary
-                title={t('settings.deliveryTitle')}
-                resetKey={`notification-delivery:${configVersion}`}
-                diagnosticHint={settingsPanelDiagnosticHint}
-              >
-                <NotificationDeliveryCard
-                  t={t}
-                  language={uiLanguage}
-                  disabled={isSaving || isLoading}
-                />
               </SettingsPanelErrorBoundary>
             ) : null}
             {activeCategory === 'agent' ? (

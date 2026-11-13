@@ -1110,6 +1110,62 @@ class TestRiskAgentPostProcess(unittest.TestCase):
                 self.assertAlmostEqual(op.confidence, expected_confidence)
 
 
+class TestTechnicalAndIntelConfidenceDegradation(unittest.TestCase):
+    """A malformed confidence must degrade one number, not crash the stage."""
+
+    def _make_technical(self):
+        from src.agent.agents.technical_agent import TechnicalAgent
+        return TechnicalAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+
+    def _make_intel(self):
+        from src.agent.agents.intel_agent import IntelAgent
+        return IntelAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
+
+    def test_technical_non_numeric_confidence_keeps_the_opinion(self):
+        agent = self._make_technical()
+        cases = [
+            (None, 0.5),
+            ("0.x", 0.5),
+            ("高", 0.5),
+            ("80", 0.8),
+            (30, 0.3),
+        ]
+
+        for value, expected_confidence in cases:
+            with self.subTest(confidence=value):
+                payload = {
+                    "signal": "hold",
+                    "confidence": value,
+                    "reasoning": "ok",
+                    "key_levels": {"support": "0.x", "resistance": 10},
+                    "trend_score": 50,
+                    "ma_alignment": "neutral",
+                    "volume_status": "normal",
+                    "pattern": "none",
+                }
+
+                op = agent.post_process(AgentContext(), json.dumps(payload))
+
+                self.assertIsNotNone(op)
+                self.assertAlmostEqual(op.confidence, expected_confidence)
+
+    def test_intel_non_numeric_confidence_keeps_the_opinion(self):
+        agent = self._make_intel()
+        for value, expected_confidence in ((None, 0.5), ("0.x", 0.5), ("70", 0.7)):
+            with self.subTest(confidence=value):
+                payload = {
+                    "signal": "hold",
+                    "confidence": value,
+                    "reasoning": "ok",
+                    "risk_alerts": [],
+                }
+
+                op = agent.post_process(AgentContext(), json.dumps(payload))
+
+                self.assertIsNotNone(op)
+                self.assertAlmostEqual(op.confidence, expected_confidence)
+
+
 class TestDecisionAgentPostProcess(unittest.TestCase):
     """Test DecisionAgent dashboard normalization behaviour."""
 

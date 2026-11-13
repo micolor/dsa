@@ -13,6 +13,17 @@ vi.mock('../../../contexts/AuthContext', () => ({
   }),
 }));
 
+vi.mock('../../../api/inbox', () => ({
+  INBOX_UPDATED_EVENT: 'dsa-inbox-updated',
+  INBOX_OPEN_ALL_EVENT: 'dsa-inbox-open-all',
+  inboxApi: {
+    list: vi.fn().mockResolvedValue({ items: [], unreadCount: 0, total: 0, page: 1, pageSize: 20, hasMore: false }),
+    markRead: vi.fn().mockResolvedValue(0),
+    markUnread: vi.fn().mockResolvedValue(0),
+    markAllRead: vi.fn().mockResolvedValue(0),
+  },
+}));
+
 vi.mock('../../../stores/agentChatStore', () => ({
   useAgentChatStore: (selector: (state: { completionBadge: boolean }) => unknown) =>
     selector({ completionBadge: true }),

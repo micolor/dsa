@@ -42,7 +42,7 @@ npm run dev
 
 ### 前置条件
 
-- Node.js 18+
+- Node.js 22.12+（Electron 45 安装脚本的最低版本要求）
 - Python 3.10+
 - 开启 Windows 开发者模式（electron-builder 需要创建符号链接）
   - 设置 -> 隐私和安全性 -> 开发者选项 -> 开发者模式

@@ -3,6 +3,7 @@ import { Component, Suspense } from 'react';
 import type { ErrorInfo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { Button } from '../common';
 
 type PageLoadingFallbackProps = {
   fullPage?: boolean;
@@ -74,20 +75,12 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
             {this.props.text.description}
           </p>
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => window.location.reload()}
-            >
+            <Button variant="primary" onClick={() => window.location.reload()}>
               {this.props.text.reload}
-            </button>
-            <button
-              type="button"
-              className="rounded-xl border border-border/70 bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover"
-              onClick={() => window.location.assign('/')}
-            >
+            </Button>
+            <Button variant="secondary" onClick={() => window.location.assign('/')}>
               {this.props.text.backHome}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

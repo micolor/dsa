@@ -36,6 +36,7 @@ export const ACTION_PROPOSAL_KINDS = [
   'config_update',
   'scheduler_run',
   'notification_test',
+  'scheduled_task_delete',
 ] as const;
 
 /** kind 类型从运行时数组派生：单一源，二者不可能不一致（详见上方注释）。 */

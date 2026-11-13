@@ -8,7 +8,6 @@
 #   同时启动: docker-compose -f ./docker/docker-compose.yml up -d analyzer server
 
 name: daily-stock-analysis
-version: '3.8'
 
 x-common: &common
   build:
@@ -57,7 +56,15 @@ x-common: &common
         memory: 512M
 
 services:
-  # 定时任务模式
+  # 一体化模式：Web UI + 运行时调度器（推荐 Docker 部署）
+  app:
+    <<: *common
+    container_name: stock-app
+    command: ["python", "main.py", "--serve", "--host", "0.0.0.0", "--port", "${API_PORT:-8000}"]
+    ports:
+      - "${API_PORT:-8000}:${API_PORT:-8000}"
+
+  # 定时任务模式（无 Web UI）
   analyzer:
     <<: *common
     container_name: stock-analyzer

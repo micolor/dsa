@@ -33,8 +33,8 @@ export const Card: React.FC<CardProps> = ({
   };
 
   const variantStyles = {
-    default: 'terminal-card',
-    bordered: 'terminal-card',
+    default: 'glass-card',
+    bordered: 'glass-card',
     gradient: 'gradient-border-card',
   };
 
@@ -59,7 +59,7 @@ export const Card: React.FC<CardProps> = ({
   return (
     <div
       style={style}
-      className={cn('rounded-2xl', variantStyles[variant], hoverStyles, paddingStyles[padding], className)}
+      className={cn(variantStyles[variant], hoverStyles, paddingStyles[padding], className)}
     >
       {(title || subtitle) && (
         <div className="mb-3">

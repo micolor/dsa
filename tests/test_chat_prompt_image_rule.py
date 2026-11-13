@@ -32,6 +32,14 @@ class TestChatPromptImageRule(unittest.TestCase):
             blocks.append(block[0])
         self.assertEqual(blocks[0], blocks[1], msg="两套 chat 提示词的规则 12 必须逐字相同")
 
+    def test_both_chat_prompts_prioritize_intent_and_concise_answers(self):
+        for prompt in CHAT_PROMPTS:
+            self.assertIn("回答优先级", prompt)
+            self.assertIn("先判断用户这条消息真正要什么", prompt)
+            self.assertIn("场外基金", prompt)
+            self.assertIn("不要长篇复盘", prompt)
+            self.assertIn("能力范围", prompt)
+
     def test_codex_prompt_does_not_get_the_rule(self):
         """Codex 是只读面，写入/直执行工具不在该面上（见 tool_surface 的 cancellation_safe 过滤）。"""
         self.assertNotIn("图中股票", CODEX_CHAT_SYSTEM_PROMPT)

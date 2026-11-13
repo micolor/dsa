@@ -367,7 +367,13 @@ class PaperService:
         """
         positions = self.paper_repo.list_open_positions(account.id)
         if not positions:
-            return date.today()
+            # 空仓时没有持仓市场可参考，按 A 股交易日历取最近一个已收盘交易日。
+            # 直接返回自然日会让周末/节假日也写快照，净值曲线出现无意义的平点。
+            try:
+                return get_effective_trading_date("cn")
+            except Exception:  # pragma: no cover - calendar failure; fall back to local today
+                logger.warning("paper: resolve_valuation_date fallback to today", exc_info=True)
+                return date.today()
         market = get_market_for_stock(positions[0].stock_code)
         try:
             return get_effective_trading_date(market)
@@ -420,6 +426,97 @@ class PaperService:
             "signals_replayed": processed,
             "snapshot": self.get_snapshot(account.id),
         }
+
+    def auto_trade_once(
+        self,
+        account_id: Optional[int] = None,
+        *,
+        lookback_days: int = 7,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Consume recent active signals once, sells before buys, buys by score.
+
+        This is the daily automation entry point. It does not invent decisions:
+        it only executes the actions already emitted by the analysis pipeline.
+        ``process_signal`` keeps the existing idempotency and per-account lock,
+        so calling this twice on the same day is safe.
+        """
+        account = (
+            self.paper_repo.get_account(int(account_id))
+            if account_id is not None
+            else self.paper_repo.ensure_account()
+        )
+        if account is None:
+            return {"status": "account_not_found", "account_id": account_id}
+
+        now_dt = now or datetime.now()
+        since = now_dt - timedelta(days=max(1, int(lookback_days)))
+        signals = self._active_signals_since(since, now_dt)
+
+        sells = [signal for signal in signals if signal.action in ("sell", "reduce")]
+        buys = [signal for signal in signals if signal.action in ("buy", "add")]
+        # Higher score first; unknown scores go last, then older signals first.
+        buys.sort(
+            key=lambda signal: (
+                -(int(signal.score) if signal.score is not None else -1),
+                signal.created_at or datetime.min,
+                signal.id,
+            )
+        )
+        ordered = sells + buys
+
+        processed = 0
+        skipped = 0
+        unavailable = 0
+        results: List[Dict[str, Any]] = []
+        for signal in ordered:
+            outcome = self.process_signal(signal.id)
+            status = str(outcome.get("status") or "")
+            if status == "processed":
+                processed += 1
+            elif status == "skipped":
+                skipped += 1
+            elif status == _DATA_UNAVAILABLE:
+                unavailable += 1
+            results.append({
+                "signal_id": signal.id,
+                "stock_code": signal.stock_code,
+                "action": signal.action,
+                "status": status,
+                "disposition": outcome.get("disposition"),
+            })
+
+        return {
+            "status": "ok",
+            "account_id": account.id,
+            "lookback_days": max(1, int(lookback_days)),
+            "signals_seen": len(ordered),
+            "processed": processed,
+            "skipped": skipped,
+            "unavailable": unavailable,
+            "results": results,
+        }
+
+    def _active_signals_since(
+        self,
+        created_from: datetime,
+        created_to: datetime,
+    ) -> List[DecisionSignalRecord]:
+        rows: List[DecisionSignalRecord] = []
+        page = 1
+        while True:
+            batch, _ = self.decision_repo.list(
+                created_from=created_from,
+                created_to=created_to,
+                status="active",
+                page=page,
+                page_size=100,
+            )
+            rows.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return rows
 
     def get_snapshot(self, account_id: int) -> Dict[str, Any]:
         account = self.paper_repo.get_account(account_id) or self.paper_repo.ensure_account()
@@ -677,7 +774,9 @@ class PaperService:
         if position is None:
             return _NO_POSITION
 
-        sell_price = self._close_price(code, as_of) or position.current_price
+        # 卖出与买入使用同一套行情可用性口径：拿不到当日 bar 就留给后续
+        # 自动交易/回填重试，而不是用上一次估值价“凭空”成交。
+        sell_price = self._close_price(code, as_of)
         if not sell_price or sell_price <= 0:
             return _DATA_UNAVAILABLE
         market = getattr(position, "market", None) or signal.market

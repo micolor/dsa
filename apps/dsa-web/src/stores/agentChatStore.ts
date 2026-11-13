@@ -21,6 +21,25 @@ import {
 } from '../types/agentAction';
 
 const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
+const STORAGE_KEY_SEEN_SESSIONS = 'dsa_chat_seen_sessions';
+const STORAGE_KEY_SEEN_INITIALIZED = 'dsa_chat_seen_initialized';
+
+const loadSeenSessions = (): Record<string, string> => {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SEEN_SESSIONS);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string') result[key] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+};
 
 // 实时进度步骤保留上限。完整详情在完成时仍会随 thinkingSteps 落进对应消息，
 // 这里只限制「运行中」状态条的常驻数组长度，避免长任务（尤其 codex）无界累积。
@@ -43,6 +62,11 @@ export interface ProgressStep {
   message?: string;
   content?: string;
   delta?: string;
+  /** stage_done 附带：该阶段的结论摘要（技术面/情报面/风险面/技能）。 */
+  summary?: string;
+  /** stage_done 附带：该阶段的结构化信号与置信度。 */
+  signal?: string;
+  confidence?: number;
   meta?: Record<string, unknown>;
   backend?: string;
   error_code?: string;
@@ -154,6 +178,20 @@ function getStreamFailureError(
   );
 }
 
+interface SessionStream {
+  messages: Message[];
+  selectedSkillIds: string[] | null;
+  loading: boolean;
+  progressSteps: ProgressStep[];
+  chatError: ParsedApiError | null;
+  abortController: AbortController | null;
+  activeRequestId: string | null;
+  serverCancellation: boolean;
+  stopping: boolean;
+  terminalStatus: StreamTerminalStatus;
+  stopError: boolean;
+}
+
 interface AgentChatState {
   messages: Message[];
   selectedSkillIds: string[] | null;
@@ -162,6 +200,8 @@ interface AgentChatState {
   sessionId: string;
   sessions: ChatSessionItem[];
   sessionsLoading: boolean;
+  /** Last time the user opened each session (ISO), used for the unread dot. */
+  sessionSeenAt: Record<string, string>;
   chatError: ParsedApiError | null;
   currentRoute: string;
   completionBadge: boolean;
@@ -172,12 +212,18 @@ interface AgentChatState {
   stopping: boolean;
   terminalStatus: StreamTerminalStatus;
   stopError: boolean;
+  /**
+   * 按会话保存的流式运行态。切换到别的会话时，正在跑的 SSE 仍写入这里；
+   * 当前会话的扁平字段只是它的镜像，供页面直接订阅。
+   */
+  sessionStreams: Record<string, SessionStream>;
 }
 
 interface AgentChatActions {
   setSelectedSkillIds: (skillIds: string[]) => void;
   setCurrentRoute: (path: string) => void;
   clearCompletionBadge: () => void;
+  markSessionSeen: (sessionId: string) => void;
   loadSessions: () => Promise<void>;
   loadInitialSession: () => Promise<void>;
   switchSession: (targetSessionId: string) => Promise<void>;
@@ -206,26 +252,104 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
    */
   const SERVER_CANCEL_WATCHDOG_MS = 660_000;
 
-  let cancelWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  const clearCancelWatchdog = () => {
-    if (cancelWatchdogTimer !== null) {
-      clearTimeout(cancelWatchdogTimer);
-      cancelWatchdogTimer = null;
+  const clearCancelWatchdog = (requestId: string) => {
+    const timer = cancelWatchdogTimers.get(requestId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      cancelWatchdogTimers.delete(requestId);
     }
   };
 
-  const armCancelWatchdog = (requestId: string) => {
-    clearCancelWatchdog();
-    cancelWatchdogTimer = setTimeout(() => {
-      cancelWatchdogTimer = null;
-      const current = get();
+  const createSessionStream = (overrides: Partial<SessionStream> = {}): SessionStream => ({
+    messages: [],
+    selectedSkillIds: null,
+    loading: false,
+    progressSteps: [],
+    chatError: null,
+    abortController: null,
+    activeRequestId: null,
+    serverCancellation: false,
+    stopping: false,
+    terminalStatus: null,
+    stopError: false,
+    ...overrides,
+  });
+
+  const streamToFlatState = (stream: SessionStream) => ({
+    messages: stream.messages,
+    selectedSkillIds: stream.selectedSkillIds,
+    loading: stream.loading,
+    progressSteps: stream.progressSteps,
+    chatError: stream.chatError,
+    abortController: stream.abortController,
+    activeRequestId: stream.activeRequestId,
+    serverCancellation: stream.serverCancellation,
+    stopping: stream.stopping,
+    terminalStatus: stream.terminalStatus,
+    stopError: stream.stopError,
+  });
+
+  /**
+   * 把一次流式更新写到它所属的会话，而不是无条件写当前页面。
+   * 当前会话同步镜像到扁平字段，其他会话只留在 sessionStreams 里。
+   */
+  const patchSessionStream = (
+    targetSessionId: string,
+    updater: Partial<SessionStream> | ((stream: SessionStream) => Partial<SessionStream>),
+  ) => {
+    set((state) => {
+      const current = state.sessionStreams[targetSessionId] ?? createSessionStream();
+      const patch = typeof updater === 'function' ? updater(current) : updater;
+      const nextStream = { ...current, ...patch };
+      const sessionStreams = { ...state.sessionStreams, [targetSessionId]: nextStream };
+      return state.sessionId === targetSessionId
+        ? { sessionStreams, ...streamToFlatState(nextStream) }
+        : { sessionStreams };
+    });
+  };
+
+  /**
+   * 单测和旧调用方可能只设置了扁平字段；在切换/停止前把它补成一条会话运行态，
+   * 否则后续 patch 会拿默认值覆盖掉正在进行的 loading / abortController。
+   */
+  const snapshotActiveSessionStream = () => {
+    const state = get();
+    if (state.sessionStreams[state.sessionId] || (!state.abortController && !state.loading)) {
+      return;
+    }
+    set((s) => ({
+      sessionStreams: {
+        ...s.sessionStreams,
+        [s.sessionId]: createSessionStream({
+          messages: s.messages,
+          selectedSkillIds: s.selectedSkillIds,
+          loading: s.loading,
+          progressSteps: s.progressSteps,
+          chatError: s.chatError,
+          abortController: s.abortController,
+          activeRequestId: s.activeRequestId,
+          serverCancellation: s.serverCancellation,
+          stopping: s.stopping,
+          terminalStatus: s.terminalStatus,
+          stopError: s.stopError,
+        }),
+      },
+    }));
+  };
+
+  const armCancelWatchdog = (sessionId: string, requestId: string) => {
+    clearCancelWatchdog(requestId);
+    cancelWatchdogTimers.set(requestId, setTimeout(() => {
+      cancelWatchdogTimers.delete(requestId);
+      const stream = get().sessionStreams[sessionId];
       // 流已经自己结束了、或已经换成了别的请求：什么都不用做。
-      if (current.activeRequestId !== requestId || !current.loading) {
+      if (!stream || stream.activeRequestId !== requestId || !stream.loading) {
         return;
       }
-      current.abortController?.abort();
-      set({
+      stream.abortController?.abort();
+      patchSessionStream(sessionId, {
         loading: false,
         progressSteps: [],
         abortController: null,
@@ -239,17 +363,17 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           category: 'upstream_timeout',
         }),
       });
-    }, SERVER_CANCEL_WATCHDOG_MS);
+    }, SERVER_CANCEL_WATCHDOG_MS));
   };
 
-  const deliverServerCancellation = async (requestId: string): Promise<void> => {
+  const deliverServerCancellation = async (sessionId: string, requestId: string): Promise<void> => {
     try {
       await agentApi.cancelChatStream(requestId);
-      armCancelWatchdog(requestId);
+      armCancelWatchdog(sessionId, requestId);
     } catch {
-      const current = get();
-      if (current.activeRequestId === requestId && current.loading) {
-        set({ stopping: false, stopError: true });
+      const stream = get().sessionStreams[sessionId];
+      if (stream?.activeRequestId === requestId && stream.loading) {
+        patchSessionStream(sessionId, { stopping: false, stopError: true });
       }
     }
   };
@@ -262,6 +386,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   sessionId: getInitialSessionId(),
   sessions: [],
   sessionsLoading: false,
+  sessionSeenAt: loadSeenSessions(),
   chatError: null,
   currentRoute: '',
   completionBadge: false,
@@ -272,12 +397,26 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   stopping: false,
   terminalStatus: null,
   stopError: false,
+  sessionStreams: {},
 
   setSelectedSkillIds: (skillIds) => set({ selectedSkillIds: skillIds }),
 
   setCurrentRoute: (path) => set({ currentRoute: path }),
 
   clearCompletionBadge: () => set({ completionBadge: false }),
+
+  markSessionSeen: (sessionId) => {
+    if (!sessionId) return;
+    set((state) => {
+      const next = { ...state.sessionSeenAt, [sessionId]: new Date().toISOString() };
+      try {
+        localStorage.setItem(STORAGE_KEY_SEEN_SESSIONS, JSON.stringify(next));
+      } catch {
+        // localStorage may be unavailable in private mode; keep the in-memory copy.
+      }
+      return { sessionSeenAt: next };
+    });
+  },
 
   loadSessions: async () => {
     set({ sessionsLoading: true });
@@ -299,6 +438,23 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     try {
       const sessionList = await agentApi.getChatSessions();
       set({ sessions: sessionList });
+
+      // First run of the unread-dot feature: baseline every existing session as
+      // already seen, otherwise all historical conversations light up at once.
+      if (localStorage.getItem(STORAGE_KEY_SEEN_INITIALIZED) !== '1') {
+        const baselineTime = new Date().toISOString();
+        const baseline: Record<string, string> = {};
+        for (const session of sessionList) {
+          baseline[session.session_id] = baselineTime;
+        }
+        try {
+          localStorage.setItem(STORAGE_KEY_SEEN_SESSIONS, JSON.stringify(baseline));
+          localStorage.setItem(STORAGE_KEY_SEEN_INITIALIZED, '1');
+        } catch {
+          // Keep the in-memory baseline even when localStorage is unavailable.
+        }
+        set({ sessionSeenAt: baseline });
+      }
 
       const savedId = localStorage.getItem(STORAGE_KEY_SESSION);
       if (savedId) {
@@ -323,6 +479,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       } else {
         localStorage.setItem(STORAGE_KEY_SESSION, get().sessionId);
       }
+      get().markSessionSeen(get().sessionId);
     } catch {
       // Ignore
     } finally {
@@ -331,26 +488,57 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   },
 
   switchSession: async (targetSessionId) => {
-    const { sessionId, messages, abortController } = get();
+    const { sessionId, messages } = get();
     if (targetSessionId === sessionId && messages.length > 0) return;
 
-    abortController?.abort();
-    clearCancelWatchdog();
+    // 切换不会中断任何流：旧会话的流继续写 sessionStreams[旧会话]。
+    snapshotActiveSessionStream();
+    const targetStream = get().sessionStreams[targetSessionId];
+
     set({
-      messages: [],
-      selectedSkillIds: null,
       sessionId: targetSessionId,
-      loading: false,
-      progressSteps: [],
-      chatError: null,
-      abortController: null,
-      activeRequestId: null,
-      serverCancellation: false,
-      stopping: false,
-      terminalStatus: null,
-      stopError: false,
+      ...streamToFlatState(targetStream ?? createSessionStream()),
     });
     localStorage.setItem(STORAGE_KEY_SESSION, targetSessionId);
+    get().markSessionSeen(targetSessionId);
+
+    if (targetStream) {
+      if (targetStream.loading) {
+        // 后台仍在跑：直接展示它的实时消息与进度，后续事件会继续镜像到扁平字段。
+        return;
+      }
+      // 已结束的后台会话：成功结果直接沿用运行态（保留思考过程/操作卡片）；
+      // 取消、超时或失败时服务端会落 "[已停止]"/失败说明，需要回读历史校正。
+      const hasVisibleAnswer = targetStream.messages.some(
+        (message) => message.role === 'assistant' && message.content.trim() !== '',
+      );
+      if (!hasVisibleAnswer || targetStream.terminalStatus || targetStream.chatError) {
+        try {
+          const detail = await agentApi.getChatSessionMessages(targetSessionId);
+          if (get().sessionId !== targetSessionId) {
+            return;
+          }
+          if (detail.messages.length > 0) {
+            set({
+              messages: detail.messages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+              })),
+              selectedSkillIds: detail.session_state.selected_skill_ids,
+            });
+          }
+        } catch {
+          // 保留运行态快照里的结果
+        }
+      }
+      set((state) => {
+        const sessionStreams = { ...state.sessionStreams };
+        delete sessionStreams[targetSessionId];
+        return { sessionStreams };
+      });
+      return;
+    }
 
     try {
       const detail = await agentApi.getChatSessionMessages(targetSessionId);
@@ -371,28 +559,19 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   },
 
   startNewChat: () => {
-    // Abort any in-flight stream so the old request does not keep running
-    get().abortController?.abort();
-    clearCancelWatchdog();
+    // 旧会话如果还在分析，保留它的运行态，不 abort。
+    snapshotActiveSessionStream();
     const newId = generateUUID();
     set({
       sessionId: newId,
-      messages: [],
-      selectedSkillIds: null,
-      loading: false,
-      progressSteps: [],
-      chatError: null,
-      abortController: null,
-      activeRequestId: null,
-      serverCancellation: false,
-      stopping: false,
-      terminalStatus: null,
-      stopError: false,
+      ...streamToFlatState(createSessionStream()),
     });
     localStorage.setItem(STORAGE_KEY_SESSION, newId);
+    get().markSessionSeen(newId);
   },
 
   stopStream: async () => {
+    snapshotActiveSessionStream();
     const state = get();
     if (!state.loading || state.stopping) return;
     if (!state.serverCancellation || !state.activeRequestId) {
@@ -400,33 +579,32 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       return;
     }
 
-    set({ stopping: true, stopError: false });
-    await deliverServerCancellation(state.activeRequestId);
+    patchSessionStream(state.sessionId, { stopping: true, stopError: false });
+    await deliverServerCancellation(state.sessionId, state.activeRequestId);
   },
 
   startStream: async (payload, meta) => {
-    if (get().loading) return;
-    const { abortController: prevAc, sessionId: storeSessionId } = get();
-    prevAc?.abort();
-    clearCancelWatchdog();
+    const storeSessionId = get().sessionId;
+    const streamSessionId = payload.session_id || storeSessionId;
+    if (get().loading || get().sessionStreams[streamSessionId]?.loading) return;
 
     const ac = new AbortController();
     const requestId = payload.request_id || generateUUID();
-    set({
+    const initialStream = createSessionStream({
+      messages: streamSessionId === storeSessionId ? get().messages : [],
+      selectedSkillIds: streamSessionId === storeSessionId ? get().selectedSkillIds : null,
+      loading: true,
       abortController: ac,
       activeRequestId: requestId,
-      serverCancellation: false,
-      stopping: false,
-      terminalStatus: null,
-      stopError: false,
     });
+    set((state) => ({
+      sessionStreams: { ...state.sessionStreams, [streamSessionId]: initialStream },
+      ...(state.sessionId === streamSessionId ? streamToFlatState(initialStream) : {}),
+    }));
 
-    const streamSessionId = payload.session_id || storeSessionId;
     const ownsStream = () => {
-      const state = get();
-      return state.abortController === ac
-        && state.activeRequestId === requestId
-        && state.sessionId === streamSessionId;
+      const stream = get().sessionStreams[streamSessionId];
+      return stream?.abortController === ac && stream?.activeRequestId === requestId;
     };
     const skillNames = meta?.skillNames?.length
       ? meta.skillNames
@@ -444,11 +622,20 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       imageDataUrl: meta?.imageDataUrl,
     };
 
-    set({
-      loading: true,
-      progressSteps: [],
-      chatError: null,
-    });
+    // 揭示定时器的清理必须能在 finally 里执行，所以状态放在 try 之外。
+    let revealTimer: ReturnType<typeof setInterval> | null = null;
+    // 失败时把已收到的分片一次性补齐，避免「最慢的 40ms」把已有内容吞掉。
+    let flushAllStreaming: (() => void) | null = null;
+    const revealWaiters: Array<() => void> = [];
+    const resolveRevealWaiters = () => {
+      revealWaiters.splice(0).forEach((resolve) => resolve());
+    };
+    const stopRevealTimer = () => {
+      if (revealTimer !== null) {
+        clearInterval(revealTimer);
+        revealTimer = null;
+      }
+    };
 
     try {
       const response = await agentApi.chatStream(
@@ -467,17 +654,25 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const pendingActionProposals: ActionProposal[] = [];
       const pendingExecutions: ActionExecuted[] = [];
       const pendingTasks: ActionTask[] = [];
-      // Streaming text accumulation. content_delta events append here and the
-      // assistant message is updated on a ~40ms throttle to avoid re-rendering
-      // the full Markdown on every token.
+      // Streaming text accumulation. content_delta events append to
+      // ``streamingBuffer`` while the assistant bubble only renders the
+      // revealed prefix.  Fast providers (deepseek-flash delivers ~500 chars
+      // in about a second) would otherwise make the whole answer appear at
+      // once; revealing at a readable cadence — but never falling more than
+      // REVEAL_CATCHUP_SECONDS behind the received text — keeps it visibly
+      // typing without holding the user back on a long answer.
       let streamingBuffer = '';
+      let revealedLength = 0;
       let streamingMessageAppended = false;
-      let lastStreamFlush = 0;
-      const STREAM_FLUSH_INTERVAL_MS = 40;
+      const REVEAL_TICK_MS = 40;
+      const REVEAL_MIN_CPS = 45;
+      const REVEAL_CATCHUP_SECONDS = 2;
+      // Short replies finish inside one tick instead of being paced char by char.
+      const REVEAL_INSTANT_THRESHOLD = 32;
       const appendStreamingMessage = () => {
-        set((s) => ({
+        patchSessionStream(streamSessionId, (stream) => ({
           messages: [
-            ...s.messages,
+            ...stream.messages,
             {
               id: generateUUID(),
               role: 'assistant',
@@ -494,9 +689,9 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       };
       const flushStreaming = () => {
         if (!streamingMessageAppended) return;
-        const content = streamingBuffer;
-        set((s) => {
-          const messages = [...s.messages];
+        const content = streamingBuffer.slice(0, revealedLength);
+        patchSessionStream(streamSessionId, (stream) => {
+          const messages = [...stream.messages];
           const last = messages.length - 1;
           if (last >= 0 && messages[last].role === 'assistant') {
             messages[last] = { ...messages[last], content };
@@ -504,6 +699,57 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           }
           return {};
         });
+      };
+      const revealTick = () => {
+        if (!ownsStream() || ac.signal.aborted) {
+          stopRevealTimer();
+          resolveRevealWaiters();
+          return;
+        }
+        const backlog = streamingBuffer.length - revealedLength;
+        if (backlog <= 0) {
+          stopRevealTimer();
+          resolveRevealWaiters();
+          return;
+        }
+        if (streamingBuffer.length <= REVEAL_INSTANT_THRESHOLD) {
+          revealedLength = streamingBuffer.length;
+        } else {
+          const charsPerSecond = Math.max(
+            REVEAL_MIN_CPS,
+            backlog / REVEAL_CATCHUP_SECONDS,
+          );
+          const take = Math.max(
+            1,
+            Math.round(charsPerSecond * (REVEAL_TICK_MS / 1000)),
+          );
+          revealedLength = Math.min(streamingBuffer.length, revealedLength + take);
+        }
+        flushStreaming();
+        if (revealedLength >= streamingBuffer.length) {
+          stopRevealTimer();
+          resolveRevealWaiters();
+        }
+      };
+      const ensureRevealTimer = () => {
+        if (revealTimer !== null) return;
+        revealTimer = setInterval(revealTick, REVEAL_TICK_MS);
+      };
+      const waitForReveal = () => new Promise<void>((resolve) => {
+        if (
+          ac.signal.aborted
+          || revealedLength >= streamingBuffer.length
+        ) {
+          resolve();
+          return;
+        }
+        revealWaiters.push(resolve);
+      });
+      flushAllStreaming = () => {
+        if (!streamingMessageAppended) return;
+        revealedLength = streamingBuffer.length;
+        stopRevealTimer();
+        flushStreaming();
       };
       const protocolError = (message: string) => createParsedApiError({
         title: '请求未被接受',
@@ -528,9 +774,11 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           }
           acceptedEvent = event as StreamAcceptedEvent;
           finalBackend = acceptedEvent.backend;
-          set((s) => ({
-            messages: [...s.messages, { ...userMessage, backend: acceptedEvent!.backend }],
+          patchSessionStream(streamSessionId, (stream) => ({
+            messages: [...stream.messages, { ...userMessage, backend: acceptedEvent!.backend }],
             serverCancellation: supportsServerCancellation(acceptedEvent!.backend),
+          }));
+          set((s) => ({
             sessions: s.sessions.some((x) => x.session_id === streamSessionId)
               ? s.sessions
               : [
@@ -555,26 +803,21 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           if (!delta) return;
           if (!streamingMessageAppended) {
             appendStreamingMessage();
-            lastStreamFlush = 0;
           }
           streamingBuffer += delta;
-          const now = Date.now();
-          if (now - lastStreamFlush >= STREAM_FLUSH_INTERVAL_MS) {
-            lastStreamFlush = now;
-            flushStreaming();
-          }
+          ensureRevealTimer();
           return;
         }
         if (event.type === 'done') {
-          set({ stopError: false });
+          patchSessionStream(streamSessionId, { stopError: false });
           receivedDoneEvent = true;
           const doneEvent = event as unknown as StreamFailureEvent;
           if (doneEvent.error_code === 'cancelled') {
-            set({ terminalStatus: 'cancelled' });
+            patchSessionStream(streamSessionId, { terminalStatus: 'cancelled' });
             return;
           }
           if (doneEvent.error_code === 'timeout') {
-            set({ terminalStatus: 'timeout' });
+            patchSessionStream(streamSessionId, { terminalStatus: 'timeout' });
             return;
           }
           if (doneEvent.success === false) {
@@ -588,13 +831,13 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
 
         if (event.type === 'error') {
-          set({ stopError: false });
+          patchSessionStream(streamSessionId, { stopError: false });
           const failureEvent = event as unknown as StreamFailureEvent;
           // 后端把整体超时以 error 事件上报（带 error_code:'timeout'）。
           // 与 done 事件的 timeout 分支保持一致：进入「已超时」终态而非普通错误。
           if (failureEvent.error_code === 'timeout') {
             receivedDoneEvent = true;
-            set({ terminalStatus: 'timeout' });
+            patchSessionStream(streamSessionId, { terminalStatus: 'timeout' });
             return;
           }
           throw getStreamFailureError(
@@ -624,12 +867,14 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
 
         currentProgressSteps.push(event);
-        const { progressSteps: liveSteps } = get();
-        const nextSteps =
-          liveSteps.length >= MAX_LIVE_PROGRESS_STEPS
-            ? [...liveSteps.slice(liveSteps.length - MAX_LIVE_PROGRESS_STEPS + 1), event]
-            : [...liveSteps, event];
-        set({ progressSteps: nextSteps });
+        patchSessionStream(streamSessionId, (stream) => {
+          const liveSteps = stream.progressSteps;
+          return {
+            progressSteps: liveSteps.length >= MAX_LIVE_PROGRESS_STEPS
+              ? [...liveSteps.slice(liveSteps.length - MAX_LIVE_PROGRESS_STEPS + 1), event]
+              : [...liveSteps, event],
+          };
+        });
       };
 
       while (true) {
@@ -673,6 +918,12 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         });
       }
 
+      // Let the paced reveal finish before the loading state clears, so the
+      // authoritative done.content never jumps in ahead of the visible text.
+      if (finalContent !== null) {
+        await waitForReveal();
+      }
+
       const { currentRoute } = get();
       const shouldAppend = ownsStream() && !ac.signal.aborted && finalContent !== null;
 
@@ -681,8 +932,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         if (streamingMessageAppended) {
           // A placeholder was already appended while streaming: converge it to the
           // authoritative done.content (falls back to whatever streamed so far).
-          set((s) => {
-            const messages = [...s.messages];
+          patchSessionStream(streamSessionId, (stream) => {
+            const messages = [...stream.messages];
             const last = messages.length - 1;
             if (last >= 0 && messages[last].role === 'assistant') {
               messages[last] = {
@@ -699,9 +950,9 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
             return {};
           });
         } else {
-          set((s) => ({
+          patchSessionStream(streamSessionId, (stream) => ({
             messages: [
-              ...s.messages,
+              ...stream.messages,
               {
                 id: generateUUID(),
                 role: 'assistant',
@@ -721,23 +972,27 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
         }
       }
 
-      if (ownsStream() && !ac.signal.aborted && currentRoute !== '/chat') {
+      if (ownsStream() && !ac.signal.aborted && currentRoute !== '/chat' && get().sessionId === streamSessionId) {
         set({ completionBadge: true });
       }
     } catch (error: unknown) {
       if (isAbortError(error) || !ownsStream() || ac.signal.aborted) {
         // Aborted or superseded requests must not affect the active chat.
       } else {
-        set({ chatError: getParsedApiError(error) });
+        // 失败前已收到的分片要全部显示出来：保留用户已经看到的进度。
+        flushAllStreaming?.();
+        patchSessionStream(streamSessionId, { chatError: getParsedApiError(error) });
         const { currentRoute } = get();
-        if (currentRoute !== '/chat') {
+        if (currentRoute !== '/chat' && get().sessionId === streamSessionId) {
           set({ completionBadge: true });
         }
       }
     } finally {
-      clearCancelWatchdog();
+      stopRevealTimer();
+      resolveRevealWaiters();
+      clearCancelWatchdog(requestId);
       if (ownsStream()) {
-        set({
+        patchSessionStream(streamSessionId, {
           loading: false,
           progressSteps: [],
           abortController: null,

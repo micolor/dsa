@@ -101,6 +101,17 @@ class BackfillRequest(BaseModel):
     to_date: Optional[date] = Field(None, description="回填结束日期（含），默认今天")
 
 
+class PaperAutoTradeResponse(BaseModel):
+    status: str = "ok"
+    account_id: int
+    lookback_days: int = 7
+    signals_seen: int = 0
+    processed: int = 0
+    skipped: int = 0
+    unavailable: int = 0
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class BackfillResponse(BaseModel):
     account_id: int
     from_date: str

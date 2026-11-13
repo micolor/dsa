@@ -20,7 +20,11 @@ from src.agent.factory import get_tool_registry
 # 用独立用例覆盖、不进通用表的工具：
 # - ``propose_portfolio_trade`` 由 tests/test_action_tools.py 覆盖；
 # - ``propose_config_update`` 需要按用例替换 config schema，见本文件下方两个专测。
-EXTERNALLY_COVERED = {"propose_portfolio_trade", "propose_config_update"}
+EXTERNALLY_COVERED = {
+    "propose_portfolio_trade",
+    "propose_config_update",
+    "propose_scheduled_task_delete",
+}
 
 CASES = [
     {
@@ -160,6 +164,22 @@ def test_every_registered_proposal_tool_has_a_case():
         f"未覆盖的提案工具: {sorted(registered - covered)}；"
         f"表里多余的工具: {sorted(covered - registered)}"
     )
+
+
+def test_scheduled_task_delete_proposal_requires_existing_task(monkeypatch):
+    import src.agent.tools.scheduled_task_tools as tools
+
+    class FakeService:
+        @staticmethod
+        def get_task(task_id):
+            return {"id": task_id, "name": "每日复盘", "time_of_day": "15:30"}
+
+    monkeypatch.setattr(tools, "_service", lambda: FakeService())
+    payload = get_tool_registry().execute("propose_scheduled_task_delete", task_id=7)
+
+    assert payload["kind"] == "scheduled_task_delete"
+    assert payload["proposal"] == {"task_id": 7}
+    assert "每日复盘" in payload["summary"]
 
 
 def test_alert_delete_requires_rule_id():

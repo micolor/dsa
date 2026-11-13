@@ -42,13 +42,13 @@ describe('ThemeTabs', () => {
 
     const darkTab = screen.getByRole('tab', { name: '深色' });
     const lightTab = screen.getByRole('tab', { name: '浅色' });
-    // defaultTheme="dark"
-    expect(darkTab).toHaveAttribute('aria-selected', 'true');
-    expect(lightTab).toHaveAttribute('aria-selected', 'false');
-
-    fireEvent.click(lightTab);
-
+    // defaultTheme="light"
     expect(lightTab).toHaveAttribute('aria-selected', 'true');
     expect(darkTab).toHaveAttribute('aria-selected', 'false');
+
+    fireEvent.click(darkTab);
+
+    expect(darkTab).toHaveAttribute('aria-selected', 'true');
+    expect(lightTab).toHaveAttribute('aria-selected', 'false');
   });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyActionProposal } from '../actionProposal';
+import { applyActionProposal, getConfigUpdatePreview } from '../actionProposal';
 import type { ActionProposal } from '../../types/actionProposal';
 
 vi.mock('../../api/alerts', () => ({
@@ -386,7 +386,11 @@ describe('applyActionProposal', () => {
     await applyActionProposal({
       kind: 'config_update',
       summary: 'x',
-      proposal: { config_version: 'v1', items: [{ key: 'STOCK_LIST', value: '600519' }] },
+      proposal: {
+        config_version: 'v1',
+        items: [{ key: 'STOCK_LIST', value: '600519' }],
+        preview: [{ key: 'STOCK_LIST', from: '000001', to: '600519' }],
+      },
     });
     await applyActionProposal({ kind: 'scheduler_run', summary: 'x', proposal: {} });
     await applyActionProposal({
@@ -419,6 +423,28 @@ describe('applyActionProposal', () => {
       summary: 'x',
       proposal: { channel: 'feishu' },
     })).rejects.toThrow('feishu 通知测试失败');
+  });
+
+  it('reads only well-formed config previews', () => {
+    expect(getConfigUpdatePreview({
+      kind: 'config_update',
+      summary: 'x',
+      proposal: {
+        config_version: 'v1',
+        items: [],
+        preview: [
+          { key: 'STOCK_LIST', from: '', to: '600519' },
+          { key: 'BROKEN' },
+          null,
+        ],
+      },
+    })).toEqual([{ key: 'STOCK_LIST', from: '', to: '600519' }]);
+
+    expect(getConfigUpdatePreview({
+      kind: 'scheduler_run',
+      summary: 'x',
+      proposal: { preview: [{ key: 'A', from: '1', to: '2' }] },
+    })).toEqual([]);
   });
 
   it('surfaces a failed config update instead of reporting success', async () => {

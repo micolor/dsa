@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # ===================================
 # A股自选股智能分析系统 - Docker 镜像
 # ===================================
@@ -46,8 +44,9 @@ RUN groupadd -g 1000 dsa && \
 # 复制依赖文件
 COPY requirements.txt .
 
-# 安装 Python 依赖
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+# 安装 Python 依赖（慢网络下放宽超时并重试）
+ENV PIP_DEFAULT_TIMEOUT=120
+RUN --mount=type=cache,target=/root/.cache/pip pip install --retries 5 -r requirements.txt
 
 # 复制应用代码
 COPY *.py ./

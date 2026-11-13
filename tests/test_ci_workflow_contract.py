@@ -107,6 +107,25 @@ def test_heavy_ci_jobs_are_path_filtered_and_backend_tests_are_sharded() -> None
     assert '--durations=30' in ci_gate
 
 
+def test_web_gate_runs_unit_tests_and_ci_pins_timezone() -> None:
+    """web-gate must execute Vitest and CI must match the runtime timezone.
+
+    Lint + build alone let routing, i18n, polling and theme regressions merge.
+    Timezone matters because trading-day tests derive dates from the system
+    clock; an unpinned UTC runner crosses local midnight differently from
+    ``docker/Dockerfile`` (``TZ=Asia/Shanghai``).
+    """
+    ci = _workflow(".github/workflows/ci.yml")
+    assert ci["env"]["TZ"] == "Asia/Shanghai"
+
+    web_gate = ci["jobs"]["web-gate"]
+    steps = web_gate["steps"]
+    names = [step.get("name") for step in steps]
+    commands = [str(step.get("run") or "") for step in steps]
+    assert "npm test" in commands
+    assert names.index("🧪 Unit tests") < names.index("🏗️ Build")
+
+
 def test_backend_filter_covers_mixed_changes_and_shared_web_assets() -> None:
     """Model the complete backend output, including shared Web-owned assets."""
     ci = _workflow(".github/workflows/ci.yml")

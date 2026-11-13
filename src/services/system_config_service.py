@@ -2382,6 +2382,17 @@ class SystemConfigService:
             field_schema = get_field_definition(key, value)
             is_sensitive = bool(field_schema.get("is_sensitive", False))
 
+            if field_schema.get("is_editable", True) is False:
+                issues.append(
+                    {
+                        "key": key,
+                        "code": "field_not_editable",
+                        "message": f"{key} is not editable through system config",
+                        "severity": "error",
+                    }
+                )
+                continue
+
             if is_sensitive and value == mask_token and saved_config_map.get(key):
                 continue
 

@@ -24,7 +24,7 @@ import { agentApi } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { Badge, Button, ConfirmDialog, Dialog, EmptyState, InlineAlert, ListItemRow, ScrollArea, Tooltip, useToastSync } from '../components/common';
 import { createParsedApiError, getParsedApiError } from '../api/error';
-import { applyActionProposal } from '../utils/actionProposal';
+import { applyActionProposal, getConfigUpdatePreview } from '../utils/actionProposal';
 import type { ActionProposal } from '../types/actionProposal';
 import type { ActionExecuted, ActionTask } from '../types/agentAction';
 import type { AgentStatusResponse, SkillInfo } from '../api/agent';
@@ -51,6 +51,7 @@ import { findMatchingStockCode, includesStockCode, normalizeStockCode } from '..
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { StockIndexItem } from '../types/stockIndex';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
+import type { UiTextKey } from '../i18n/uiText';
 import { formatUiText } from '../i18n/uiText';
 
 // Quick question examples shown on empty state
@@ -104,6 +105,7 @@ const MarkdownBody: React.FC<{ content: string }> = memo(({ content }) => (
 ));
 MarkdownBody.displayName = 'MarkdownBody';
 
+const CHAT_MESSAGE_COLUMN_CLASS = 'mx-auto w-full max-w-[52rem] xl:max-w-[64rem] 2xl:max-w-[72rem]';
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
 const STRONG_COMPARE_STOCK_MESSAGE_RE = /比较|对比|\bvs\b|和[^，。,.!?！？]{0,40}比/i;
@@ -172,6 +174,113 @@ const getStageDoneLabel = (step: ProgressStep): string => {
 const getPipelineBudgetSkippedLabel = (step: ProgressStep): string => {
   if (step.message) return step.message;
   return `${STAGE_FALLBACK_LABEL}因剩余预算不足被跳过`;
+};
+
+// 实时进度面板按阶段归组后的一行数据。stage 用内部 id 作为稳定 key，
+// label 则是后端已经本地化好的用户可见文案。
+type LiveStageGroup = {
+  stage: string;
+  label: string;
+  status: 'running' | 'done' | 'failed';
+  duration?: number;
+  signal?: string;
+  confidence?: number;
+  summary?: string;
+};
+
+// 后端阶段文案带「进行中...」「完成」「未完成」「超时」后缀；归组展示时
+// 这些状态由 status 单独表达，标题只留阶段名。
+const stripStageStatusSuffix = (message?: string): string => (
+  (message || '')
+    .replace(/未完成\s*$/, '')
+    .replace(/进行中[.…]*\s*$/, '')
+    .replace(/完成\s*$/, '')
+    .replace(/超时\s*$/, '')
+    .trim()
+);
+
+const buildLiveStageGroups = (steps: ProgressStep[]): LiveStageGroup[] => {
+  const groups = new Map<string, LiveStageGroup>();
+
+  for (const step of steps) {
+    const stage = step.stage?.trim();
+    if (!stage) continue;
+
+    if (step.type === 'stage_start') {
+      groups.set(stage, {
+        stage,
+        label: stripStageStatusSuffix(step.message) || STAGE_FALLBACK_LABEL,
+        status: 'running',
+      });
+    } else if (step.type === 'stage_done') {
+      const previous = groups.get(stage);
+      groups.set(stage, {
+        stage,
+        label: stripStageStatusSuffix(step.message)
+          || previous?.label
+          || STAGE_FALLBACK_LABEL,
+        status: isStageDoneSuccessful(step.status) ? 'done' : 'failed',
+        duration: typeof step.duration === 'number' ? step.duration : previous?.duration,
+        signal: step.signal || previous?.signal,
+        confidence: typeof step.confidence === 'number' ? step.confidence : previous?.confidence,
+        summary: step.summary || previous?.summary,
+      });
+    }
+  }
+
+  return [...groups.values()];
+};
+
+const SIGNAL_LABEL_KEYS = {
+  strong_buy: 'chat.signal.strong_buy',
+  buy: 'chat.signal.buy',
+  hold: 'chat.signal.hold',
+  sell: 'chat.signal.sell',
+  strong_sell: 'chat.signal.strong_sell',
+} as const satisfies Record<string, UiTextKey>;
+
+const normalizeSignalKey = (signal?: string): keyof typeof SIGNAL_LABEL_KEYS | null => {
+  switch ((signal || '').trim().toLowerCase()) {
+    case 'strong_buy':
+    case 'strong-buy':
+    case 'strongbuy':
+      return 'strong_buy';
+    case 'buy':
+    case 'bullish':
+    case 'long':
+      return 'buy';
+    case 'hold':
+    case 'neutral':
+      return 'hold';
+    case 'sell':
+    case 'bearish':
+    case 'short':
+      return 'sell';
+    case 'strong_sell':
+    case 'strong-sell':
+    case 'strongsell':
+      return 'strong_sell';
+    default:
+      return null;
+  }
+};
+
+const getSignalLabel = (signal: string | undefined, t: (key: UiTextKey) => string): string => {
+  const key = normalizeSignalKey(signal);
+  if (key) return t(SIGNAL_LABEL_KEYS[key]);
+  return (signal || '').trim();
+};
+
+const ONE_LINE_SUMMARY_LIMIT = 80;
+
+// 实时面板只放一句结论；完整推理仍在「思考过程」折叠面板里。
+const toOneLineSummary = (text?: string): string => {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const firstSentence = (normalized.match(/^[^。！？!?]+[。！？!?]?/)?.[0] || normalized).trim();
+  return firstSentence.length > ONE_LINE_SUMMARY_LIMIT
+    ? `${firstSentence.slice(0, ONE_LINE_SUMMARY_LIMIT)}…`
+    : firstSentence;
 };
 
 const isCompareStockMessage = (
@@ -505,6 +614,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
     sessionId,
     sessions,
     sessionsLoading,
+    sessionSeenAt,
     chatError,
     stopping,
     terminalStatus,
@@ -719,6 +829,17 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
       setSessionMessagesLoading(false);
     });
   }, [loadInitialSession]);
+
+  // The proactive brief is written by the backend scheduler, not by this tab.
+  // Refresh the session list periodically so its unread dot appears without a reload.
+  useEffect(() => {
+    if (isDock) return undefined;
+    void loadSessions();
+    const timer = window.setInterval(() => {
+      void loadSessions();
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [isDock, loadSessions]);
 
   useEffect(() => {
     agentApi.getSkills()
@@ -965,6 +1086,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
   // 让它跑这段会把当前页面的查询串（筛选条件、分页等）一并清掉。
   useEffect(() => {
     if (isDock) return;
+    // 设置页「问助手」等入口可以通过 ?prompt= 预填问题，但不自动发送：
+    // 用户仍有编辑和确认的机会，避免 URL 参数直接触发一次模型调用。
+    const prompt = (searchParams.get('prompt') || '').trim().slice(0, 2000);
+    if (prompt) {
+      setInput(prompt);
+      setSearchParams({}, { replace: true });
+      return;
+    }
     const stock = sanitizeFollowUpStockCode(searchParams.get('stock'));
     const name = sanitizeFollowUpStockName(searchParams.get('name'));
     const recordId = parseFollowUpRecordId(searchParams.get('recordId'));
@@ -1081,6 +1210,11 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
         imageDataUrl: pendingImage?.dataUrl,
         onAccepted: () => {
           setReadingImage(false);
+          // 后台会话的流被接受时，当前页面可能已经切到别的会话；
+          // 此时只能清「读图横幅」，不能清掉另一个会话正在编辑的输入框。
+          if (useAgentChatStore.getState().sessionId !== sessionId) {
+            return;
+          }
           followUpHydrationTokenRef.current += 1;
           followUpContextRef.current = null;
           setIsFollowUpContextLoading(false);
@@ -1312,6 +1446,72 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
     return '处理中...';
   };
 
+  // 等待期间按「阶段」而不是逐条工具展示：技术面 / 情报面 / 风险面各自一行，
+  // 完成后显示耗时、信号、置信度和一句结论。长流水线最多保留最近 5 个阶段，
+  // 避免把输入框挤走；完整步骤仍在消息提交后进入「思考过程」折叠面板。
+  const renderLiveProgress = () => {
+    const groups = buildLiveStageGroups(progressSteps).slice(-5);
+    if (groups.length === 0) return null;
+
+    return (
+      <div className="mt-2 pl-5 border-l border-border/40 space-y-1.5 animate-fade-in">
+        {groups.map((group) => {
+          const isDone = group.status === 'done';
+          const isFailed = group.status === 'failed';
+          const signalText = getSignalLabel(group.signal, t);
+          const confidenceText = typeof group.confidence === 'number'
+            ? `${Math.round(group.confidence * 100)}%`
+            : '';
+          const summary = toOneLineSummary(group.summary);
+
+          return (
+            <div
+              key={group.stage}
+              className={cn(
+                'chat-progress-item',
+                isDone
+                  ? 'chat-progress-item-success'
+                  : isFailed
+                    ? 'chat-progress-item-danger'
+                    : 'chat-progress-item-thinking',
+              )}
+            >
+              <span className={cn(
+                'chat-progress-dot',
+                isDone
+                  ? 'chat-progress-dot-success'
+                  : isFailed
+                    ? 'chat-progress-dot-danger'
+                    : 'chat-progress-dot-thinking',
+              )} />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="leading-relaxed">
+                    {group.label}
+                    {group.status === 'running' ? ` · ${t('chat.stageRunning')}` : ''}
+                  </span>
+                  {typeof group.duration === 'number' ? (
+                    <span className="text-[0.7rem] opacity-50">{group.duration.toFixed(1)}s</span>
+                  ) : null}
+                  {signalText ? (
+                    <span className="text-[0.7rem] opacity-70">
+                      {signalText}{confidenceText ? ` ${confidenceText}` : ''}
+                    </span>
+                  ) : null}
+                </div>
+                {summary ? (
+                  <span className="mt-0.5 block text-[0.7rem] leading-relaxed opacity-60">
+                    {summary}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderThinkingBlock = (msg: Message) => {
     if (!msg.thinkingSteps || msg.thinkingSteps.length === 0) return null;
     const isExpanded = expandedThinking.has(msg.id);
@@ -1397,7 +1597,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
             className={cn('chat-progress-item', statusClass)}
           >
             <span className={cn('chat-progress-dot', iconClass)} />
-            <span className="leading-relaxed">{text}</span>
+            <div className="min-w-0">
+              <span className="leading-relaxed">{text}</span>
+              {step.summary ? (
+                <span className="mt-0.5 block text-[0.7rem] leading-relaxed opacity-60">
+                  {step.summary}
+                </span>
+              ) : null}
+            </div>
           </div>
         );
       })}
@@ -1413,6 +1620,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
     const applying = status === 'applying';
     const failed = status === 'error';
     const failureMessage = actionProposalError[cardKey] ?? t('chat.actionProposalFailed');
+    const configChanges = getConfigUpdatePreview(proposal);
 
     return (
       <div key={cardKey} className="mb-3 mt-2">
@@ -1422,6 +1630,24 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
           message={(
             <span className="flex flex-col gap-3">
               <span className="font-medium">{proposal.summary}</span>
+              {configChanges.length > 0 && (
+                <span className="flex flex-col gap-1 rounded-lg border border-border/50 bg-background/35 px-2.5 py-2">
+                  <span className="text-[11px] font-medium text-muted-text">
+                    {t('chat.actionProposalConfigChanges')}
+                  </span>
+                  {configChanges.map((change) => (
+                    <span key={change.key} className="break-all font-mono text-[11px] leading-5">
+                      <span className="text-muted-text">{change.key}</span>
+                      {': '}
+                      <span>{change.from || t('chat.actionProposalUnset')}</span>
+                      <span aria-hidden="true"> → </span>
+                      <span className="font-medium text-foreground">
+                        {change.to || t('chat.actionProposalUnset')}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              )}
               {failed && (
                 <span className="text-xs">{failureMessage}</span>
               )}
@@ -1468,6 +1694,18 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
           <span className="flex flex-col gap-1">
             <span className="font-medium">{execution.summary}</span>
             <span className="text-xs">{t('chat.actionUndoHint', { hint: execution.undoHint })}</span>
+            {execution.kind.startsWith('scheduled_task_') ? (
+              <span className="mt-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate('/scheduled-tasks')}
+                >
+                  {t('chat.viewScheduledTasks')}
+                </Button>
+              </span>
+            ) : null}
           </span>
         )}
       />
@@ -1490,6 +1728,15 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
       />
     </div>
   );
+
+  const isSessionUnread = (session: { session_id: string; last_active?: string | null }) => {
+    if (session.session_id === sessionId || !session.last_active) return false;
+    const seenAt = sessionSeenAt[session.session_id];
+    if (!seenAt) return true;
+    const last = new Date(session.last_active).getTime();
+    const seen = new Date(seenAt).getTime();
+    return Number.isFinite(last) && (!Number.isFinite(seen) || last > seen);
+  };
 
   const sidebarContent = (
     <>
@@ -1528,6 +1775,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
           <div className="space-y-2">
             {sessions.map((s) => {
               const isActive = s.session_id === sessionId;
+              const isUnread = isSessionUnread(s);
               return (
                 <ListItemRow
                   key={s.session_id}
@@ -1547,8 +1795,20 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                     />
                   )}
                   title={(
-                    <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
-                      {s.title}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 truncate text-sm font-semibold text-foreground tracking-tight">
+                        {s.title}
+                      </span>
+                      {isUnread && (
+                        <span
+                          data-testid={`session-unread-dot-${s.session_id}`}
+                          className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-danger shadow-[0_0_8px_hsl(var(--danger)/0.6)]"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {isUnread && (
+                        <span className="sr-only">{t('chat.unreadUpdate')}</span>
+                      )}
                     </span>
                   )}
                   meta={(
@@ -1897,7 +2157,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                       ? 'chat.emptyDescriptionCodex'
                       : 'chat.emptyDescriptionDefault',
                   )}
-                  className="max-w-2xl border-dashed bg-card/55"
+                  className="max-w-2xl border-dashed bg-card/55 xl:max-w-3xl 2xl:max-w-4xl"
                   icon={(
                     <svg
                       className="h-8 w-8"
@@ -1914,7 +2174,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                     </svg>
                   )}
                   action={(
-                    <div className="flex max-w-lg flex-wrap justify-center gap-2">
+                    <div className="flex max-w-lg flex-wrap justify-center gap-2 xl:max-w-xl 2xl:max-w-2xl">
                       {quickQuestions.map((q, i) => (
                         <button
                           key={i}
@@ -1936,13 +2196,13 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                 return (
                 <div
                   key={msg.id}
-                  className={`mx-auto flex w-full max-w-[52rem] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  className={cn(CHAT_MESSAGE_COLUMN_CLASS, 'flex', msg.role === 'user' ? 'flex-row-reverse' : '')}
                 >
                   {/* 不再渲染头像：一行的两边直接由内容自己交代 —— 用户气泡贴右、
                       AI 回复左侧起排。左右各让出的 48px（32px 头像 + 16px gap）回到正文宽度。
                       AI 回复不是气泡（不收缩到内容宽度、没有内边距），文字与面板内边距对齐。
-                      整列对话压一个 52rem 的阅读宽度上限并居中：宽屏上正文不会拉出上百字符的长行，
-                      面板更宽时两侧均匀留白，用户气泡也贴在这条列宽的内侧，而不是漂到面板最右。
+                      整列对话按视口加宽阅读上限并居中：小屏仍是 52rem，xl 放宽到 64rem、
+                      2xl 放宽到 72rem，避免宽屏两侧留下大片空白，同时不会拉出上百字符的长行。
                       用户气泡保持 w-fit + 48rem 上限 + 自己的 chip 内边距。 */}
                   <div
                     className={cn(
@@ -2051,7 +2311,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
 
             {loading && (
               /* 等待中的占位与 AI 回复同形：没有头像、没有气泡外壳，文字与 AI 回复同一条左边线。 */
-              <div className="py-4">
+              <div className={cn(CHAT_MESSAGE_COLUMN_CLASS, 'py-4')}>
                 <div className="flex items-center gap-2.5 text-sm text-secondary-text">
                   <div className="relative w-4 h-4 flex-shrink-0">
                     <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
@@ -2061,6 +2321,9 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                     {getCurrentStage(progressSteps)}
                   </span>
                 </div>
+                {/* 流水线要跑几十秒：按阶段实时展示进度与一句结论，
+                    用户不必等到最终答复出现才知道分析进行到哪一步。 */}
+                {renderLiveProgress()}
               </div>
             )}
 
@@ -2366,7 +2629,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ variant = 'page' }) => {
                     onClick={() => handleSend()}
                     disabled={(!input.trim() && !pendingImage) || loading || !agentAvailable}
                     isLoading={loading}
-                    className="btn-primary flex-shrink-0"
+                    className="flex-shrink-0"
                   >
                     {t('chat.send')}
                   </Button>

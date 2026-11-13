@@ -36,6 +36,7 @@ from src.schemas.decision_scale import action_for_score, decision_type_for_score
         ("wait", "watch"),
         ("reduce", "reduce"),
         ("减仓", "reduce"),
+        ("减仓/卖出（原建议已被风控下调）", "reduce"),
         ("trim", "reduce"),
         ("sell", "sell"),
         ("卖出", "sell"),

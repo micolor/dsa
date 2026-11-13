@@ -39,6 +39,7 @@ This is the entry point for project documentation. The README covers the project
 | [LiteLLM YAML Example](examples/litellm_config.example.yaml) | Example LiteLLM multi-provider configuration |
 | [Notification Baseline](notifications.md) <sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> (Chinese-only) | WeChat Work, Feishu, Telegram, Discord, Slack, Email, and other notification channels |
 | [Tushare Stock List Guide](TUSHARE_STOCK_LIST_GUIDE.md) <sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> (Chinese-only) | Tushare stock-list configuration and usage notes |
+| [Config Alias Consolidation](config-consolidation.md) (Chinese-only) | Legacy single/multi key and scheduler alias display policy, migration steps and rollback requirements |
 
 ## Usage Topics
 
@@ -51,6 +52,12 @@ This is the entry point for project documentation. The README covers the project
 | [OTC Fund NAV Review](fund-nav-review.md) (Chinese-only) | Fund-check anchors, 1m/3m/6m/1y NAV outcome windows, dividend-reinvested and cumulative-NAV fallback chain, NAV range API and trend chart, report-page review summary, state machine, history backfill, restore-metric backfill, auto-evaluation switch, and rollback |
 | [Analysis Context Pack Contract, Runtime Consumption, And Visibility](analysis-context-pack.md) <sub><sub>![P6 Badge](https://img.shields.io/badge/P6-orange?style=flat)</sub></sub> (Chinese-only) | AnalysisContextPack first-scope boundaries, field quality states, P1/P2 internal contracts, P3 prompt-summary consumption, P4 history/API/Web low-sensitivity visibility, P5 data-quality scoring, and P6 migration/rollback notes, plus source anchors; the full guide adds #1386 market-phase analysis, migration, and rollback entry points |
 | [Ask-stock Site Operations Assistant](agent-chat-site-operations.md) (Chinese-only) | Execution semantics, tool lists, explicit exclusions, and audit/rollback behavior for site-wide reads, low-risk direct actions, background tasks, and high-risk confirmation cards in Ask Stock |
+| [Scheduled Tasks and Calendar](scheduled-tasks.md) (Chinese-only) | User-defined recurring tasks, daily calendar, five task types, assistant create/enable/run, and scheduling semantics |
+| [Proactive Assistant Overview](proactive-assistant_EN.md) | Daily brief, event alerts, weekly review, opportunity scan, risk profile, quiet hours, retention and the bell inbox ([中文](proactive-assistant.md)) |
+| [Proactive Daily Brief](proactive-brief_EN.md) | Schedule, sections, dedup, notification and limitations of the proactive daily brief ([中文](proactive-brief.md)) |
+| [Event-Driven Agent](event-driven-agent_EN.md) | Event detection, one-shot LLM analysis, dedup and push behavior ([中文](event-driven-agent.md)) |
+| [Risk Profile and Weekly Review](risk-profile-and-weekly-review_EN.md) | Risk boundary configuration, per-account overrides, weekly decision review and portfolio checks ([中文](risk-profile-and-weekly-review.md)) |
+| [Opportunity Scan](opportunity-scan_EN.md) | Candidate shortlist from the latest screening snapshot and hot themes, freshness warnings and auto-refresh ([中文](opportunity-scan.md)) |
 | [Image Extraction Prompt](image-extract-prompt.md) <sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> (Chinese-only) | Prompt and boundaries for extracting stock information from images |
 | [OpenClaw Skill Integration](openclaw-skill-integration.md) <sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> (Chinese-only) | OpenClaw / Skill external integration notes |
 

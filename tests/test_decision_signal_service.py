@@ -668,6 +668,29 @@ def test_list_signals_does_not_backfill_market_review_history(isolated_db) -> No
         assert session.query(DecisionSignalRecord).count() == 0
 
 
+def test_list_signals_backfills_risk_downgraded_compound_sell_history(isolated_db) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(
+            operation_advice="减仓/卖出（原建议已被风控下调）",
+            decision_type="sell",
+            sentiment_score=39,
+            action=None,
+            action_label=None,
+        ),
+        query_id="query-lazy-risk-downgraded-sell",
+        report_type="simple",
+        news_content="新闻摘要",
+        context_snapshot=None,
+        save_snapshot=False,
+    )
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 1
+    assert listed["items"][0]["action"] == "reduce"
+
+
 def test_list_signals_does_not_backfill_ambiguous_history_advice(isolated_db) -> None:
     record_id = isolated_db.save_analysis_history(
         result=_history_result(operation_advice="", decision_type="", action=None, action_label=None),

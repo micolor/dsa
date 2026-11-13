@@ -1,7 +1,7 @@
 import type React from 'react';
 import { lazy, useEffect } from 'react';
 import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { ApiErrorAlert, Shell } from './components/common';
+import { ApiErrorAlert, Button, Shell } from './components/common';
 import {
   PageLoadingFallback,
   RouteOutletBoundary,
@@ -15,7 +15,6 @@ import './App.css';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const PaperTradingPage = lazy(() => import('./pages/PaperTradingPage'));
-const BacktestPage = lazy(() => import('./pages/BacktestPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
@@ -24,6 +23,7 @@ const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const DecisionSignalsPage = lazy(() => import('./pages/DecisionSignalsPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const TokenUsagePage = lazy(() => import('./pages/TokenUsagePage'));
+const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
 
 const AppContent: React.FC = () => {
@@ -50,13 +50,9 @@ const AppContent: React.FC = () => {
         <div className="w-full max-w-lg">
           <ApiErrorAlert error={loadError} />
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => void refreshStatus()}
-        >
+        <Button type="button" variant="primary" onClick={() => void refreshStatus()}>
           {t('common.retry')}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -91,8 +87,9 @@ const AppContent: React.FC = () => {
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/decision-signals" element={<DecisionSignalsPage />} />
         <Route path="/screening" element={<StockScreeningPage />} />
-        <Route path="/backtest" element={<BacktestPage />} />
+        <Route path="/backtest" element={<Navigate to="/decision-signals?tab=backtest" replace />} />
         <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/scheduled-tasks" element={<ScheduledTasksPage />} />
         <Route path="/paper" element={<PaperTradingPage />} />
         <Route path="/usage" element={<TokenUsagePage />} />
         <Route path="/settings" element={<SettingsPage />} />

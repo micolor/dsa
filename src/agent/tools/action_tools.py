@@ -1048,6 +1048,17 @@ def _config_schema_fields() -> Dict[str, Dict[str, Any]]:
     }
 
 
+_CONFIG_PREVIEW_VALUE_LIMIT = 500
+
+
+def _config_preview_value(value: Any) -> str:
+    """Render one config value for the confirmation card, bounded for SSE size."""
+    text = "" if value is None else str(value)
+    if len(text) <= _CONFIG_PREVIEW_VALUE_LIMIT:
+        return text
+    return f"{text[:_CONFIG_PREVIEW_VALUE_LIMIT]}…"
+
+
 def _handle_propose_config_update(
     config_version: str,
     items: List[Dict[str, str]],
@@ -1104,11 +1115,51 @@ def _handle_propose_config_update(
             )
         }
 
+    non_editable = [
+        item["key"]
+        for item in normalized
+        if schema_fields[item["key"].upper()].get("is_editable", True) is False
+    ]
+    if non_editable:
+        return {
+            "error": (
+                "以下配置不允许通过问股助手修改："
+                + "、".join(non_editable)
+                + "。请到设置页手动处理。"
+            )
+        }
+
     keys = [item["key"] for item in normalized]
+    # Confirmation cards should show what will actually change. Preview is
+    # display-only and must never be forwarded to the update endpoint; the Web
+    # client strips it before calling /system/config/update.
+    preview: List[Dict[str, str]] = []
+    try:
+        current_config = _system_config_service_instance().get_config(include_schema=False)
+        current_values = {
+            str(item.get("key") or "").upper(): item.get("value")
+            for item in current_config.get("items", [])
+        }
+        preview = [
+            {
+                "key": item["key"],
+                "from": _config_preview_value(current_values.get(item["key"].upper())),
+                "to": _config_preview_value(item["value"]),
+            }
+            for item in normalized
+        ]
+    except Exception as exc:
+        # A read failure must not block the proposal; the card simply omits the
+        # old→new preview and falls back to the summary.
+        logger.warning("propose_config_update preview lookup failed: %s", exc)
+
+    proposal: Dict[str, Any] = {"config_version": norm_version, "items": normalized}
+    if preview:
+        proposal["preview"] = preview
     return _proposal(
         "config_update",
         f"修改 {len(normalized)} 项系统配置：{'、'.join(keys)}",
-        {"config_version": norm_version, "items": normalized},
+        proposal,
     )
 
 
