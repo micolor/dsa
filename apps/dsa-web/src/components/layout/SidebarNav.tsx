@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bell, BriefcaseBusiness, CalendarClock, Home, Inbox, LogOut, MessageSquareQuote, Search, Settings2, TrendingUp } from 'lucide-react';
+import { Activity, BarChart3, Bell, BriefcaseBusiness, CalendarClock, Home, Inbox, LogOut, MessageSquareQuote, Settings2, TrendingUp } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { INBOX_OPEN_ALL_EVENT, INBOX_UPDATED_EVENT, inboxApi } from '../../api/inbox';
-import { SCREENING_CONFIG_CHANGED_EVENT, SYSTEM_CONFIG_CHANGED_EVENT, screeningApi } from '../../api/screening';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
@@ -15,17 +14,6 @@ type SidebarNavProps = {
   collapsed?: boolean;
   onNavigate?: () => void;
   variant?: 'default' | 'rail';
-};
-
-/** 选股导航项启用状态的本地缓存 key（避免每次打开菜单都动态插入该导航项） */
-const SCREENING_NAV_ENABLED_KEY = 'dsa.screeningNav.enabled';
-
-const readScreeningNavEnabled = (): boolean => {
-  try {
-    return window.localStorage.getItem(SCREENING_NAV_ENABLED_KEY) === '1';
-  } catch {
-    return false;
-  }
 };
 
 type NavItem = {
@@ -62,8 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'research',
     labelKey: 'layout.navGroup.research',
     items: [
-      { key: 'screening', labelKey: 'layout.nav.screening', to: '/screening', icon: Search },
-      { key: 'decision-signals', labelKey: 'layout.nav.decisionSignals', to: '/decision-signals', icon: Activity },
+      { key: 'research', labelKey: 'layout.nav.research', to: '/research', icon: Activity },
     ],
   },
   {
@@ -97,8 +84,6 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
   const { t } = useUiLanguage();
   const completionBadge = useAgentChatStore((state) => state.completionBadge);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  // 优先从本地缓存初始化，避免打开菜单时「选股」项在接口返回后才插入的闪变
-  const [showScreeningNav, setShowScreeningNav] = useState<boolean>(readScreeningNavEnabled);
   const [inboxUnread, setInboxUnread] = useState(0);
 
   // 侧栏只在菜单展开时挂载，这里的轮询生命周期很短；复用铃铛的更新事件，
@@ -123,48 +108,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-
-    const refreshScreeningStatus = async () => {
-      try {
-        const status = await screeningApi.getStatus();
-        const enabled = Boolean(status.enabled);
-        if (active) {
-          setShowScreeningNav(enabled);
-        }
-        try {
-          window.localStorage.setItem(SCREENING_NAV_ENABLED_KEY, enabled ? '1' : '0');
-        } catch {
-          // localStorage 不可用时静默降级
-        }
-      } catch {
-        if (active) {
-          // 拉取失败时回退到缓存值，避免菜单项闪变
-          setShowScreeningNav(readScreeningNavEnabled());
-        }
-      }
-    };
-
-    void refreshScreeningStatus();
-    window.addEventListener(SCREENING_CONFIG_CHANGED_EVENT, refreshScreeningStatus);
-    window.addEventListener(SYSTEM_CONFIG_CHANGED_EVENT, refreshScreeningStatus);
-
-    return () => {
-      active = false;
-      window.removeEventListener(SCREENING_CONFIG_CHANGED_EVENT, refreshScreeningStatus);
-      window.removeEventListener(SYSTEM_CONFIG_CHANGED_EVENT, refreshScreeningStatus);
-    };
-  }, []);
-
-  const navGroups = NAV_GROUPS
-    .map((group) => ({
-      ...group,
-      items: showScreeningNav
-        ? group.items
-        : group.items.filter((item) => item.key !== 'screening'),
-    }))
-    .filter((group) => group.items.length > 0);
+  const navGroups = NAV_GROUPS;
   const isRail = variant === 'rail';
   const itemBaseClass = cn(
     'group relative flex h-[var(--nav-item-height)] w-full items-center overflow-hidden rounded-xl border border-transparent text-sm leading-none text-secondary-text transition-colors',

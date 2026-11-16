@@ -356,19 +356,23 @@ export function useSystemConfig() {
         setValidationIssues(error.issues);
         setSaveError(error.parsedError);
       } else if (error instanceof SystemConfigConflictError) {
+        const parsed = error.parsedError;
         setSaveError(createParsedApiError({
           title: '配置版本冲突',
           message: `${error.message}，请先重新加载配置。`,
-          rawMessage: error.parsedError.rawMessage,
-          status: error.parsedError.status,
-          category: error.parsedError.category,
+          rawMessage: parsed?.rawMessage ?? error.message,
+          status: parsed?.status ?? 409,
+          category: parsed?.category ?? 'http_error',
         }));
+        // Retrying with the stale version can only conflict again. Force a
+        // reload so the user gets the new configVersion and can re-apply.
+        setRetryAction('load');
       } else {
         setSaveError(getParsedApiError(error));
+        setRetryAction('save');
       }
 
       setToast({ type: 'error', error: getParsedApiError(error) });
-      setRetryAction('save');
       return { success: false, message: '保存失败' };
     } finally {
       setIsSaving(false);

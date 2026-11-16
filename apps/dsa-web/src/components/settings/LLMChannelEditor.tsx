@@ -78,23 +78,23 @@ function getRouteProvenance(
   return undefined;
 }
 
-const shouldUseSavedHermesSecret = (
+const shouldUseSavedSecret = (
   channel: Pick<ChannelConfig, 'name' | 'apiKey'>,
   maskToken: string,
   hasPersistedSecret: boolean,
 ): boolean => (
-  isHermesChannel(channel) && channel.apiKey === maskToken && hasPersistedSecret
+  channel.apiKey === maskToken && hasPersistedSecret
 );
 
-const hasRuntimeOnlyMaskedHermesSecret = (
+const hasRuntimeOnlyMaskedSecret = (
   channel: Pick<ChannelConfig, 'name' | 'apiKey'>,
   maskToken: string,
   hasPersistedSecret: boolean,
 ): boolean => (
-  isHermesChannel(channel) && channel.apiKey === maskToken && !hasPersistedSecret
+  channel.apiKey === maskToken && !hasPersistedSecret
 );
 
-const RUNTIME_ONLY_HERMES_SECRET_MESSAGE = '运行时注入的 Hermes Key 不会回传；如需在设置页测试，请重新输入 Key 或保存到 .env。';
+const RUNTIME_ONLY_SECRET_MESSAGE = '运行时注入的渠道 Key 不会回传；如需在设置页测试，请重新输入 Key 或保存到 .env。';
 
 interface ChannelConfig {
   id: string;
@@ -1636,9 +1636,11 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   const initialNames = useMemo(() => initialChannels.map((channel) => channel.name), [initialChannels]);
   const initialRuntimeConfig = useMemo(() => parseRuntimeConfigFromItems(items), [items]);
   const savedItemMap = useMemo(() => new Map(items.map((item) => [item.key.toUpperCase(), item.value])), [items]);
-  const hasPersistedHermesSecret = (channel: ChannelConfig): boolean => (
-    isHermesChannel(channel) && initialItemSourceByKey.get('LLM_HERMES_API_KEY') === true
-  );
+  const hasPersistedChannelSecret = (channel: ChannelConfig): boolean => {
+    const upper = channel.name.trim().toUpperCase();
+    return initialItemSourceByKey.get(`LLM_${upper}_API_KEY`) === true
+      || initialItemSourceByKey.get(`LLM_${upper}_API_KEYS`) === true;
+  };
   const hasLitellmConfig = useMemo(
     () => items.some((item) => item.key === 'LITELLM_CONFIG' && item.value.trim().length > 0),
     [items],
@@ -2061,10 +2063,10 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   };
 
   const handleTest = async (channel: ChannelConfig) => {
-    if (hasRuntimeOnlyMaskedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel))) {
+    if (hasRuntimeOnlyMaskedSecret(channel, maskToken, hasPersistedChannelSecret(channel))) {
       setTestStates((previous) => ({
         ...previous,
-        [channel.id]: { status: 'error', text: RUNTIME_ONLY_HERMES_SECRET_MESSAGE },
+        [channel.id]: { status: 'error', text: RUNTIME_ONLY_SECRET_MESSAGE },
       }));
       return;
     }
@@ -2091,7 +2093,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         apiKey: channel.apiKey,
         models: splitModels(channel.models),
         enabled: channel.enabled,
-        useSavedSecret: shouldUseSavedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel)),
+        useSavedSecret: shouldUseSavedSecret(channel, maskToken, hasPersistedChannelSecret(channel)),
       });
 
       const text = result.success
@@ -2121,12 +2123,12 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   };
 
   const handleDiscoverModels = async (channel: ChannelConfig) => {
-    if (hasRuntimeOnlyMaskedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel))) {
+    if (hasRuntimeOnlyMaskedSecret(channel, maskToken, hasPersistedChannelSecret(channel))) {
       setDiscoveryStates((previous) => ({
         ...previous,
         [channel.id]: {
           status: 'error',
-          text: RUNTIME_ONLY_HERMES_SECRET_MESSAGE,
+          text: RUNTIME_ONLY_SECRET_MESSAGE,
           hint: undefined,
           models: previous[channel.id]?.models || [],
         },
@@ -2156,7 +2158,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         models: splitModels(channel.models),
-        useSavedSecret: shouldUseSavedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel)),
+        useSavedSecret: shouldUseSavedSecret(channel, maskToken, hasPersistedChannelSecret(channel)),
       });
 
       if (discoveryNonceRef.current[channel.id] !== nonce) return;
@@ -2214,13 +2216,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     );
     if (selected.length === 0) return;
 
-    if (hasRuntimeOnlyMaskedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel))) {
+    if (hasRuntimeOnlyMaskedSecret(channel, maskToken, hasPersistedChannelSecret(channel))) {
       setCapabilityStates((previous) => ({
         ...previous,
         [channel.id]: {
           selected,
           status: 'error',
-          text: RUNTIME_ONLY_HERMES_SECRET_MESSAGE,
+          text: RUNTIME_ONLY_SECRET_MESSAGE,
           hint: undefined,
           results: {},
         },
@@ -2254,7 +2256,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         models: splitModels(channel.models),
         enabled: channel.enabled,
         capabilityChecks: selected,
-        useSavedSecret: shouldUseSavedHermesSecret(channel, maskToken, hasPersistedHermesSecret(channel)),
+        useSavedSecret: shouldUseSavedSecret(channel, maskToken, hasPersistedChannelSecret(channel)),
       });
 
       if (capabilityNonceRef.current[channel.id] !== nonce) return;

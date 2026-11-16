@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
@@ -46,6 +46,10 @@ vi.mock('./pages/PortfolioPage', () => ({
 
 vi.mock('./pages/DecisionSignalsPage', () => ({
   default: () => <div data-testid="decision-signals-page">Decision signals</div>,
+}));
+
+vi.mock('./pages/StockScreeningPage', () => ({
+  default: () => <div data-testid="screening-page">Screening</div>,
 }));
 
 vi.mock('./pages/BacktestPage', () => ({
@@ -166,14 +170,50 @@ describe('App routing behavior', () => {
     expect(screen.queryByTestId('home-page')).not.toBeInTheDocument();
   });
 
-  it('routes /decision-signals to the AI signals page after auth is ready', async () => {
+  it('redirects old /decision-signals links to the research workspace', async () => {
     window.history.pushState({}, '', '/decision-signals');
 
     render(<App />);
 
     expect(await screen.findByTestId('decision-signals-page')).toBeInTheDocument();
-    expect(setCurrentRoute).toHaveBeenCalledWith('/decision-signals');
+    expect(setCurrentRoute).toHaveBeenCalledWith('/research/signals');
     expect(screen.queryByTestId('home-page')).not.toBeInTheDocument();
+  });
+
+  it('preserves query params when redirecting legacy research links', async () => {
+    window.history.pushState({}, '', '/backtest?code=600519');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('backtest-page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/research/backtest');
+      expect(window.location.search).toBe('?code=600519');
+    });
+  });
+
+  it('redirects the legacy screening route into the research workspace', async () => {
+    window.history.pushState({}, '', '/screening?focus=1');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('screening-page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/research/screening');
+      expect(window.location.search).toBe('?focus=1');
+    });
+  });
+
+  it('redirects the legacy decision-signals backtest tab to research/backtest', async () => {
+    window.history.pushState({}, '', '/decision-signals?tab=backtest&sourceReportId=42');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('backtest-page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/research/backtest');
+      expect(window.location.search).toBe('?sourceReportId=42');
+    });
   });
 
   it('redirects authenticated login visits back to the home page', async () => {

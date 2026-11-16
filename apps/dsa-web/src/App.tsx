@@ -15,6 +15,7 @@ import './App.css';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const PaperTradingPage = lazy(() => import('./pages/PaperTradingPage'));
+const BacktestPage = lazy(() => import('./pages/BacktestPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
@@ -23,8 +24,26 @@ const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const DecisionSignalsPage = lazy(() => import('./pages/DecisionSignalsPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const TokenUsagePage = lazy(() => import('./pages/TokenUsagePage'));
+const ResearchLayout = lazy(() => import('./components/layout/ResearchLayout'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
+
+type LegacyResearchRedirectProps = {
+  to: string;
+  backtestTo?: string;
+};
+
+/** Keep old bookmarks working while the research workspace owns the tabs. */
+const LegacyResearchRedirect: React.FC<LegacyResearchRedirectProps> = ({ to, backtestTo }) => {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (backtestTo && params.get('tab') === 'backtest') {
+    params.delete('tab');
+    const search = params.toString();
+    return <Navigate to={`${backtestTo}${search ? `?${search}` : ''}${location.hash}`} replace />;
+  }
+  return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
+};
 
 const AppContent: React.FC = () => {
   const location = useLocation();
@@ -85,9 +104,24 @@ const AppContent: React.FC = () => {
         <Route path="/" element={<HomePage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
-        <Route path="/decision-signals" element={<DecisionSignalsPage />} />
-        <Route path="/screening" element={<StockScreeningPage />} />
-        <Route path="/backtest" element={<Navigate to="/decision-signals?tab=backtest" replace />} />
+        <Route path="/research" element={<ResearchLayout />}>
+          <Route index element={<Navigate to="/research/screening" replace />} />
+          <Route path="screening" element={<StockScreeningPage />} />
+          <Route path="signals" element={<DecisionSignalsPage embedded />} />
+          <Route path="backtest" element={<BacktestPage />} />
+        </Route>
+        <Route
+          path="/decision-signals"
+          element={<LegacyResearchRedirect to="/research/signals" backtestTo="/research/backtest" />}
+        />
+        <Route
+          path="/screening"
+          element={<LegacyResearchRedirect to="/research/screening" />}
+        />
+        <Route
+          path="/backtest"
+          element={<LegacyResearchRedirect to="/research/backtest" />}
+        />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/scheduled-tasks" element={<ScheduledTasksPage />} />
         <Route path="/paper" element={<PaperTradingPage />} />

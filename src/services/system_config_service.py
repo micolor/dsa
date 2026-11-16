@@ -475,7 +475,11 @@ class SystemConfigService:
             field_schema = schema_by_key[key]
             display_value = self._resolve_display_value(raw_value, field_schema, raw_value_exists)
             is_masked = False
-            if key in self._SERVER_MASKED_CONFIG_KEYS and display_value:
+            # Every schema-declared sensitive field is masked on read, not just
+            # the four server-managed Hermes/HMAC keys. Editing a masked field
+            # requires re-entering the value; leaving the mask unchanged keeps
+            # the saved secret.
+            if (field_schema.get("is_sensitive") or key in self._SERVER_MASKED_CONFIG_KEYS) and display_value:
                 display_value = mask_token
                 is_masked = True
             item: Dict[str, Any] = {
@@ -738,6 +742,8 @@ class SystemConfigService:
             items=updates,
             mask_token="__DSA_IMPORT_LITERAL_MASK__",
             reload_now=reload_now,
+            allow_unknown_keys=True,
+            source="import",
         )
 
     def import_desktop_env(
@@ -753,6 +759,63 @@ class SystemConfigService:
             content=content,
             reload_now=reload_now,
         )
+
+    def _resolve_saved_channel_secret(
+        self,
+        *,
+        channel_name: str,
+        base_url: str,
+        submitted_api_key: str,
+        use_saved_secret: bool,
+        stage: str,
+    ) -> Tuple[Optional[str], Dict[str, Any], Set[str]]:
+        """Resolve a saved non-Hermes channel key without leaving its endpoint.
+
+        The saved key is only reused when the submitted Base URL matches the
+        saved one, so a compromised/edited URL cannot exfiltrate the secret.
+        """
+        redaction_values = self._build_redaction_values(submitted_api_key)
+        if not use_saved_secret:
+            return submitted_api_key, {}, redaction_values
+
+        channel = channel_name.strip().upper()
+        saved_map = self._manager.read_config_map()
+        saved_key = (
+            (saved_map.get(f"LLM_{channel}_API_KEYS") or "").strip()
+            or (saved_map.get(f"LLM_{channel}_API_KEY") or "").strip()
+        )
+        if not saved_key or is_masked_secret_placeholder(saved_key):
+            return None, self._build_llm_channel_result(
+                success=False,
+                message="Missing saved channel secret",
+                error="The saved channel key is unavailable; re-enter it",
+                stage=stage,
+                error_code="missing_saved_secret",
+                retryable=False,
+                details={"reason": "missing_saved_secret"},
+                resolved_protocol=None,
+                models=[] if stage == "model_discovery" else None,
+                latency_ms=None,
+                redaction_values=redaction_values,
+            ), redaction_values
+
+        saved_base = (saved_map.get(f"LLM_{channel}_BASE_URL") or "").strip()
+        if saved_base.rstrip("/") != (base_url or "").strip().rstrip("/"):
+            return None, self._build_llm_channel_result(
+                success=False,
+                message="Base URL changed; re-enter the channel key",
+                error="Saved secret is bound to the previous Base URL",
+                stage=stage,
+                error_code="saved_secret_scope_mismatch",
+                retryable=False,
+                details={"reason": "base_url_changed"},
+                resolved_protocol=None,
+                models=[] if stage == "model_discovery" else None,
+                latency_ms=None,
+                redaction_values=redaction_values,
+            ), redaction_values
+
+        return saved_key, {}, redaction_values
 
     def _resolve_hermes_saved_secret(
         self,
@@ -944,14 +1007,23 @@ class SystemConfigService:
     ) -> Dict[str, Any]:
         """Discover available models from an OpenAI-compatible `/models` endpoint."""
         channel_name = name.strip() or "channel"
-        resolved_secret, secret_error, redaction_values = self._resolve_hermes_saved_secret(
-            channel_name=channel_name,
-            protocol=protocol,
-            base_url=base_url,
-            submitted_api_key=api_key,
-            use_saved_secret=use_saved_secret,
-            stage="model_discovery",
-        )
+        if use_saved_secret and not is_reserved_hermes_name(channel_name):
+            resolved_secret, secret_error, redaction_values = self._resolve_saved_channel_secret(
+                channel_name=channel_name,
+                base_url=base_url,
+                submitted_api_key=api_key,
+                use_saved_secret=use_saved_secret,
+                stage="model_discovery",
+            )
+        else:
+            resolved_secret, secret_error, redaction_values = self._resolve_hermes_saved_secret(
+                channel_name=channel_name,
+                protocol=protocol,
+                base_url=base_url,
+                submitted_api_key=api_key,
+                use_saved_secret=use_saved_secret,
+                stage="model_discovery",
+            )
         if resolved_secret is None:
             return secret_error
         api_key = resolved_secret
@@ -1217,14 +1289,23 @@ class SystemConfigService:
         channel_name = name.strip() or "channel"
         resolved_api_surface = normalize_llm_channel_api_surface(api_surface)
         generation_stage = "responses" if resolved_api_surface == "responses" else "chat_completion"
-        resolved_secret, secret_error, redaction_values = self._resolve_hermes_saved_secret(
-            channel_name=channel_name,
-            protocol=protocol,
-            base_url=base_url,
-            submitted_api_key=api_key,
-            use_saved_secret=use_saved_secret,
-            stage=generation_stage,
-        )
+        if use_saved_secret and not is_reserved_hermes_name(channel_name):
+            resolved_secret, secret_error, redaction_values = self._resolve_saved_channel_secret(
+                channel_name=channel_name,
+                base_url=base_url,
+                submitted_api_key=api_key,
+                use_saved_secret=use_saved_secret,
+                stage=generation_stage,
+            )
+        else:
+            resolved_secret, secret_error, redaction_values = self._resolve_hermes_saved_secret(
+                channel_name=channel_name,
+                protocol=protocol,
+                base_url=base_url,
+                submitted_api_key=api_key,
+                use_saved_secret=use_saved_secret,
+                stage=generation_stage,
+            )
         if resolved_secret is None:
             result = secret_error
             if requested_capabilities and "capability_results" not in result:
@@ -2038,11 +2119,38 @@ class SystemConfigService:
         items: Sequence[Dict[str, str]],
         mask_token: str = "******",
         reload_now: bool = True,
+        allow_unknown_keys: bool = False,
+        source: str = "api",
     ) -> Dict[str, Any]:
         """Validate and persist updates into `.env`, then reload runtime config."""
         current_version = self._manager.get_config_version()
         if current_version != config_version:
             raise ConfigConflictError(current_version=current_version)
+
+        if not allow_unknown_keys:
+            registered = {key.upper() for key in get_registered_field_keys()}
+            # Existing unregistered keys (legacy .env entries) remain editable so
+            # users can clear them; only *new* arbitrary keys are rejected.
+            saved_keys = {key.upper() for key in self._manager.read_config_map().keys()}
+            unknown = [
+                str(item.get("key") or "").upper()
+                for item in items
+                if str(item.get("key") or "").upper() not in registered
+                and str(item.get("key") or "").upper() not in saved_keys
+                and not self._WEB_SETTINGS_LLM_CHANNEL_SUPPORT_KEY_RE.fullmatch(
+                    str(item.get("key") or "").upper()
+                )
+            ]
+            if unknown:
+                raise ConfigValidationError([
+                    {
+                        "key": key,
+                        "code": "unknown_config_key",
+                        "message": f"{key} is not a registered system config key",
+                        "severity": "error",
+                    }
+                    for key in unknown
+                ])
 
         issues = self._collect_issues(items=items, mask_token=mask_token)
         errors = [issue for issue in issues if issue["severity"] == "error"]
@@ -2067,6 +2175,13 @@ class SystemConfigService:
             updates=updates,
             sensitive_keys=sensitive_keys,
             mask_token=mask_token,
+        )
+        logger.info(
+            "system config updated: source=%s keys=%s version=%s skipped_masked=%s",
+            source,
+            ",".join(sorted(updated_keys)),
+            new_version,
+            ",".join(sorted(skipped_masked_keys)),
         )
 
         warnings: List[str] = []

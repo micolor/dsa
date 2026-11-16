@@ -650,6 +650,20 @@ describe('SettingsPage', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(mockedAnchorClick);
   });
 
+  it('applies the category deep link once instead of pinning it across rerenders', () => {
+    window.history.pushState({}, '', '/settings?category=agent');
+    const { rerender } = render(<SettingsPage />);
+
+    expect(setActiveCategory).toHaveBeenCalledWith('agent');
+    setActiveCategory.mockClear();
+
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState());
+    rerender(<SettingsPage />);
+
+    expect(setActiveCategory).not.toHaveBeenCalled();
+    window.history.pushState({}, '', '/');
+  });
+
   it('renders category navigation and auth settings modules', async () => {
     render(<SettingsPage />);
 

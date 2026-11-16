@@ -1133,9 +1133,15 @@ const SettingsPage: React.FC = () => {
     void load();
   }, [load]);
 
+  // Apply ?category= only once per query. `categories` is rebuilt on every draft
+  // edit, so depending on it unconditionally would pin the page to the deep-link
+  // category and undo manual tab changes after the first keystroke.
+  const appliedCategoryParamRef = useRef<string | null>(null);
   useEffect(() => {
     const requestedCategory = new URLSearchParams(window.location.search).get('category');
-    if (requestedCategory && categories.some((category) => category.category === requestedCategory)) {
+    if (!requestedCategory || requestedCategory === appliedCategoryParamRef.current) return;
+    if (categories.some((category) => category.category === requestedCategory)) {
+      appliedCategoryParamRef.current = requestedCategory;
       setActiveCategory(requestedCategory);
     }
   }, [categories, setActiveCategory]);
@@ -1802,8 +1808,12 @@ const SettingsPage: React.FC = () => {
   // 带重试按钮的几条不自动消失，由用户自己关。
   useToastSync('settings-save-error', saveError, (err) => ({
     error: err,
-    actionLabel: retryAction === 'save' ? t('settings.saveRetry') : undefined,
-    onAction: retryAction === 'save' ? () => void retry() : undefined,
+    actionLabel: retryAction === 'save'
+      ? t('settings.saveRetry')
+      : retryAction === 'load'
+        ? t('settings.reload')
+        : undefined,
+    onAction: retryAction === 'save' || retryAction === 'load' ? () => void retry() : undefined,
   }));
   useToastSync('settings-load-error', loadError, (err) => ({
     error: err,
@@ -1960,6 +1970,7 @@ const SettingsPage: React.FC = () => {
               itemsByCategory={itemsByCategory}
               activeCategory={activeCategory}
               onSelect={handleCategorySelect}
+              showCounts={settingsViewMode === 'all'}
             />
           </aside>
 

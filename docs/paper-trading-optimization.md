@@ -489,7 +489,9 @@
 - 回看：`PAPER_AUTO_TRADE_LOOKBACK_DAYS`（默认 7 天，1–365），只处理这段时间内创建、状态仍为 `active` 的信号。
 - 顺序：先处理 `sell` / `reduce`（释放现金），再按 `score` 从高到低处理 `buy` / `add`；`hold` / `watch` / `avoid` / `alert` 不产生交易。
 - 幂等：复用 `PaperService.process_signal` 的 `account_id + signal_id` 去重；同一天重复执行不会重复成交。
-- 行情缺失：`data_unavailable` 不落“已消费”，下一次自动交易或手动回填会重试。
+- 行情缺失：`data_unavailable` 不落“已消费”；自动交易当天不标记完成，后续 30 分钟 tick 会重试。
+- 时序保护：只处理“信号对应交易日仍是最新已收盘交易日”的信号；更早的信号不自动补交易，避免用旧 `as_of` 把当前持仓估值回滚到历史价，需要时用手动回填。
+- 单条信号异常不会中断整轮；响应里的 `errors` 记录失败数量。指定不存在/已归档的 `account_id` 返回 404。
 - 现金不足：按 score 排序后排名靠后的 buy/add 会记 `no_cash` 并视为已处理；不会在后续现金释放后自动补单。
 - 手动入口：`POST /api/v1/paper/auto-trade?lookback_days=7`，模拟盘页也有「自动交易」按钮。
 

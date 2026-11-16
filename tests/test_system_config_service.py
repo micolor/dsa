@@ -62,15 +62,15 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
-    def test_get_config_keeps_regular_sensitive_values_unmasked(self) -> None:
+    def test_get_config_masks_regular_sensitive_values(self) -> None:
         payload = self.service.get_config(include_schema=True)
         items = {item["key"]: item for item in payload["items"]}
 
         self.assertIn("openai", payload["llm_model_providers"])
         self.assertIn("xai", payload["llm_model_providers"])
         self.assertIn("GEMINI_API_KEY", items)
-        self.assertEqual(items["GEMINI_API_KEY"]["value"], "secret-key-value")
-        self.assertFalse(items["GEMINI_API_KEY"]["is_masked"])
+        self.assertEqual(items["GEMINI_API_KEY"]["value"], "******")
+        self.assertTrue(items["GEMINI_API_KEY"]["is_masked"])
         self.assertTrue(items["GEMINI_API_KEY"]["raw_value_exists"])
 
     def _assert_agent_backend_status_matches_runtime(
@@ -874,7 +874,8 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
             self.assertEqual(pre_save_items["OPENAI_BASE_URL"]["value"], "https://runtime-openai.v1")
             self.assertFalse(pre_save_items["OPENAI_BASE_URL"]["raw_value_exists"])
-            self.assertEqual(pre_save_items["OPENAI_API_KEY"]["value"], "runtime-openai-key")
+            self.assertEqual(pre_save_items["OPENAI_API_KEY"]["value"], "******")
+            self.assertTrue(pre_save_items["OPENAI_API_KEY"]["is_masked"])
             self.assertFalse(pre_save_items["OPENAI_API_KEY"]["raw_value_exists"])
             self.assertEqual(pre_save_items["LITELLM_MODEL"]["value"], "openai/gpt-4o-mini")
             self.assertTrue(pre_save_items["LITELLM_MODEL"]["raw_value_exists"])
@@ -959,6 +960,34 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertIn("LOG_DIR", items)
         self.assertEqual(items["LOG_DIR"]["schema"]["help_key"], "settings.system.LOG_DIR")
 
+    def test_saved_channel_secret_is_reused_only_for_the_saved_base_url(self) -> None:
+        self._rewrite_env(
+            "STOCK_LIST=600519",
+            "LLM_CHANNELS=deepseek",
+            "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com",
+            "LLM_DEEPSEEK_API_KEYS=sk-saved",
+        )
+
+        secret, error, _ = self.service._resolve_saved_channel_secret(
+            channel_name="deepseek",
+            base_url="https://api.deepseek.com/",
+            submitted_api_key="******",
+            use_saved_secret=True,
+            stage="chat_completion",
+        )
+        self.assertEqual(secret, "sk-saved")
+        self.assertEqual(error, {})
+
+        secret, error, _ = self.service._resolve_saved_channel_secret(
+            channel_name="deepseek",
+            base_url="https://evil.example.com",
+            submitted_api_key="******",
+            use_saved_secret=True,
+            stage="chat_completion",
+        )
+        self.assertIsNone(secret)
+        self.assertEqual(error["error_code"], "saved_secret_scope_mismatch")
+
     def test_get_config_with_schema_keeps_declared_llm_channel_support_keys(self) -> None:
         self._rewrite_env(
             "STOCK_LIST=600519,000001",
@@ -978,9 +1007,11 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         items = {item["key"]: item for item in payload["items"]}
 
         self.assertIn("LLM_CHANNELS", items)
-        self.assertEqual(items["LLM_DEEPSEEK_API_KEY"]["value"], "sk-test-value")
+        self.assertEqual(items["LLM_DEEPSEEK_API_KEY"]["value"], "******")
+        self.assertTrue(items["LLM_DEEPSEEK_API_KEY"]["is_masked"])
         self.assertEqual(items["LLM_DEEPSEEK_MODELS"]["value"], "deepseek-v4-flash,deepseek-v4-pro")
-        self.assertEqual(items["LLM_MY_PROXY_API_KEYS"]["value"], "sk-key-1,sk-key-2")
+        self.assertEqual(items["LLM_MY_PROXY_API_KEYS"]["value"], "******")
+        self.assertTrue(items["LLM_MY_PROXY_API_KEYS"]["is_masked"])
         self.assertEqual(items["LLM_MY_PROXY_MODELS"]["value"], "gpt-5.5")
         self.assertEqual(items["LLM_MY_PROXY_API_KEYS"]["schema"]["category"], "ai_model")
         self.assertNotIn("LLM_UNUSED_API_KEY", items)
@@ -4220,6 +4251,19 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             for item in self.service.get_config(include_schema=True)["items"]
         }
         self.assertEqual(items["CUSTOM_WEBHOOK_BODY_TEMPLATE"]["value"], template)
+
+    def test_update_rejects_new_unregistered_key(self) -> None:
+        version = self.manager.get_config_version()
+        with self.assertRaises(ConfigValidationError) as ctx:
+            self.service.update(
+                config_version=version,
+                items=[{"key": "DSA_DESKTOP_MODE", "value": "true"}],
+                reload_now=False,
+            )
+        self.assertTrue(
+            any(issue["code"] == "unknown_config_key" for issue in ctx.exception.issues)
+        )
+        self.assertNotIn("DSA_DESKTOP_MODE", self.env_path.read_text(encoding="utf-8"))
 
     def test_update_rejects_non_editable_field(self) -> None:
         version = self.manager.get_config_version()

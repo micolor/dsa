@@ -21,7 +21,7 @@ from src.core.trading_calendar import (
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.paper_repo import PaperRepository
 from src.services.paper_notify import send_paper_fill_notification
-from src.storage import DatabaseManager, DecisionSignalRecord
+from src.storage import DatabaseManager, DecisionSignalRecord, utc_naive_now
 
 logger = logging.getLogger(__name__)
 
@@ -286,12 +286,22 @@ class PaperService:
         )
         return self._account_payload(account)
 
-    def process_signal(self, signal_id: int) -> Dict[str, Any]:
-        """Consume a single decision signal into the paper account (idempotent)."""
+    def process_signal(self, signal_id: int, account_id: Optional[int] = None) -> Dict[str, Any]:
+        """Consume a single decision signal into the paper account (idempotent).
+
+        ``account_id`` lets callers that already resolved a specific account
+        (the daily auto-trade pass) avoid silently falling back to the active
+        account when the requested one is archived or missing.
+        """
         signal = self.decision_repo.get(signal_id)
         if signal is None:
             return {"status": "not_found"}
-        account = self.paper_repo.ensure_account()
+        if account_id is not None:
+            account = self.paper_repo.get_account(int(account_id))
+            if account is None or account.status != "active":
+                return {"status": "account_not_found", "account_id": account_id}
+        else:
+            account = self.paper_repo.ensure_account()
 
         # Serialize the whole consume (dedup-check -> execute -> record) per
         # account so concurrent consumers of the same signal cannot both buy.
@@ -446,31 +456,85 @@ class PaperService:
             if account_id is not None
             else self.paper_repo.ensure_account()
         )
-        if account is None:
+        if account is None or account.status != "active":
             return {"status": "account_not_found", "account_id": account_id}
 
-        now_dt = now or datetime.now()
+        # decision_signals.created_at is stored as UTC-naive; use the same clock
+        # for the lookback window instead of local wall time.
+        now_dt = now or utc_naive_now()
         since = now_dt - timedelta(days=max(1, int(lookback_days)))
         signals = self._active_signals_since(since, now_dt)
 
-        sells = [signal for signal in signals if signal.action in ("sell", "reduce")]
-        buys = [signal for signal in signals if signal.action in ("buy", "add")]
-        # Higher score first; unknown scores go last, then older signals first.
-        buys.sort(
-            key=lambda signal: (
-                -(int(signal.score) if signal.score is not None else -1),
-                signal.created_at or datetime.min,
-                signal.id,
+        # Do not replay a signal whose intended session is already in the past:
+        # process_signal values the *whole* account at as_of, so filling an old
+        # signal would roll current positions back to an old close and rewrite a
+        # historical snapshot. Older signals remain available for explicit backfill.
+        current_signals: List[DecisionSignalRecord] = []
+        stale_skipped = 0
+        for signal in signals:
+            if self._is_current_signal_session(signal, now_dt):
+                current_signals.append(signal)
+            else:
+                stale_skipped += 1
+
+        # Preserve chronological order within one stock. Moving every sell ahead
+        # of every buy would turn "buy then sell" into "sell (no position) then
+        # buy", leaving a position that should have been closed.
+        actionable = [
+            signal for signal in current_signals
+            if signal.action in ("buy", "add", "sell", "reduce")
+        ]
+        groups: Dict[str, List[DecisionSignalRecord]] = {}
+        for signal in actionable:
+            groups.setdefault(signal.stock_code, []).append(signal)
+        ordered_groups: List[List[DecisionSignalRecord]] = []
+        for items in groups.values():
+            items.sort(key=lambda signal: (signal.created_at or datetime.min, signal.id))
+            ordered_groups.append(items)
+        # Groups with a sell/reduce go first to free cash, but keep each stock's
+        # internal chronology intact; buy-only groups stay score-ordered.
+        def group_sort_key(items: List[DecisionSignalRecord]) -> tuple:
+            has_sell = any(signal.action in ("sell", "reduce") for signal in items)
+            best_score = max(
+                (int(signal.score) if signal.score is not None else -1)
+                for signal in items
             )
-        )
-        ordered = sells + buys
+            return (
+                0 if has_sell else 1,
+                -best_score if not has_sell else 0,
+                items[0].created_at or datetime.min,
+                items[0].id,
+            )
+
+        ordered_groups.sort(key=group_sort_key)
+        ordered = [signal for items in ordered_groups for signal in items]
 
         processed = 0
         skipped = 0
         unavailable = 0
+        errors = 0
         results: List[Dict[str, Any]] = []
         for signal in ordered:
-            outcome = self.process_signal(signal.id)
+            try:
+                outcome = self.process_signal(signal.id)
+            except Exception as exc:
+                # One malformed signal must not abort the whole daily pass; keep
+                # the remaining candidates eligible.
+                errors += 1
+                logger.warning(
+                    "paper auto trade signal failed: signal_id=%s stock_code=%s error=%s",
+                    signal.id,
+                    signal.stock_code,
+                    exc,
+                )
+                results.append({
+                    "signal_id": signal.id,
+                    "stock_code": signal.stock_code,
+                    "action": signal.action,
+                    "status": "error",
+                    "error": str(exc),
+                })
+                continue
             status = str(outcome.get("status") or "")
             if status == "processed":
                 processed += 1
@@ -491,11 +555,23 @@ class PaperService:
             "account_id": account.id,
             "lookback_days": max(1, int(lookback_days)),
             "signals_seen": len(ordered),
+            "stale_skipped": stale_skipped,
             "processed": processed,
             "skipped": skipped,
             "unavailable": unavailable,
+            "errors": errors,
             "results": results,
         }
+
+    def _is_current_signal_session(self, signal: DecisionSignalRecord, now: datetime) -> bool:
+        """True when the signal's intended fill session is still the latest one."""
+        market = signal.market or get_market_for_stock(signal.stock_code)
+        now_aware = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+        try:
+            latest = get_effective_trading_date(market, current_time=now_aware)
+        except Exception:  # pragma: no cover - calendar failure; keep the signal eligible
+            return True
+        return self._signal_trade_date(signal) >= latest
 
     def _active_signals_since(
         self,
@@ -783,7 +859,7 @@ class PaperService:
         sell_price = self._apply_slippage(sell_price, "sell")
 
         quantity = float(position.quantity or 0) * fraction
-        quantity = self._round_lot(quantity, market=signal.market)
+        quantity = self._round_lot(quantity, market=market)
         if quantity <= 0:
             return _LOT_TOO_SMALL
 

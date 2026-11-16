@@ -9,14 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 系统配置读取统一按 `is_sensitive` 脱敏：不再只遮 4 个 Hermes/HMAC key，Tushare Token、各模型 API Key、邮箱密码、Webhook 地址等敏感值不再通过 `/api/v1/system/config` 明文下发；编辑时需重新输入，未修改的掩码保存会保留原值
+- [修复] `PUT /api/v1/system/config` 拒绝写入新的未注册配置键，关闭通过 `DSA_DESKTOP_MODE` 等隐藏键绕过设置页的链路；已存在的旧未注册键仍可编辑/清空，`.env` 导入保持兼容。配置写入新增不含值的结构化日志（来源、key 列表、版本）
 - [改进] 告警页顶部 Tab 从 6 个收敛为 5 个：「通知尝试记录」和「投递记录」合并为「通知记录」，内部用「告警通知 / 全部投递」切换；`?tab=deliveries` 旧链接仍可直接打开全部投递子视图
+- [修复] 模拟盘自动交易改为用 UTC-naive 时间计算回看窗口（与 decision_signals.created_at 同口径），避免东八区部署时窗口偏移；单条信号异常不再中断整轮自动交易，结果新增 `errors` 计数
 - [修复] 模拟盘卖出侧在缺当日行情时不再用上一次估值的陈旧价成交，改为与买入一致返回 `data_unavailable` 并留待自动交易/回填重试，避免净值按旧价失真
 - [修复] 空仓模拟盘不再在周末/节假日写净值快照，估值日期改按 A 股交易日历取最近已收盘交易日
 - [新功能] 模拟盘每日自动交易：调度器在每个交易日 `PAPER_AUTO_TRADE_TIME`（默认 16:30 Asia/Shanghai）消费最近 `PAPER_AUTO_TRADE_LOOKBACK_DAYS` 天内的 active 信号，先卖/减仓再按 score 买/加仓，hold/watch 不交易；复用信号幂等，行情缺失下一轮重试。新增 `PAPER_AUTO_TRADE_ENABLED/TIME/LOOKBACK_DAYS`、`POST /api/v1/paper/auto-trade` 和模拟盘页「自动交易」按钮
 - [新功能] 新增 `scripts/migrate_legacy_config.py`：把旧版单 Key / 调度字段复制到规范 key；默认 dry-run，`--apply` 前自动备份 `.env`，不删除旧 key、不输出密钥值，配套 `tests/test_migrate_legacy_config.py` 6 例
 - [文档] 新增 `docs/config-consolidation.md`：说明单 Key/多 Key、旧调度字段、生成后端别名的展示策略、运行时优先级，以及后续真正下线旧 key 所需的迁移、备份、验证与回滚步骤
 - [改进] 侧栏「提醒」入口显示未读数，打开菜单即可看到有多少条未读主动消息，点击仍打开全量收件箱抽屉
-- [改进] 回测正式并入「AI 建议」：页面顶部新增「AI 建议 / 回测」切换，侧栏不再单独列回测入口；旧 `/backtest` 链接会重定向到 `/decision-signals?tab=backtest`，回测组件与接口不变
+- [修复] 研究页子页面懒加载时不再把顶部 Tab 一起替换成整页 spinner；旧 `/backtest`、`/decision-signals?tab=backtest` 重定向会保留剩余查询参数和 hash
+- [修复] 设置页 `?category=` 深链只应用一次，编辑草稿时不再把用户强制拉回深链分类；配置版本冲突后提示改为「重新加载」而不是用旧版本反复重试保存
+- [改进] 基础设置视图不再显示分类的“全部字段总数”，避免 47/64 等数字与当前可见字段数不一致
+- [改进] 新增「研究」聚合页：选股 / AI 建议 / 回测统一为一个侧栏入口和顶部 Tab，页面数据与筛选逻辑保持不变；旧 `/screening`、`/decision-signals`、`/backtest` 链接自动重定向并保留查询参数。顶部提供「问助手」入口，带上当前研究 Tab 的上下文跳转问股
+- [改进] 回测并入「研究」工作台，作为独立 Tab；侧栏不再单独列回测入口，旧 `/backtest` 链接会重定向到 `/research/backtest`，回测组件与接口不变
 - [改进] 打通「AI 建议 → 回测 / 模拟盘」主链路：AI 建议页新增「回测复盘」「模拟盘」入口，模拟盘页新增「AI 建议」入口，页面职责不变但不再需要回侧栏找
 - [改进] 模型提供商 Key 在设置页每个 provider 只显示一个字段：多 Key 字段优先；仅当旧版单 Key 已配置时才显示单 Key，避免同一凭据出现两份（不改运行时优先级，也不删除旧配置）
 - [改进] 补齐几个页面的错误/空态：Token 用量首载失败不再空白，改为页面级错误与重试；回测加载失败不再伪装成“暂无结果”；定时任务为零时显示新建引导；模拟盘首载失败显示页面级重试

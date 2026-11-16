@@ -528,11 +528,18 @@ function resolveInitialSection(): DecisionSignalsSection {
     : 'signals';
 }
 
-const DecisionSignalsPage: React.FC = () => {
+type DecisionSignalsPageProps = {
+  /** Rendered inside the research workspace; the outer layout owns the tabs. */
+  embedded?: boolean;
+};
+
+const DecisionSignalsPage: React.FC<DecisionSignalsPageProps> = ({ embedded = false }) => {
   const { t } = useUiLanguage();
   const actionLabels = useMemo(() => buildDecisionActionLabelMap(t), [t]);
   const { index: stockIndex } = useStockIndex();
-  const [activeSection, setActiveSection] = useState<DecisionSignalsSection>(resolveInitialSection);
+  const [activeSection, setActiveSection] = useState<DecisionSignalsSection>(
+    () => (embedded ? 'signals' : resolveInitialSection()),
+  );
   const [filters, setFilters] = useState<ListFilters>(() => getInitialFilters());
   const [appliedFilters, setAppliedFilters] = useState<ListFilters>(() => getInitialFilters());
   const [page, setPage] = useState(1);
@@ -1648,14 +1655,20 @@ const DecisionSignalsPage: React.FC = () => {
   return (
     <AppPage>
       <div className="space-y-5">
-        {renderSectionTabs()}
+        {!embedded ? renderSectionTabs() : null}
         <div className="flex items-start justify-between gap-3">
           <p className="max-w-2xl text-sm text-secondary-text">{t('decisionSignals.pagePurpose')}</p>
           <div className="flex shrink-0 flex-wrap justify-end gap-2">
             <Button
               type="button"
               variant="secondary"
-              onClick={() => selectSection('backtest')}
+              onClick={() => {
+                if (embedded) {
+                  window.location.assign('/research/backtest');
+                } else {
+                  selectSection('backtest');
+                }
+              }}
             >
               <BarChart3 className="h-4 w-4" aria-hidden="true" />
               <span>{t('decisionSignals.openBacktest')}</span>

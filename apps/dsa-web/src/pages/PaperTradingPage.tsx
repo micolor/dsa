@@ -225,7 +225,7 @@ export const PaperTradingPage: React.FC = () => {
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => window.location.assign('/decision-signals')}
+            onClick={() => window.location.assign('/research/signals')}
           >
             {t('layout.nav.decisionSignals')}
           </Button>

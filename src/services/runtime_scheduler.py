@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from src.config import Config, get_config
-from src.core.trading_calendar import get_effective_trading_date
+from src.core.trading_calendar import get_effective_trading_date, is_market_open
 from src.scheduler import Scheduler, normalize_schedule_times
 
 logger = logging.getLogger(__name__)
@@ -543,7 +543,10 @@ class RuntimeSchedulerService:
                 global _paper_auto_trade_last_date
                 now = datetime.now(_PAPER_AUTO_TRADE_TZ)
                 try:
-                    if get_effective_trading_date("cn") != now.date():
+                    # Use "is today a trading day", not "the latest finalized
+                    # session": before the close the latter is yesterday, which
+                    # would silently defer an early configured time to after close.
+                    if not is_market_open("cn", now.date()):
                         return
                     current_config = get_config()
                     configured = str(
@@ -565,7 +568,10 @@ class RuntimeSchedulerService:
                             getattr(current_config, "paper_auto_trade_lookback_days", 7) or 7
                         ),
                     )
-                    _paper_auto_trade_last_date = now.date()
+                    # Do not mark the day done while any fill is still waiting
+                    # for data; the next 30-minute tick retries it.
+                    if result.get("unavailable", 0) == 0 and result.get("errors", 0) == 0:
+                        _paper_auto_trade_last_date = now.date()
                     logger.info(
                         "paper auto trade: account=%s seen=%s processed=%s unavailable=%s",
                         result.get("account_id"),

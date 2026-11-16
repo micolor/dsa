@@ -511,7 +511,7 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByLabelText('JSON'));
     fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
 
-    const messages = await screen.findAllByText(/运行时注入的 Hermes Key 不会回传/i);
+    const messages = await screen.findAllByText(/运行时注入的渠道 Key 不会回传/i);
     expect(messages.length).toBeGreaterThanOrEqual(3);
     expect(testLLMChannel).not.toHaveBeenCalled();
     expect(discoverLLMChannelModels).not.toHaveBeenCalled();

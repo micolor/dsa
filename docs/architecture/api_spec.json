@@ -20498,6 +20498,11 @@
             "title": "Signals Seen",
             "default": 0
           },
+          "stale_skipped": {
+            "type": "integer",
+            "title": "Stale Skipped",
+            "default": 0
+          },
           "processed": {
             "type": "integer",
             "title": "Processed",
@@ -20511,6 +20516,11 @@
           "unavailable": {
             "type": "integer",
             "title": "Unavailable",
+            "default": 0
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors",
             "default": 0
           },
           "results": {

@@ -180,6 +180,70 @@ def test_auto_trade_orders_buys_by_score_and_is_idempotent(isolated_db, service)
     assert second["skipped"] == 2
 
 
+def test_auto_trade_continues_after_one_signal_failure(isolated_db, service, monkeypatch):
+    d1 = date(2026, 1, 5)
+    _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)
+    first = _make_signal(
+        isolated_db, action="buy", code="600519", entry_high=100.0,
+        created_at=datetime(2026, 1, 5, 1, 0), score=90,
+    )
+    second = _make_signal(
+        isolated_db, action="buy", code="000001", entry_high=10.0,
+        created_at=datetime(2026, 1, 5, 1, 0), score=80,
+    )
+    _seed_daily(isolated_db, "000001", d1, 10, 10, 10, 10)
+
+    original = service.process_signal
+    calls: list[int] = []
+
+    def flaky(signal_id: int):
+        calls.append(signal_id)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return original(signal_id)
+
+    monkeypatch.setattr(service, "process_signal", flaky)
+    result = service.auto_trade_once(
+        service.get_or_create_account()["account_id"],
+        lookback_days=7,
+        now=datetime(2026, 1, 5, 9, 0),
+    )
+
+    assert result["errors"] == 1
+    assert result["processed"] == 1
+    assert [item["status"] for item in result["results"]] == ["error", "processed"]
+    assert calls == [first.id, second.id]
+
+
+def test_auto_trade_skips_signals_from_older_sessions(isolated_db, service):
+    d_old = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d_old, 100, 100, 100, 100)
+    _make_signal(
+        isolated_db, action="buy", entry_high=100.0,
+        created_at=datetime(2026, 1, 6, 1, 0),
+    )
+
+    result = service.auto_trade_once(
+        service.get_or_create_account()["account_id"],
+        lookback_days=7,
+        now=datetime(2026, 1, 8, 9, 0),
+    )
+
+    assert result["stale_skipped"] == 1
+    assert result["signals_seen"] == 0
+    assert result["processed"] == 0
+    assert service.get_positions(service.get_or_create_account()["account_id"]) == []
+
+
+def test_auto_trade_rejects_archived_account(isolated_db, service):
+    account_id = service.get_or_create_account()["account_id"]
+    service.paper_repo.update_account(account_id, {"status": "archived"})
+
+    result = service.auto_trade_once(account_id, lookback_days=7)
+
+    assert result["status"] == "account_not_found"
+
+
 def test_auto_trade_ignores_hold_and_signals_outside_lookback(isolated_db, service):
     d1 = date(2026, 1, 5)
     _seed_daily(isolated_db, "600519", d1, 100, 100, 100, 100)

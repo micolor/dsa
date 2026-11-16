@@ -1,10 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarNav } from '../SidebarNav';
 
 const mockLogout = vi.fn().mockResolvedValue(undefined);
-const mockGetScreeningStatus = vi.fn().mockResolvedValue({ enabled: false, available: false });
 const { mockInboxList } = vi.hoisted(() => ({
   mockInboxList: vi.fn().mockResolvedValue({ items: [], unreadCount: 0, total: 0, page: 1, pageSize: 1, hasMore: false }),
 }));
@@ -31,14 +30,6 @@ vi.mock('../../../api/inbox', () => ({
   },
 }));
 
-vi.mock('../../../api/screening', () => ({
-  SCREENING_CONFIG_CHANGED_EVENT: 'screening-config-changed',
-  SYSTEM_CONFIG_CHANGED_EVENT: 'dsa-system-config-changed',
-  screeningApi: {
-    getStatus: () => mockGetScreeningStatus(),
-  },
-}));
-
 describe('SidebarNav', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -53,20 +44,16 @@ describe('SidebarNav', () => {
     });
   });
 
-  it('renders the screening item from local cache on first render without a fetch', () => {
-    window.localStorage.setItem('dsa.screeningNav.enabled', '1');
-    // 接口挂起不返回，验证首帧就用缓存渲染，不依赖接口结果
-    mockGetScreeningStatus.mockReturnValueOnce(
-      new Promise<{ enabled: boolean; available: boolean }>(() => {}),
-    );
-
+  it('renders a single research entry for screening, signals and backtest', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('link', { name: '选股' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '研究' })).toHaveAttribute('href', '/research');
+    expect(screen.queryByRole('link', { name: '选股' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'AI 建议' })).not.toBeInTheDocument();
   });
 
   it('groups navigation entries into sections', () => {
@@ -77,11 +64,11 @@ describe('SidebarNav', () => {
     );
 
     expect(screen.getByText('工作台')).toBeInTheDocument();
-    expect(screen.getByText('研究')).toBeInTheDocument();
+    expect(screen.getAllByText('研究').length).toBeGreaterThan(0);
     expect(screen.getByText('交易')).toBeInTheDocument();
     expect(screen.getByText('自动化')).toBeInTheDocument();
     expect(screen.getByText('系统')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'AI 建议' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '研究' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '模拟盘' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '提醒' })).toBeInTheDocument();
   });
@@ -104,63 +91,6 @@ describe('SidebarNav', () => {
 
     const reminders = screen.getByRole('button', { name: '提醒' });
     expect(await within(reminders).findByText('3')).toBeInTheDocument();
-  });
-
-  it('writes the screening flag to local cache after a successful fetch', async () => {
-    mockGetScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SidebarNav />
-      </MemoryRouter>,
-    );
-
-    await screen.findByRole('link', { name: '选股' });
-    await waitFor(() => expect(window.localStorage.getItem('dsa.screeningNav.enabled')).toBe('1'));
-  });
-
-  it('hides the screening navigation item while Screening is disabled', () => {
-    mockGetScreeningStatus.mockResolvedValueOnce({ enabled: false, available: true });
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SidebarNav />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByRole('link', { name: '选股' })).not.toBeInTheDocument();
-  });
-
-  it('shows screening in the research group when Screening is enabled', async () => {
-    mockGetScreeningStatus.mockResolvedValueOnce({ enabled: true, available: true });
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SidebarNav />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByRole('link', { name: '选股' })).toHaveAttribute('href', '/screening');
-    const hrefs = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
-    expect(hrefs.slice(0, 4)).toEqual(['/', '/chat', '/screening', '/decision-signals']);
-  });
-
-  it('refreshes the controlled screening entry after config changes', async () => {
-    mockGetScreeningStatus
-      .mockResolvedValueOnce({ enabled: false, available: true })
-      .mockResolvedValueOnce({ enabled: true, available: true });
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SidebarNav />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByRole('link', { name: '选股' })).not.toBeInTheDocument();
-    window.dispatchEvent(new Event('screening-config-changed'));
-
-    expect(await screen.findByRole('link', { name: '选股' })).toHaveAttribute('href', '/screening');
-    await waitFor(() => expect(mockGetScreeningStatus.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
   it('shows the shared completion badge only when chat completion is pending', () => {
@@ -197,16 +127,16 @@ describe('SidebarNav', () => {
     expect(alertsLink).toHaveClass('font-medium');
   });
 
-  it('renders the AI signals navigation item and marks it active', () => {
+  it('marks the research entry active on research sub-routes', () => {
     render(
-      <MemoryRouter initialEntries={['/decision-signals']}>
+      <MemoryRouter initialEntries={['/research/signals']}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    const signalsLink = screen.getByRole('link', { name: 'AI 建议' });
-    expect(signalsLink).toHaveAttribute('href', '/decision-signals');
-    expect(signalsLink).toHaveClass('font-medium');
+    const researchLink = screen.getByRole('link', { name: '研究' });
+    expect(researchLink).toHaveAttribute('href', '/research');
+    expect(researchLink).toHaveClass('font-medium');
   });
 
   it('opens the logout confirmation and confirms logout', async () => {

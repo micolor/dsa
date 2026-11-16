@@ -87,6 +87,13 @@ def test_auto_trade_endpoint_runs_a_pass(client):
     assert payload["processed"] == 0
 
 
+def test_auto_trade_rejects_unknown_account(client):
+    response = client.post("/api/v1/paper/auto-trade?account_id=999")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "account_not_found"
+
+
 def test_reset_opens_a_new_account_with_the_supplied_capital(client):
     first = client.get("/api/v1/paper/account")
     assert first.status_code == 200

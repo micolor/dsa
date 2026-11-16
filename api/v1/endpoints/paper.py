@@ -7,7 +7,7 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_database_manager
 from api.v1.errors import api_error
@@ -240,7 +240,11 @@ def auto_trade(
             account_id=account_id,
             lookback_days=int(lookback_days),
         )
+        if result.get("status") == "account_not_found":
+            raise api_error(404, "account_not_found", "模拟盘账户不存在或已归档")
         return PaperAutoTradeResponse(**result)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("模拟盘自动交易失败: %s", exc, exc_info=True)
         raise api_error(500, "internal_error", "模拟盘自动交易失败")

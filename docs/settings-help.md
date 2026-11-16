@@ -117,3 +117,10 @@ Issue #1512 收口后，Web 设置页只展示后端配置注册表中的正式�
 - `SCHEDULE_TIME`、`SCHEDULE_TIMES`：不是重启必需项。`SCHEDULE_TIMES` 为空时使用 `SCHEDULE_TIME`；已运行的 scheduler 会按新时间重建 daily jobs。
 - `SCHEDULE_RUN_IMMEDIATELY`：schedule 模式启动行为，保存后不会让当前进程立即执行一次分析；手动执行请使用 runtime scheduler 的 run-now API。
 - runtime scheduler 的 run-now API 只会在没有分析任务运行时接受请求；如果已有分析在执行，会返回忙碌状态，Web 设置页会提示稍后重试。
+
+## 敏感字段读取与编辑
+
+- `GET /api/v1/system/config` 对所有 schema 中 `is_sensitive=true` 的字段统一返回掩码（`mask_token`），不再区分是否在服务端硬编码脱敏名单中。
+- 设置页保存时，值仍等于掩码的敏感项视为“未修改”，服务端保留原值；要更换 Key/Token/Webhook 必须重新输入。
+- LLM 渠道编辑器的测试/模型发现可以用已保存的 Key：前端发送 `use_saved_secret=true`，服务端仅在提交的 Base URL 与已保存 Base URL 一致时复用，防止把 Key 发往新地址。
+- 配置写入拒绝新增未注册 key；`.env` 导入为兼容旧备份仍允许未注册 key，但设置页只展示注册字段。

@@ -13,6 +13,8 @@ interface SettingsCategoryNavProps {
   itemsByCategory: Record<string, SystemConfigItem[]>;
   activeCategory: string;
   onSelect: (category: string) => void;
+  /** Hide raw totals in the basic view; they describe the full schema, not the visible subset. */
+  showCounts?: boolean;
 }
 
 const categoryIconMap: Partial<Record<SystemConfigCategory, LucideIcon>> = {
@@ -30,6 +32,7 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
   itemsByCategory,
   activeCategory,
   onSelect,
+  showCounts = true,
 }) => {
   const { language, t } = useUiLanguage();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -96,18 +99,20 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
                   </span>
                 ) : null}
               </span>
-              <Badge
-                variant={isActive ? 'info' : 'default'}
-                size="sm"
-                className={cn(
-                  'shrink-0 px-1.5 py-0 text-[11px]',
-                  isActive
-                    ? 'border-[hsl(var(--primary)/0.32)]'
-                    : 'border-border/60 bg-elevated text-muted-text',
-                )}
-              >
-                {count}
-              </Badge>
+              {showCounts ? (
+                <Badge
+                  variant={isActive ? 'info' : 'default'}
+                  size="sm"
+                  className={cn(
+                    'shrink-0 px-1.5 py-0 text-[11px]',
+                    isActive
+                      ? 'border-[hsl(var(--primary)/0.32)]'
+                      : 'border-border/60 bg-elevated text-muted-text',
+                  )}
+                >
+                  {count}
+                </Badge>
+              ) : null}
             </button>
           );
         })}
