@@ -25,7 +25,7 @@ from api.v1.schemas.paper import (
     PaperTradeListResponse,
     PaperValuationResponse,
 )
-from src.services.paper_service import PaperService
+from src.services.paper_service import PaperAccountBusy, PaperService
 from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -168,7 +168,10 @@ def get_signals(
 @router.post(
     "/refresh",
     response_model=PaperValuationResponse,
-    responses={500: {"description": "服务器错误", "model": ErrorResponse}},
+    responses={
+        409: {"description": "账户正在被其他进程处理", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
     summary="触发模拟盘当日估值",
 )
 def refresh(
@@ -182,6 +185,8 @@ def refresh(
         # Manual refresh always re-prices today, even if a snapshot already exists.
         valuation = service.run_daily_valuation(account_id, force=True)
         return PaperValuationResponse(**valuation)
+    except PaperAccountBusy:
+        raise api_error(409, "paper_account_busy", "模拟盘账户正在被其他任务处理，请稍后重试")
     except Exception as exc:
         logger.error("模拟盘估值失败: %s", exc, exc_info=True)
         raise api_error(500, "internal_error", "模拟盘估值失败")
@@ -192,6 +197,7 @@ def refresh(
     response_model=BackfillResponse,
     responses={
         400: {"description": "请求参数错误", "model": ErrorResponse},
+        409: {"description": "账户正在被其他进程处理", "model": ErrorResponse},
         500: {"description": "服务器错误", "model": ErrorResponse},
     },
     summary="历史信号回填",
@@ -210,6 +216,8 @@ def backfill(
             account_id = service.get_or_create_account()["account_id"]
         result = service.backfill_history(account_id, request.from_date, request.to_date)
         return BackfillResponse(**result)
+    except PaperAccountBusy:
+        raise api_error(409, "paper_account_busy", "模拟盘账户正在被其他任务处理，请稍后重试")
     except ValueError as exc:
         raise api_error(400, "invalid_params", str(exc))
     except Exception as exc:
@@ -255,6 +263,7 @@ def auto_trade(
     response_model=PaperAccountResponse,
     responses={
         400: {"description": "请求参数错误", "model": ErrorResponse},
+        409: {"description": "账户正在被其他进程处理", "model": ErrorResponse},
         500: {"description": "服务器错误", "model": ErrorResponse},
     },
     summary="重置模拟盘账户",
@@ -269,6 +278,8 @@ def reset_account(
         service = _service(db_manager)
         capital = request.initial_capital if request is not None else None
         return PaperAccountResponse(**service.reset_account(initial_capital=capital))
+    except PaperAccountBusy:
+        raise api_error(409, "paper_account_busy", "模拟盘账户正在被其他任务处理，请稍后重试")
     except ValueError as exc:
         raise api_error(400, "invalid_params", str(exc))
     except Exception as exc:

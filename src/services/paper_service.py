@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 import math
 import threading
+import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from src.core.trading_calendar import (
     get_effective_trading_date,
@@ -127,6 +129,21 @@ def _account_lock(account_id: int) -> threading.RLock:
         return lock
 
 
+# How long a caller waits for another *process* to finish mutating the same
+# account before giving up. The lock is held for the duration of one signal
+# consume / valuation; a backfill can hold it for minutes, in which case the
+# caller should surface "busy" and retry later instead of writing concurrently.
+_PAPER_CROSS_PROCESS_LOCK_TIMEOUT_SECONDS = 5.0
+
+
+class PaperAccountBusy(RuntimeError):
+    """Another process is currently mutating this paper account."""
+
+    def __init__(self, account_id: int):
+        self.account_id = account_id
+        super().__init__(f"paper account {account_id} is busy in another process")
+
+
 # Per-stock bar cache shared across ALL PaperService instances, so the daily
 # valuation task, signal-consumption pipeline, backfill and manual refresh reuse
 # one window instead of re-pulling DEFAULT_LOOKBACK_DAYS bars per run. This is
@@ -215,6 +232,61 @@ class PaperService:
         except Exception:  # pragma: no cover - defensive fallback
             return True, COMMISSION_RATE, SLIPPAGE_BPS
 
+    def _account_lock_path(self, account_id: int) -> Optional[str]:
+        """Return the per-account lock file, or None when the DB has no file.
+
+        The file lives next to the SQLite database instead of the repo root so
+        test databases and deployments with custom ``DATABASE_PATH`` never
+        contend with each other.
+        """
+        db_url = str(getattr(self.db, "_db_url", "") or "")
+        db_file = ""
+        if db_url.startswith("sqlite:///"):
+            db_file = db_url[len("sqlite:///"):]
+        elif db_url.startswith("sqlite://"):
+            db_file = db_url[len("sqlite://"):]
+        if not db_file:
+            try:
+                from src.config import get_config
+
+                db_file = str(getattr(get_config(), "database_path", "") or "")
+            except Exception:  # pragma: no cover - defensive fallback
+                db_file = ""
+        if not db_file or db_file == ":memory:":
+            return None
+        return f"{db_file}.paper.{int(account_id)}.lock"
+
+    @contextmanager
+    def _account_write_lock(self, account_id: int) -> Iterator[None]:
+        """Serialize one account's write path across threads *and* processes.
+
+        The in-process RLock stays the cheap first line of defence; the file
+        lock is what keeps two uvicorn workers (or the scheduler plus a manual
+        API call) from each committing a half-updated cash/position state. A
+        committed half-update cannot be rolled back by the signal-unique index,
+        so serializing the whole read-modify-write is the only safe option.
+        """
+        with _account_lock(account_id):
+            lock_path = self._account_lock_path(account_id)
+            if lock_path is None:
+                yield
+                return
+
+            # Imported lazily: runtime_scheduler imports PaperService inside its
+            # task functions, so a module-level import would create a cycle.
+            from src.services.runtime_scheduler import CrossProcessAnalysisLock
+
+            lock = CrossProcessAnalysisLock(lock_path)
+            deadline = time.monotonic() + _PAPER_CROSS_PROCESS_LOCK_TIMEOUT_SECONDS
+            while not lock.acquire():
+                if time.monotonic() >= deadline:
+                    raise PaperAccountBusy(account_id)
+                time.sleep(0.05)
+            try:
+                yield
+            finally:
+                lock.release()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -272,7 +344,7 @@ class PaperService:
         current = self.paper_repo.ensure_account()
         # Serialize on the account being replaced so two concurrent resets cannot
         # both archive the same row and each open a successor.
-        with _account_lock(current.id):
+        with self._account_write_lock(current.id):
             for stale in self.paper_repo.list_accounts():
                 if stale.status == "active":
                     self.paper_repo.update_account(stale.id, {"status": "archived"})
@@ -305,7 +377,23 @@ class PaperService:
 
         # Serialize the whole consume (dedup-check -> execute -> record) per
         # account so concurrent consumers of the same signal cannot both buy.
-        with _account_lock(account.id):
+        try:
+            return self._process_signal_locked(account, signal)
+        except PaperAccountBusy:
+            return {
+                "status": "busy",
+                "signal_id": signal.id,
+                "account_id": account.id,
+            }
+
+    def _process_signal_locked(self, account, signal: DecisionSignalRecord) -> Dict[str, Any]:
+        with self._account_write_lock(account.id):
+            # The account row was read before the lock. A concurrent reset may
+            # have archived it while we waited, so re-check the status before
+            # booking a trade into a retired account.
+            fresh = self.paper_repo.get_account(account.id)
+            if fresh is None or fresh.status != "active":
+                return {"status": "account_not_found", "account_id": account.id}
             if self.paper_repo.has_signal_record(account.id, signal.id):
                 return {"status": "skipped", "signal_id": signal.id}
 
@@ -350,7 +438,7 @@ class PaperService:
         account = self.paper_repo.get_account(account_id) or self.paper_repo.ensure_account()
         # Serialize valuation against signal consumption / backfill on the same
         # account so a stop-loss exit and a concurrent signal cannot interleave.
-        with _account_lock(account.id):
+        with self._account_write_lock(account.id):
             as_of = as_of_date or self.resolve_valuation_date(account)
             if not force and self.paper_repo.has_snapshot(account.id, as_of):
                 # 已有当日快照时复用其数据，但补齐 trade_date 以满足 PaperValuationResponse。
@@ -362,18 +450,22 @@ class PaperService:
                     "market_value": snap["market_value"],
                     "net_value": snap["net_value"],
                     "return_pct": snap["return_pct"],
+                    "status": "ok",
+                    "missing_symbols": [],
+                    "snapshot_written": False,
                 }
 
             return self._valuate(account, as_of)
 
     def resolve_valuation_date(self, account) -> date:
-        """Resolve the latest completed (finalized) daily-bar date to value at.
+        """Resolve the latest date on which *every* held market has closed.
 
-        Uses the market of the account's first open position so the date reflects
-        that market's completed session (before close -> previous session, after
-        close -> current session). This avoids recording a premature "today"
-        snapshot priced against a not-yet-final daily bar. Falls back to today
-        when the account has no open position or a calendar is unavailable.
+        A single date for the whole portfolio must wait for the slowest market:
+        with A股 + 美股 positions, using the first position's market would write
+        a "today" snapshot while the US session is still open, marking those
+        positions at a stale price. Taking the minimum completed session across
+        all held markets avoids recording that partial snapshot. Falls back to
+        today when the account has no open position or a calendar is unavailable.
         """
         positions = self.paper_repo.list_open_positions(account.id)
         if not positions:
@@ -384,12 +476,16 @@ class PaperService:
             except Exception:  # pragma: no cover - calendar failure; fall back to local today
                 logger.warning("paper: resolve_valuation_date fallback to today", exc_info=True)
                 return date.today()
-        market = get_market_for_stock(positions[0].stock_code)
-        try:
-            return get_effective_trading_date(market)
-        except Exception:  # pragma: no cover - calendar failure; fall back to local today
-            logger.warning("paper: resolve_valuation_date fallback to today", exc_info=True)
-            return date.today()
+
+        dates: List[date] = []
+        for position in positions:
+            market = position.market or get_market_for_stock(position.stock_code)
+            try:
+                dates.append(get_effective_trading_date(market))
+            except Exception:  # pragma: no cover - calendar failure; fall back to local today
+                logger.warning("paper: resolve_valuation_date fallback to today", exc_info=True)
+                dates.append(date.today())
+        return min(dates)
 
     def latest_snapshot_date(self, account_id: int) -> Optional[date]:
         """Return the most recent equity-snapshot date, or None if none exists."""
@@ -411,7 +507,7 @@ class PaperService:
         unavailable = 0
         # Serialize the whole replay per account so it never interleaves with live
         # signal consumption or the valuation task on the same account.
-        with _account_lock(account.id):
+        with self._account_write_lock(account.id):
             for signal in signals:
                 if self.paper_repo.has_signal_record(account.id, signal.id):
                     continue
@@ -516,7 +612,10 @@ class PaperService:
         results: List[Dict[str, Any]] = []
         for signal in ordered:
             try:
-                outcome = self.process_signal(signal.id)
+                # Pin the resolved account: without it process_signal falls back
+                # to the lowest-id active account, which may differ from the one
+                # this pass validated (e.g. an explicitly requested account).
+                outcome = self.process_signal(signal.id, account_id=account.id)
             except Exception as exc:
                 # One malformed signal must not abort the whole daily pass; keep
                 # the remaining candidates eligible.
@@ -542,6 +641,12 @@ class PaperService:
                 skipped += 1
             elif status == _DATA_UNAVAILABLE:
                 unavailable += 1
+            elif status in ("busy", "account_not_found"):
+                # Another process holds the account lock, or the account was
+                # archived mid-pass. Count it as an error so the scheduler keeps
+                # the day's pass open and retries next tick instead of marking it
+                # complete without executing the signal.
+                errors += 1
             results.append({
                 "signal_id": signal.id,
                 "stock_code": signal.stock_code,
@@ -910,11 +1015,18 @@ class PaperService:
     def _valuate(self, account, as_of: date, notify: bool = True) -> Dict[str, Any]:
         """Mark-to-market open positions, trigger stop-loss/take-profit, snapshot."""
         positions = self.paper_repo.list_open_positions(account.id)
+        missing: List[str] = []
         for position in positions:
-            bar = self._bar_for(position.stock_code, as_of)
+            bar_date = self._position_bar_date(position, as_of)
+            bar = self._bar_for(position.stock_code, bar_date)
             if bar is None:
+                # 不用上一次的 market_value 顶替：那会把几天前的旧价写进当天快照，
+                # 净值曲线看起来正常，实际是历史残值。本次不落快照，交给下一轮重试。
+                missing.append(position.stock_code)
                 logger.warning(
-                    "paper: 无 %s 在 %s 的行情 bar，估值跳过该标的", position.stock_code, as_of
+                    "paper: 无 %s 在 %s 的行情 bar，本次不写入估值快照",
+                    position.stock_code,
+                    bar_date,
                 )
                 continue
             close = bar.get("close")
@@ -951,7 +1063,41 @@ class PaperService:
                 },
             )
 
-        return self._record_snapshot(account, as_of)
+        if missing:
+            payload = self._snapshot_payload(account, as_of)
+            payload.update({
+                "status": _DATA_UNAVAILABLE,
+                "missing_symbols": missing,
+                "snapshot_written": False,
+            })
+            return payload
+
+        payload = self._record_snapshot(account, as_of)
+        payload.update({
+            "status": "ok",
+            "missing_symbols": [],
+            "snapshot_written": True,
+        })
+        return payload
+
+    def _position_bar_date(self, position, as_of: date) -> date:
+        """Latest completed session for this position's market, capped at ``as_of``.
+
+        ``as_of`` may be "today" for a market that is still open (e.g. a CN
+        signal valued while the US session is running). Pricing that position on
+        its previous completed session is the latest real close; asking for an
+        ``as_of`` bar that does not exist yet would either miss or reuse a stale
+        value. For a historical ``as_of`` the cap keeps the replay free of
+        look-ahead.
+        """
+        market = getattr(position, "market", None) or get_market_for_stock(
+            getattr(position, "stock_code", "") or ""
+        )
+        try:
+            latest = get_effective_trading_date(market)
+        except Exception:  # pragma: no cover - calendar failure; keep the requested date
+            return as_of
+        return min(as_of, latest)
 
     def _daily_exit(self, position, bar: Dict[str, float]) -> Tuple[Optional[float], str]:
         """Return (exit_price, reason) if today's bar triggers stop-loss or take-profit.
@@ -1035,7 +1181,7 @@ class PaperService:
             "paper: closed %s %s @ %.2f (%s)", position.stock_code, quantity, exit_price, reason
         )
 
-    def _record_snapshot(self, account, as_of: date) -> Dict[str, Any]:
+    def _snapshot_payload(self, account, as_of: date) -> Dict[str, Any]:
         # Re-read open positions *after* the marking/exit loop above. The records
         # fetched at the start of `_valuate` are stale by then: upsert_position /
         # close_position write to the database, not to those objects. Summing them
@@ -1048,9 +1194,6 @@ class PaperService:
         return_pct = (
             (net_value / account.initial_capital - 1.0) * 100 if account.initial_capital else 0.0
         )
-        self.paper_repo.add_snapshot(
-            account.id, as_of, cash, market_value, net_value, round(return_pct, 4)
-        )
         return {
             "account_id": account.id,
             "trade_date": as_of.isoformat(),
@@ -1059,6 +1202,18 @@ class PaperService:
             "net_value": round(net_value, 4),
             "return_pct": round(return_pct, 4),
         }
+
+    def _record_snapshot(self, account, as_of: date) -> Dict[str, Any]:
+        payload = self._snapshot_payload(account, as_of)
+        self.paper_repo.add_snapshot(
+            account.id,
+            as_of,
+            payload["cash"],
+            payload["market_value"],
+            payload["net_value"],
+            payload["return_pct"],
+        )
+        return payload
 
     def _account_payload(self, account) -> Dict[str, Any]:
         return {

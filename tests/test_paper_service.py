@@ -196,11 +196,11 @@ def test_auto_trade_continues_after_one_signal_failure(isolated_db, service, mon
     original = service.process_signal
     calls: list[int] = []
 
-    def flaky(signal_id: int):
+    def flaky(signal_id: int, account_id=None):
         calls.append(signal_id)
         if len(calls) == 1:
             raise RuntimeError("boom")
-        return original(signal_id)
+        return original(signal_id, account_id=account_id)
 
     monkeypatch.setattr(service, "process_signal", flaky)
     result = service.auto_trade_once(
@@ -658,6 +658,110 @@ def test_resolve_valuation_date_no_positions_uses_cn_trading_calendar(isolated_d
     account_id = service.get_or_create_account()["account_id"]
     account = service.paper_repo.get_account(account_id)
     assert service.resolve_valuation_date(account) == get_effective_trading_date("cn")
+
+
+def test_resolve_valuation_date_waits_for_every_held_market(isolated_db, service):
+    """快照日期必须等最慢的市场收盘，不能只看第一只持仓。"""
+    account_id = service.get_or_create_account()["account_id"]
+    for code, market in (("600519", "cn"), ("AAPL", "us")):
+        service.paper_repo.upsert_position(
+            account_id,
+            code,
+            {
+                "market": market,
+                "quantity": 100,
+                "current_price": 100.0,
+                "market_value": 10000.0,
+                "entry_date": date(2026, 1, 5),
+                "status": "open",
+            },
+        )
+    account = service.paper_repo.get_account(account_id)
+    expected = {"cn": date(2026, 1, 8), "us": date(2026, 1, 7)}
+    with mock.patch.object(ps, "get_effective_trading_date", side_effect=lambda market: expected[market]):
+        assert service.resolve_valuation_date(account) == date(2026, 1, 7)
+
+
+def test_valuation_prices_each_market_at_its_latest_completed_session(isolated_db, service):
+    """A股收盘、美股仍在盘中时，美股按上一已收盘交易日计价，而不是等 as_of 的 bar。"""
+    d1 = date(2026, 1, 5)
+    d2 = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d2, 110, 110, 110, 110)
+    _seed_daily(isolated_db, "AAPL", d1, 200, 200, 200, 200)
+    account_id = service.get_or_create_account()["account_id"]
+    for code, market in (("600519", "cn"), ("AAPL", "us")):
+        service.paper_repo.upsert_position(
+            account_id,
+            code,
+            {
+                "market": market,
+                "quantity": 10,
+                "current_price": 1.0,
+                "market_value": 10.0,
+                "entry_date": d1,
+                "status": "open",
+            },
+        )
+
+    with mock.patch.object(
+        ps,
+        "get_effective_trading_date",
+        side_effect=lambda market, current_time=None: {"cn": d2, "us": d1}[market],
+    ):
+        result = service.run_daily_valuation(account_id, as_of_date=d2)
+
+    assert result["status"] == "ok"
+    us = service.paper_repo.get_open_position(account_id, "AAPL")
+    assert us.market_value == 2000.0
+    cn = service.paper_repo.get_open_position(account_id, "600519")
+    assert cn.market_value == 1100.0
+
+
+def test_valuation_without_bar_does_not_write_stale_snapshot(isolated_db, service):
+    """缺 bar 的持仓不能用上一次的 market_value 顶替并落成当天快照。"""
+    d = date(2026, 1, 6)
+    account_id = service.get_or_create_account()["account_id"]
+    service.paper_repo.upsert_position(
+        account_id,
+        "600519",
+        {
+            "market": "cn",
+            "quantity": 100,
+            "current_price": 100.0,
+            "market_value": 10000.0,
+            "entry_date": date(2026, 1, 5),
+            "status": "open",
+        },
+    )
+
+    result = service.run_daily_valuation(account_id, as_of_date=d)
+
+    assert result["status"] == "data_unavailable"
+    assert result["snapshot_written"] is False
+    assert result["missing_symbols"] == ["600519"]
+    assert service.paper_repo.has_snapshot(account_id, d) is False
+    position = service.paper_repo.get_open_position(account_id, "600519")
+    assert position.market_value == 10000.0
+
+
+def test_process_signal_reports_busy_when_another_process_holds_account_lock(isolated_db, service):
+    """另一个进程持有账户锁时，信号不能被并发消费。"""
+    from src.services.runtime_scheduler import CrossProcessAnalysisLock
+
+    sig = _make_signal(isolated_db, action="buy", created_at=datetime(2026, 1, 5))
+    account_id = service.get_or_create_account()["account_id"]
+    lock_path = service._account_lock_path(account_id)
+    assert lock_path is not None
+    holder = CrossProcessAnalysisLock(lock_path)
+    assert holder.acquire()
+    try:
+        with mock.patch.object(ps, "_PAPER_CROSS_PROCESS_LOCK_TIMEOUT_SECONDS", 0.05):
+            result = service.process_signal(sig.id)
+    finally:
+        holder.release()
+
+    assert result["status"] == "busy"
+    assert service.get_signals(account_id)["total"] == 0
 
 
 def test_bar_cache_reloads_when_the_latest_session_bar_lands_later(isolated_db, service):

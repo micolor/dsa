@@ -118,8 +118,8 @@ export const PaperTradingPage: React.FC = () => {
     setIsActioning(true);
     setError(null);
     try {
-      await paperApi.refresh();
-      setToast(text.refreshDone);
+      const result = await paperApi.refresh();
+      setToast(result.status === 'data_unavailable' ? text.refreshPartial : text.refreshDone);
       await loadStatic();
       await loadList(activeSection, page);
     } catch (err) {
@@ -127,7 +127,7 @@ export const PaperTradingPage: React.FC = () => {
     } finally {
       setIsActioning(false);
     }
-  }, [loadStatic, loadList, activeSection, page, text.refreshDone]);
+  }, [loadStatic, loadList, activeSection, page, text.refreshDone, text.refreshPartial]);
 
   const handleBackfill = useCallback(async () => {
     if (!backfillFrom) return;

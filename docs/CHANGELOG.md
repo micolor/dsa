@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 模拟盘账户写入新增跨进程文件锁：信号消费、每日估值、回填和重置在同一账户上串行执行，避免多 uvicorn worker / 调度器与手动请求并发时重复买卖或丢失现金更新；抢锁超时返回 `busy`（API 409），自动交易将其计入 `errors` 并留待下一轮重试
+- [修复] 多市场持仓估值不再用第一只持仓的市场决定快照日期，改为等待所有持仓市场都收盘；缺行情 bar 的持仓不再沿用上一次 `market_value` 写入快照，本次不落快照并返回 `data_unavailable`，由下一轮自动重试
+- [改进] `POST /api/v1/paper/refresh` 响应新增 `status`、`missing_symbols`、`snapshot_written`；模拟盘页在行情未就绪时提示「本次未写入快照」而不是误报估值已更新
 - [修复] 系统配置读取统一按 `is_sensitive` 脱敏：不再只遮 4 个 Hermes/HMAC key，Tushare Token、各模型 API Key、邮箱密码、Webhook 地址等敏感值不再通过 `/api/v1/system/config` 明文下发；编辑时需重新输入，未修改的掩码保存会保留原值
 - [修复] `PUT /api/v1/system/config` 拒绝写入新的未注册配置键，关闭通过 `DSA_DESKTOP_MODE` 等隐藏键绕过设置页的链路；已存在的旧未注册键仍可编辑/清空，`.env` 导入保持兼容。配置写入新增不含值的结构化日志（来源、key 列表、版本）
 - [改进] 告警页顶部 Tab 从 6 个收敛为 5 个：「通知尝试记录」和「投递记录」合并为「通知记录」，内部用「告警通知 / 全部投递」切换；`?tab=deliveries` 旧链接仍可直接打开全部投递子视图

@@ -78,6 +78,10 @@ export interface PaperValuation {
   marketValue: number;
   netValue: number;
   returnPct: number;
+  /** `data_unavailable` means a quote was missing, so no snapshot was written. */
+  status?: string;
+  missingSymbols?: string[];
+  snapshotWritten?: boolean;
 }
 
 export interface PaperAutoTradeResult {

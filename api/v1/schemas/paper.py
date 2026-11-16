@@ -86,6 +86,13 @@ class PaperValuationResponse(BaseModel):
     market_value: float = 0.0
     net_value: float = 0.0
     return_pct: float = 0.0
+    # ``data_unavailable`` means at least one held symbol had no usable bar for
+    # the selected session, so no snapshot was written and the caller should
+    # retry later. ``ok`` with ``snapshot_written=false`` means the day already
+    # had a snapshot and the existing values were returned unchanged.
+    status: str = "ok"
+    missing_symbols: List[str] = Field(default_factory=list)
+    snapshot_written: bool = True
 
 
 class PaperResetRequest(BaseModel):

@@ -277,9 +277,14 @@ def _handle_refresh_paper_valuation(
         # 直执行动作允许按需创建默认模拟盘账户；真实载荷键是 ``account_id``
         # （见 PaperService._account_payload），不是 ``id``。
         account = int(service.get_or_create_account()["account_id"])
-    result = service.run_daily_valuation(
-        account_id=account, as_of_date=parsed_as_of, force=bool(force)
-    )
+    from src.services.paper_service import PaperAccountBusy
+
+    try:
+        result = service.run_daily_valuation(
+            account_id=account, as_of_date=parsed_as_of, force=bool(force)
+        )
+    except PaperAccountBusy:
+        return _error("模拟盘账户正在被其他任务处理，请稍后重试")
     return _dump({
         "kind": "paper_refresh",
         "summary": "已获取模拟盘估值快照（同日快照已存在时会复用，不重复计价）",

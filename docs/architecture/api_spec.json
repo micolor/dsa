@@ -6832,6 +6832,16 @@
               }
             }
           },
+          "409": {
+            "description": "账户正在被其他进程处理",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "服务器错误",
             "content": {
@@ -6899,6 +6909,16 @@
           },
           "400": {
             "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "账户正在被其他进程处理",
             "content": {
               "application/json": {
                 "schema": {
@@ -7042,6 +7062,16 @@
           },
           "400": {
             "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "账户正在被其他进程处理",
             "content": {
               "application/json": {
                 "schema": {
@@ -20903,6 +20933,23 @@
             "type": "number",
             "title": "Return Pct",
             "default": 0.0
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "missing_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Symbols"
+          },
+          "snapshot_written": {
+            "type": "boolean",
+            "title": "Snapshot Written",
+            "default": true
           }
         },
         "type": "object",
