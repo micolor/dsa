@@ -1915,4 +1915,14 @@ worker 会把 `triggered`、`skipped`、`degraded`、`failed` 写入 `alert_trig
 - 关闭自动交易：`PAPER_AUTO_TRADE_ENABLED=false`；关闭后仍可在模拟盘页手动回填历史信号。
 - 首次开启且回看窗口较长时可能一次性补较多历史信号，建议先用 `PAPER_AUTO_TRADE_LOOKBACK_DAYS=1` 观察。
 
+### 选股结果自动买入
+
+每次选股运行完成后，系统可以把本次排名前 `PAPER_SCREENING_TOP_N`（默认 3）的候选自动转成模拟盘 `buy` 信号：
+
+- 选股候选会先落成一条普通决策信号（`trace_id=screening:<run_id>`，来源 `screening`），再走和报告信号完全相同的消费链路：同信号幂等、每只 20% 目标仓位、现金/费用校验、跨进程账户锁。
+- 只在已经存在 active 模拟账户时执行；选股本身不会创建账户。没有账户时响应里的 `paper_screening_auto_buy.status` 为 `no_account`。
+- 同一 `run_id` 重复执行会按 `trace_id + 股票` 去重，不会重复买入；同一天多次选股会分别评估，现金不足时记录 `no_cash`。
+- 模拟买入使用日线收盘价（无 entry 区间），默认按参考价 `-5%` 止损、`+10%` 止盈，只用于模拟退出。
+- 关闭：`PAPER_SCREENING_AUTO_BUY_ENABLED=false`；关闭后选股、报告和手动回填都不受影响。
+
 实现细节与边界见 [模拟盘优化说明](paper-trading-optimization.md) 第 18 节。

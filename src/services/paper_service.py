@@ -43,6 +43,11 @@ COMMISSION_RATE = 0.00025
 # assumption about execution quality, not an observable fee, so the simulation
 # does not invent it unless the user asks for it.
 SLIPPAGE_BPS = 0.0
+# Fixed risk bracket for screening-driven buys. Screening candidates carry a
+# reference price but no plan, so the paper account needs an exit rule of its
+# own; 5%/10% keeps the simulated trade from becoming a buy-and-forget position.
+_SCREENING_STOP_LOSS_PCT = 0.05
+_SCREENING_TAKE_PROFIT_PCT = 0.10
 
 # Statutory / exchange fees per market. These are set by the venue rather than
 # negotiated, so they live here instead of in config. `stamp_duty_sell_only`
@@ -667,6 +672,196 @@ class PaperService:
             "errors": errors,
             "results": results,
         }
+
+    def auto_buy_screening_run(
+        self,
+        run: Dict[str, Any],
+        *,
+        top_n: int = 3,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Turn a screening run's top picks into paper buy signals and consume them.
+
+        Screening picks are ordinary decision signals, so they reuse the same
+        idempotency, position sizing, fee model and cross-process lock as report
+        signals. A pick never opens a position directly here: it is persisted
+        with ``trace_id=screening:<run_id>`` first, which makes re-running the
+        same screening run a no-op instead of buying twice.
+        """
+        run_id = str(run.get("run_id") or "").strip()
+        candidates = run.get("candidates")
+        if not run_id or not isinstance(candidates, list):
+            return {"status": "invalid_run", "run_id": run_id, "processed": 0}
+
+        account_id = self.get_existing_account_id()
+        if account_id is None:
+            # Do not create an account from a screening run: paper trading stays
+            # opted-in by visiting the page or by the existing scheduler task.
+            return {"status": "no_account", "run_id": run_id, "processed": 0}
+        account = self.paper_repo.get_account(account_id)
+        if account is None or account.status != "active":
+            return {"status": "no_account", "run_id": run_id, "processed": 0}
+
+        limit = max(1, min(int(top_n or 3), 20))
+        run_market = str(run.get("market") or "").strip().lower() or None
+        selected = [
+            item
+            for item in candidates
+            if isinstance(item, dict) and str(item.get("code") or "").strip()
+        ][:limit]
+
+        from src.services.decision_signal_service import DecisionSignalService
+
+        signal_service = DecisionSignalService(db_manager=self.db)
+        created_at = now or utc_naive_now()
+
+        results: List[Dict[str, Any]] = []
+        signals_created = processed = skipped = unavailable = errors = 0
+        for item in selected:
+            code = str(item.get("code") or "").strip()
+            market = get_market_for_stock(code) or run_market
+            price = self._optional_positive_float(item.get("price"))
+            score = self._clamp_score(item.get("score") or item.get("screen_score"))
+            confidence = self._optional_unit_float(item.get("llm_confidence"))
+            if confidence is None:
+                confidence = round(score / 100.0, 4)
+            risk_flags = self._text_list(item.get("risk_flags")) + self._text_list(item.get("llm_risks"))
+            payload: Dict[str, Any] = {
+                "stock_code": code,
+                "stock_name": str(item.get("name") or "").strip() or None,
+                "market": market,
+                "source_type": "analysis",
+                "source_agent": "screening",
+                "trace_id": f"screening:{run_id}",
+                "trigger_source": "screening",
+                "action": "buy",
+                "confidence": confidence,
+                "score": score,
+                "horizon": "3d",
+                # Keep expiry on the same clock as the run instead of the
+                # service's wall clock, so a replayed/test-created run expires
+                # three days after its own created_at.
+                "expires_at": created_at + timedelta(days=3),
+                "stop_loss": round(price * (1 - _SCREENING_STOP_LOSS_PCT), 2) if price else None,
+                "target_price": round(price * (1 + _SCREENING_TAKE_PROFIT_PCT), 2) if price else None,
+                "reason": self._first_text(
+                    item.get("reason"),
+                    item.get("llm_thesis"),
+                    item.get("llm_style_fit"),
+                ),
+                "risk_summary": "；".join(risk_flags) or None,
+                "catalyst_summary": "；".join(self._text_list(item.get("llm_catalysts"))) or None,
+                "watch_conditions": "；".join(self._text_list(item.get("llm_watch_items"))) or None,
+                "invalidation": "；".join(self._text_list(item.get("llm_invalidators"))) or None,
+                "evidence": {"factor_scores": item.get("factor_scores") or {}},
+                "metadata": {
+                    "screening_run_id": run_id,
+                    "screening_strategy": run.get("strategy"),
+                    "screening_rank": item.get("rank"),
+                    "screen_score": item.get("screen_score"),
+                    "screening_price": price,
+                    "screening_change_pct": item.get("change_pct"),
+                    "risk_level": item.get("risk_level"),
+                    "risk_flags": item.get("risk_flags") or [],
+                },
+                "_created_at_override": created_at,
+            }
+            try:
+                write = signal_service.create_signal(payload)
+                signal_id = int(write["item"]["id"])
+                if write.get("created"):
+                    signals_created += 1
+                outcome = self.process_signal(signal_id, account_id=account.id)
+                status = str(outcome.get("status") or "")
+                if status == "processed":
+                    processed += 1
+                elif status == "skipped":
+                    skipped += 1
+                elif status == _DATA_UNAVAILABLE:
+                    unavailable += 1
+                else:
+                    errors += 1
+                results.append({
+                    "signal_id": signal_id,
+                    "stock_code": code,
+                    "status": status,
+                    "disposition": outcome.get("disposition"),
+                })
+            except Exception as exc:
+                errors += 1
+                logger.warning(
+                    "paper screening auto-buy failed: run_id=%s stock_code=%s error=%s",
+                    run_id,
+                    code,
+                    exc,
+                )
+                results.append({
+                    "stock_code": code,
+                    "status": "error",
+                    "error": str(exc),
+                })
+
+        logger.info(
+            "paper screening auto-buy: run_id=%s account=%s candidates=%s created=%s processed=%s unavailable=%s",
+            run_id,
+            account.id,
+            len(selected),
+            signals_created,
+            processed,
+            unavailable,
+        )
+        return {
+            "status": "ok",
+            "run_id": run_id,
+            "account_id": account.id,
+            "candidates": len(selected),
+            "signals_created": signals_created,
+            "processed": processed,
+            "skipped": skipped,
+            "unavailable": unavailable,
+            "errors": errors,
+            "results": results,
+        }
+
+    @staticmethod
+    def _optional_positive_float(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) and number > 0 else None
+
+    @staticmethod
+    def _optional_unit_float(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+            return None
+        return number
+
+    @staticmethod
+    def _clamp_score(value: Any) -> int:
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(100, number))
+
+    @staticmethod
+    def _text_list(value: Any) -> List[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @staticmethod
+    def _first_text(*values: Any) -> Optional[str]:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text[:2000]
+        return None
 
     def _is_current_signal_session(self, signal: DecisionSignalRecord, now: datetime) -> bool:
         """True when the signal's intended fill session is still the latest one."""

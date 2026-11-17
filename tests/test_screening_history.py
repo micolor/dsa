@@ -80,6 +80,85 @@ class ScreeningHistoryTestCase(unittest.TestCase):
         self.assertEqual(history["run_count"], 1)
         self.assertNotIn("result", history["runs"][0])
 
+    def test_screen_feeds_top_candidates_to_paper_when_enabled(self) -> None:
+        raw_result = {
+            "run_id": "screen-paper-1",
+            "strategy": "dual_low",
+            "market": "cn",
+            "candidates": [
+                {"rank": 1, "code": "600519", "name": "贵州茅台", "score": 88, "price": 1500.0},
+            ],
+        }
+        self.config = Config(
+            screening_enabled=True,
+            paper_trading_enabled=True,
+            paper_screening_auto_buy_enabled=True,
+            paper_screening_top_n=2,
+        )
+        service = ScreeningService(self.config, db_manager=self.db)
+
+        with (
+            patch(
+                "src.services.screening_service._get_screening_status_snapshot",
+                return_value=({}, True, None),
+            ),
+            patch(
+                "src.services.screening_service._call_screening_screen",
+                return_value=raw_result,
+            ),
+            patch(
+                "src.services.screening_service._enrich_candidates_with_dsa",
+                side_effect=lambda candidates: (candidates, {"enabled": True, "warnings": []}),
+            ),
+            patch(
+                "src.services.paper_service.PaperService.auto_buy_screening_run",
+                return_value={"status": "ok", "processed": 1},
+            ) as auto_buy,
+        ):
+            response = service.screen(strategy="dual_low", market="cn", max_results=3)
+
+        auto_buy.assert_called_once()
+        self.assertEqual(auto_buy.call_args.kwargs["top_n"], 2)
+        self.assertEqual(response["paper_screening_auto_buy"]["processed"], 1)
+
+    def test_screen_skips_paper_when_auto_buy_disabled(self) -> None:
+        raw_result = {
+            "run_id": "screen-paper-off",
+            "strategy": "dual_low",
+            "market": "cn",
+            "candidates": [
+                {"rank": 1, "code": "600519", "name": "贵州茅台", "score": 88, "price": 1500.0},
+            ],
+        }
+        self.config = Config(
+            screening_enabled=True,
+            paper_trading_enabled=True,
+            paper_screening_auto_buy_enabled=False,
+        )
+        service = ScreeningService(self.config, db_manager=self.db)
+
+        with (
+            patch(
+                "src.services.screening_service._get_screening_status_snapshot",
+                return_value=({}, True, None),
+            ),
+            patch(
+                "src.services.screening_service._call_screening_screen",
+                return_value=raw_result,
+            ),
+            patch(
+                "src.services.screening_service._enrich_candidates_with_dsa",
+                side_effect=lambda candidates: (candidates, {"enabled": True, "warnings": []}),
+            ),
+            patch(
+                "src.services.paper_service.PaperService.auto_buy_screening_run",
+            ) as auto_buy,
+        ):
+            response = service.screen(strategy="dual_low", market="cn", max_results=3)
+
+        auto_buy.assert_not_called()
+        self.assertNotIn("paper_screening_auto_buy", response)
+
     def test_screen_maps_pipeline_degradation_into_warning_contract(self) -> None:
         raw_result = {
             "run_id": "screen-run-degradation",

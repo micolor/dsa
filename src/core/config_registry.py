@@ -100,6 +100,8 @@ _BASIC_SETTING_KEYS = frozenset({
     "SINGLE_STOCK_NOTIFY",
     "MERGE_EMAIL_NOTIFICATION",
     "PAPER_AUTO_TRADE_ENABLED",
+    "PAPER_SCREENING_AUTO_BUY_ENABLED",
+    "PAPER_SCREENING_TOP_N",
 })
 
 _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -3719,6 +3721,55 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_order": 56,
         "help_key": "settings.base.PAPER_AUTO_TRADE_LOOKBACK_DAYS",
         "examples": ["PAPER_AUTO_TRADE_LOOKBACK_DAYS=7"],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "PAPER_SCREENING_AUTO_BUY_ENABLED": {
+        "title": "Paper Screening Auto Buy",
+        "description": "Turn each completed screening run's top-ranked candidates into simulated buy signals. Only runs when an active paper account already exists; screening itself never creates an account.",
+        "category": "base",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "true",
+        "options": [],
+        "validation": {},
+        "display_order": 57,
+        "help_key": "settings.base.PAPER_SCREENING_AUTO_BUY_ENABLED",
+        "examples": [
+            "PAPER_SCREENING_AUTO_BUY_ENABLED=true",
+            "PAPER_SCREENING_AUTO_BUY_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "模拟盘优化说明",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/paper-trading-optimization.md",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "PAPER_SCREENING_TOP_N": {
+        "title": "Paper Screening Top N",
+        "description": "How many top-ranked candidates from each screening run become paper buy signals. Position weight and available cash still cap the actual spend.",
+        "category": "base",
+        "data_type": "integer",
+        "ui_control": "number",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "3",
+        "options": [],
+        "validation": {"min": 1, "max": 20},
+        "display_order": 58,
+        "help_key": "settings.base.PAPER_SCREENING_TOP_N",
+        "examples": ["PAPER_SCREENING_TOP_N=3"],
         "docs": [
             {
                 "label": "模拟盘优化说明",

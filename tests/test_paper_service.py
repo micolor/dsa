@@ -215,6 +215,59 @@ def test_auto_trade_continues_after_one_signal_failure(isolated_db, service, mon
     assert calls == [first.id, second.id]
 
 
+def test_auto_buy_screening_run_buys_top_candidates_and_is_idempotent(isolated_db, service):
+    d = date(2026, 1, 6)
+    _seed_daily(isolated_db, "600519", d, 100, 100, 100, 100)
+    _seed_daily(isolated_db, "000001", d, 10, 10, 10, 10)
+    account_id = service.get_or_create_account()["account_id"]
+    run = {
+        "run_id": "screen-run-1",
+        "strategy": "capital_heat",
+        "market": "cn",
+        "candidates": [
+            {"rank": 1, "code": "600519", "name": "贵州茅台", "score": 88, "price": 100.0,
+             "llm_confidence": 0.8, "reason": "量价同步", "risk_flags": ["高估值"]},
+            {"rank": 2, "code": "000001", "name": "平安银行", "score": 80, "price": 10.0,
+             "llm_confidence": 0.7},
+            {"rank": 3, "code": "000002", "name": "万科A", "score": 70, "price": 8.0},
+        ],
+    }
+
+    result = service.auto_buy_screening_run(run, top_n=2, now=datetime(2026, 1, 5, 17, 0))
+
+    assert result["status"] == "ok"
+    assert result["candidates"] == 2
+    assert result["signals_created"] == 2
+    assert result["processed"] == 2
+    positions = {p["stock_code"] for p in service.get_positions(account_id)}
+    assert positions == {"600519", "000001"}
+    trades = service.get_trades(account_id)["items"]
+    assert len(trades) == 2
+    assert all(trade["side"] == "buy" for trade in trades)
+
+    # Re-running the same screening run must not create new signals or trades.
+    again = service.auto_buy_screening_run(run, top_n=2, now=datetime(2026, 1, 5, 17, 30))
+
+    assert again["signals_created"] == 0
+    assert again["skipped"] == 2
+    assert len(service.get_trades(account_id)["items"]) == 2
+
+
+def test_auto_buy_screening_run_does_not_create_an_account(isolated_db, service):
+    run = {
+        "run_id": "screen-run-2",
+        "market": "cn",
+        "candidates": [{"rank": 1, "code": "600519", "name": "贵州茅台", "score": 88, "price": 100.0}],
+    }
+
+    result = service.auto_buy_screening_run(run, top_n=3)
+
+    assert result["status"] == "no_account"
+    rows, total = service.decision_repo.list(page=1, page_size=10)
+    assert total == 0
+    assert rows == []
+
+
 def test_auto_trade_skips_signals_from_older_sessions(isolated_db, service):
     d_old = date(2026, 1, 6)
     _seed_daily(isolated_db, "600519", d_old, 100, 100, 100, 100)

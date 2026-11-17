@@ -1252,6 +1252,26 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响自动交易会处理多旧的信号。'],
     notes: ['过长的回看窗口会让首次开启时一次性补较多交易。'],
   },
+  'settings.base.PAPER_SCREENING_AUTO_BUY_ENABLED': {
+    title: '选股结果自动买入',
+    summary: '每次选股完成后，把排名靠前的候选自动转成模拟盘买入信号。',
+    usage: '取本次选股的前 N 名，生成 buy 信号后交给模拟盘消费；仓位权重、可用现金和跨进程锁与普通信号一致。只影响模拟账户。',
+    valueNotes: [
+      '默认开启；关闭后选股仍可正常使用，只是不会自动下单。',
+      '只在已经存在 active 模拟账户时执行，选股本身不会创建账户。',
+      '同一选股 run 重复执行会按 trace_id 去重，不会重复买入。',
+    ],
+    impact: ['影响每日选股结果是否自动变成模拟盘持仓。'],
+    notes: ['模拟买入使用日线价格，不保证与真实盘中成交一致；5% 止损、10% 目标价仅用于模拟退出。'],
+  },
+  'settings.base.PAPER_SCREENING_TOP_N': {
+    title: '选股自动买入数量',
+    summary: '每次选股取排名前 N 的候选进入模拟盘。',
+    usage: '默认 3。实际投入仍受每只 20% 目标仓位和账户现金限制，不会因为 N 很大而无限买入。',
+    valueNotes: ['范围 1–20。'],
+    impact: ['影响每次选股自动买入的候选数量。'],
+    notes: ['同一天多次运行选股会按每次运行分别评估；现金不足时会记录 no_cash。'],
+  },
   'settings.system.DEBUG': {
     title: '调试模式',
     summary: '开启调试模式，输出详细日志信息。',
@@ -2497,6 +2517,26 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Range: 1–365 days.'],
     impact: ['Controls how old a signal can be and still auto-trade.'],
     notes: ['A long lookback can backfill many trades when first enabled.'],
+  },
+  'settings.base.PAPER_SCREENING_AUTO_BUY_ENABLED': {
+    title: 'Paper Screening Auto Buy',
+    summary: "Turn each screening run's top-ranked candidates into simulated buy signals.",
+    usage: 'Takes the top N candidates, creates buy signals and lets the paper account consume them with the same position sizing, cash and cross-process lock as report signals. Simulated account only.',
+    valueNotes: [
+      'On by default; turn it off to keep screening research-only.',
+      'Runs only when an active paper account already exists; screening never creates one.',
+      'Re-running the same screening run is deduplicated by trace_id and does not buy twice.',
+    ],
+    impact: ['Controls whether daily screening picks become paper positions automatically.'],
+    notes: ['Simulated fills use daily prices; the 5% stop and 10% target are paper-only exit rules.'],
+  },
+  'settings.base.PAPER_SCREENING_TOP_N': {
+    title: 'Paper Screening Top N',
+    summary: 'How many top candidates from each screening run enter the paper account.',
+    usage: 'Defaults to 3. Spend is still capped by the 20% target weight per position and available cash.',
+    valueNotes: ['Range: 1–20.'],
+    impact: ['Controls how many candidates each screening run can buy.'],
+    notes: ['Multiple runs in one day are evaluated separately; exhausted cash is recorded as no_cash.'],
   },
   'settings.system.DEBUG': {
     title: 'Debug Mode',

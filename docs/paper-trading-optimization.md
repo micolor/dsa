@@ -17,6 +17,7 @@
 - ✅ **分类归位（H / I 的设置项归入「基础设置」）** 已实施：见第 14 节。
 - ✅ **方向 J（跨进程账户锁）** 已实施：`PaperService._account_write_lock` 在进程内 RLock 之外增加按账户的 `flock` 文件锁（锁文件与 SQLite 同目录）。信号消费、每日估值、回填、重置共用同一把锁；抢锁超时抛 `PaperAccountBusy`，API 返回 409，自动交易计入 `errors` 并在下一轮重试。已补充并发占锁回归用例。
 - ✅ **方向 K（多市场估值一致性）** 已实施：`resolve_valuation_date` 取所有持仓市场已完成交易日的**最小值**，等待最慢市场收盘再写快照；`_valuate` 按每个持仓自己市场的最近已完成交易日取 bar，缺 bar 时不再沿用旧 `market_value`，而是本次不写快照并返回 `data_unavailable` 供下一轮重试。`/paper/refresh` 响应新增 `status` / `missing_symbols` / `snapshot_written`。
+- ✅ **方向 L（选股结果自动买入）** 已实施：`ScreeningService.screen()` 保存运行结果后调用 `PaperService.auto_buy_screening_run`，把前 `PAPER_SCREENING_TOP_N` 名候选落成 `trace_id=screening:<run_id>` 的 `buy` 信号并立即走信号消费链路。只在已有 active 账户时执行；同一 run 重复执行按 `trace_id + 股票` 去重。默认 `-5%` 止损 / `+10%` 止盈，仓位权重、现金和跨进程锁与报告信号一致。配置项 `PAPER_SCREENING_AUTO_BUY_ENABLED` / `PAPER_SCREENING_TOP_N`。
 
 ## 1. 模块现状
 

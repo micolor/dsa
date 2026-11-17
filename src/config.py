@@ -1044,6 +1044,8 @@ class Config:
     paper_auto_trade_enabled: bool = True  # Consume active decision signals into the paper account once a day
     paper_auto_trade_time: str = "16:30"  # Asia/Shanghai time for the daily auto-trade pass
     paper_auto_trade_lookback_days: int = 7  # Only auto-trade active signals created within this window
+    paper_screening_auto_buy_enabled: bool = True  # Turn each screening run's top picks into paper buy signals
+    paper_screening_top_n: int = 3  # How many screening candidates to auto-buy per run
     paper_position_weight: float = 0.20  # Target weight of total assets allocated per opened position
     paper_initial_capital: float = 1000000.0  # Starting cash for a newly created paper account
     paper_notify_enabled: bool = False  # Push a notification for live paper fills (backfill replays stay silent)
@@ -2098,6 +2100,17 @@ class Config:
                 field_name='PAPER_AUTO_TRADE_LOOKBACK_DAYS',
                 minimum=1,
                 maximum=365,
+            ),
+            paper_screening_auto_buy_enabled=parse_env_bool(
+                os.getenv('PAPER_SCREENING_AUTO_BUY_ENABLED'),
+                default=True,
+            ),
+            paper_screening_top_n=parse_env_int(
+                os.getenv('PAPER_SCREENING_TOP_N'),
+                3,
+                field_name='PAPER_SCREENING_TOP_N',
+                minimum=1,
+                maximum=20,
             ),
             paper_position_weight=parse_env_float(
                 os.getenv('PAPER_POSITION_WEIGHT'),

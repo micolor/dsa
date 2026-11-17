@@ -1349,7 +1349,38 @@ class ScreeningService:
         }
         if self.db_manager is not None:
             self.db_manager.save_screening_run(response)
+            paper_result = self._auto_buy_paper_candidates(response)
+            if paper_result is not None:
+                response["paper_screening_auto_buy"] = paper_result
         return response
+
+    def _auto_buy_paper_candidates(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Feed this run's top picks into the paper account, best-effort.
+
+        Screening is a research surface; a paper-trading failure must never turn
+        a successful screening run into an error, so every exception is logged
+        and reported in the response instead of raised.
+        """
+        if not bool(getattr(self.config, "paper_trading_enabled", False)):
+            return None
+        if not bool(getattr(self.config, "paper_screening_auto_buy_enabled", False)):
+            return None
+        try:
+            from src.services.paper_service import PaperService
+
+            service = PaperService(self.db_manager)
+            return service.auto_buy_screening_run(
+                response,
+                top_n=int(getattr(self.config, "paper_screening_top_n", 3) or 3),
+            )
+        except Exception as exc:  # pragma: no cover - defensive: screening must not fail
+            logger.warning(
+                "paper screening auto-buy skipped: run_id=%s error=%s",
+                response.get("run_id"),
+                exc,
+                exc_info=True,
+            )
+            return {"status": "error", "run_id": response.get("run_id"), "error": str(exc)}
 
 
 def _emit_screening_progress(
