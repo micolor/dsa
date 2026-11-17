@@ -92,4 +92,26 @@ describe('ScheduledTasksPage', () => {
     expect(screen.getByLabelText('任务类型')).toBeInTheDocument();
     expect(screen.getByText('股票代码')).toBeInTheDocument();
   });
+
+  it('shows the lookback field for paper auto trade tasks', async () => {
+    render(<ScheduledTasksPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建任务' }));
+    fireEvent.click(await screen.findByLabelText('任务类型'));
+    fireEvent.click(await screen.findByRole('option', { name: '模拟盘自动交易' }));
+
+    expect(await screen.findByText('信号回看天数')).toBeInTheDocument();
+    expect(screen.getByText(/只处理最近 N 天内创建且仍有效的信号/)).toBeInTheDocument();
+  });
+
+  it('shows screening fields and the hotspot hint for data refresh tasks', async () => {
+    render(<ScheduledTasksPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建任务' }));
+    fireEvent.click(await screen.findByLabelText('任务类型'));
+    fireEvent.click(await screen.findByRole('option', { name: '数据刷新（选股 + 热点）' }));
+
+    expect(await screen.findByText('选股策略')).toBeInTheDocument();
+    expect(screen.getByText(/执行选股并刷新热点缓存/)).toBeInTheDocument();
+  });
 });

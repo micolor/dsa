@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 定时任务新增 `data_refresh`（选股 + 热点刷新）和 `paper_auto_trade`（模拟盘自动消费有效信号）两种类型：可以把原先 08:40/15:40 的内置数据刷新和 16:30 的模拟盘执行统一放进「定时任务」页面管理；接管后关闭 `AGENT_DATA_REFRESH_ENABLED` / `PAPER_AUTO_TRADE_ENABLED` 即可避免重复执行
 - [新功能] 每日选股结果自动买入模拟盘：每次选股完成后把排名前 `PAPER_SCREENING_TOP_N`（默认 3）的候选转成 `buy` 决策信号并自动消费，复用信号幂等、20% 目标仓位、现金/费用校验和跨进程账户锁；默认 `-5%` 止损、`+10%` 止盈。只在已有 active 模拟账户时执行，同一 `run_id` 重复运行不会重复买入；可用 `PAPER_SCREENING_AUTO_BUY_ENABLED=false` 关闭
 - [修复] 模拟盘账户写入新增跨进程文件锁：信号消费、每日估值、回填和重置在同一账户上串行执行，避免多 uvicorn worker / 调度器与手动请求并发时重复买卖或丢失现金更新；抢锁超时返回 `busy`（API 409），自动交易将其计入 `errors` 并留待下一轮重试
 - [修复] 多市场持仓估值不再用第一只持仓的市场决定快照日期，改为等待所有持仓市场都收盘；缺行情 bar 的持仓不再沿用上一次 `market_value` 写入快照，本次不落快照并返回 `data_unavailable`，由下一轮自动重试

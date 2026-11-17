@@ -18,6 +18,8 @@ TASK_TYPES = (
     "stock_analysis",
     "market_review",
     "screening",
+    "data_refresh",
+    "paper_auto_trade",
     "backtest",
     "agent_prompt",
 )
@@ -77,7 +79,7 @@ def _market_for_task(task_type: str, payload: Dict[str, Any]) -> str:
     if task_type == "market_review":
         region = str(payload.get("region") or "cn").split(",")[0].strip().lower()
         return region or "cn"
-    if task_type == "screening":
+    if task_type in ("screening", "data_refresh"):
         return str(payload.get("market") or "cn").strip().lower()
     return "cn"
 
@@ -107,7 +109,7 @@ def normalize_payload(task_type: str, payload: Optional[Dict[str, Any]]) -> Dict
         if region not in {"cn", "hk", "us"}:
             raise ScheduledTaskValidationError("region 只支持 cn / hk / us")
         return {"region": region, "notify": bool(data.get("notify", False))}
-    if task_type == "screening":
+    if task_type in ("screening", "data_refresh"):
         strategy = str(data.get("strategy") or "capital_heat").strip()
         market = str(data.get("market") or "cn").strip().lower()
         if not strategy:
@@ -121,6 +123,14 @@ def normalize_payload(task_type: str, payload: Optional[Dict[str, Any]]) -> Dict
         if not 1 <= max_results <= 100:
             raise ScheduledTaskValidationError("max_results 必须在 1-100 之间")
         return {"strategy": strategy, "market": market, "max_results": max_results}
+    if task_type == "paper_auto_trade":
+        try:
+            lookback_days = int(data.get("lookback_days", 7))
+        except (TypeError, ValueError):
+            raise ScheduledTaskValidationError("lookback_days 必须是整数") from None
+        if not 1 <= lookback_days <= 365:
+            raise ScheduledTaskValidationError("lookback_days 必须在 1-365 之间")
+        return {"lookback_days": lookback_days}
     if task_type == "backtest":
         code = str(data.get("code") or "").strip().upper() or None
         try:
@@ -385,6 +395,52 @@ class ScheduledTaskService:
             )
             task_id = result.get("task_id") if isinstance(result, dict) else None
             return "submitted", f"选股任务已提交{f'（{task_id}）' if task_id else ''}"
+        if task_type == "data_refresh":
+            from src.services.proactive_data_refresh_service import ProactiveDataRefreshService
+            from src.services.task_queue import get_task_queue
+
+            strategy = str(payload.get("strategy") or "capital_heat")
+            market = str(payload.get("market") or "cn")
+            max_results = int(payload.get("max_results") or 20)
+            refresh = ProactiveDataRefreshService(self.config, db=self.db)
+
+            def run_refresh() -> Optional[Dict[str, Any]]:
+                return refresh.run(
+                    slot=f"manual:{task['id']}",
+                    force=True,
+                    strategy=strategy,
+                    market=market,
+                    max_results=max_results,
+                )
+
+            queued = get_task_queue().submit_background_task(
+                run_refresh,
+                stock_code="data_refresh",
+                stock_name=f"{strategy} / {market}",
+                report_type="data_refresh",
+                message="数据刷新任务已提交",
+            )
+            return "submitted", f"数据刷新任务已提交（{queued.task_id}）"
+        if task_type == "paper_auto_trade":
+            from src.services.paper_service import PaperService
+
+            result = PaperService(self.db).auto_trade_once(
+                lookback_days=int(payload.get("lookback_days") or 7),
+            )
+            if result.get("status") == "account_not_found":
+                return "failed", "模拟盘账户不存在或已归档"
+            unavailable = int(result.get("unavailable") or 0)
+            errors = int(result.get("errors") or 0)
+            message = (
+                f"模拟盘自动交易：处理 {int(result.get('processed') or 0)} 条，"
+                f"跳过 {int(result.get('skipped') or 0)} 条，"
+                f"缺行情 {unavailable} 条，错误 {errors} 条"
+            )
+            if unavailable or errors:
+                # Keep the run visibly failed so the next scheduled occurrence
+                # retries; signals whose bar was missing are not consumed.
+                return "failed", message
+            return "success", message
         if task_type == "backtest":
             submitter.submit_backtest(
                 code=payload.get("code"),

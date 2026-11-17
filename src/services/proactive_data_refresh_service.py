@@ -82,6 +82,9 @@ class ProactiveDataRefreshService:
         slot: str = "manual",
         now: Optional[datetime] = None,
         force: bool = True,
+        strategy: Optional[str] = None,
+        market: Optional[str] = None,
+        max_results: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         if not bool(getattr(self.config, "agent_data_refresh_enabled", False)) and not force:
             return None
@@ -100,16 +103,23 @@ class ProactiveDataRefreshService:
         if not force and self.db.has_proactive_brief_run(day, marker):
             return None
 
-        strategy = str(getattr(self.config, "agent_data_refresh_strategy", "capital_heat") or "capital_heat")
-        market = str(getattr(self.config, "agent_data_refresh_market", "cn") or "cn")
-        max_results = max(
-            1, min(int(getattr(self.config, "agent_data_refresh_max_results", 20) or 20), 100)
+        strategy = str(
+            strategy
+            or getattr(self.config, "agent_data_refresh_strategy", "capital_heat")
+            or "capital_heat"
         )
+        market = str(
+            market or getattr(self.config, "agent_data_refresh_market", "cn") or "cn"
+        )
+        configured_max = max_results if max_results is not None else getattr(
+            self.config, "agent_data_refresh_max_results", 20
+        )
+        max_results_value = max(1, min(int(configured_max or 20), 100))
         try:
             screening = self.screening_service.screen(
                 strategy=strategy,
                 market=market,
-                max_results=max_results,
+                max_results=max_results_value,
             )
         except Exception as exc:
             logger.warning("[DataRefresh] screening refresh failed: %s", exc)

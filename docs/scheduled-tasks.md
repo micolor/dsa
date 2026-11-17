@@ -11,6 +11,8 @@
 | `stock_analysis` | 个股 / 自选 / 场外基金分析 | `stocks`（留空使用当前自选；场外基金写 `fund:005827`）、`report_type`、`force_refresh`、`mode`（standard/quick）、`notify` |
 | `market_review` | 大盘复盘 | `region`（cn/hk/us）、`notify` |
 | `screening` | 选股 | `strategy`、`market`、`max_results` |
+| `data_refresh` | 数据刷新：选股 + 热点缓存 | `strategy`、`market`、`max_results` |
+| `paper_auto_trade` | 模拟盘自动消费有效信号 | `lookback_days`（1-365，默认 7） |
 | `backtest` | 回测评估 | `code`（留空全量）、`force`、`limit` |
 | `agent_prompt` | 自定义助手指令 | `prompt`（5-2000 字），由问股 Agent 在后台执行并把结果写入运行记录 |
 
@@ -22,7 +24,8 @@
 - `trading_day_only=true` 时，非交易日不执行，日历显示「已跳过」。
 - 调度轮询每 60 秒检查一次当前时间槽；同一任务同一时间槽只会执行一次（`scheduled_task_runs.slot_key` 唯一）。
 - 服务重启不会补跑历史时间槽；错过的时间槽在日历中标记「未执行」。
-- 任务提交到现有后台任务队列执行（`stock_analysis` / `market_review` / `screening` / `backtest`），`agent_prompt` 在调度线程内同步调用**通用单 Agent**（不进入多智能体股票流水线，避免后台任务先跑数分钟分析）。
+- 任务提交到现有后台任务队列执行（`stock_analysis` / `market_review` / `screening` / `data_refresh` / `backtest`），`paper_auto_trade` 与 `agent_prompt` 在调度线程内同步执行：前者通常只消费少量信号，后者使用**通用单 Agent**（不进入多智能体股票流水线，避免后台任务先跑数分钟分析）。
+- `data_refresh` 与 `screening` 都会在选股完成后触发模拟盘自动买入（如果 `PAPER_SCREENING_AUTO_BUY_ENABLED=true` 且已有 active 模拟账户）。
 - 默认只在 `main.py --serve` / `--schedule` 启动调度器时执行；`--serve-only` 只提供页面与手动「立即执行」。
 
 ## 快速模式
@@ -69,6 +72,17 @@
 SCHEDULED_TASKS_ENABLED=true
 ```
 
+### 与内置后台任务的关系
+
+以下两项是内置后台任务，不在定时任务页里；如果已经用定时任务接管对应节奏，应关闭内置项，避免重复执行：
+
+| 内置开关 | 内置行为 | 定时任务替代类型 |
+| --- | --- | --- |
+| `AGENT_DATA_REFRESH_ENABLED` | 按 `AGENT_DATA_REFRESH_TIMES`（默认 08:40/15:40）跑选股 + 热点刷新 | `data_refresh` |
+| `PAPER_AUTO_TRADE_ENABLED` | 每个交易日 16:30 后消费一次有效信号 | `paper_auto_trade` |
+
+`data_refresh` 会同时刷新选股快照和热点缓存，因此比单独创建 `screening` 任务更接近原来的内置行为。
+
 ## 接口
 
 ```text
@@ -86,7 +100,7 @@ GET    /api/v1/scheduled-tasks/{id}/runs
 
 - 日历范围最多 92 天。
 - `agent_prompt` 会消耗 LLM 调用；成本与问股对话相同。
-- 任务不会自动交易、不会修改持仓或告警配置。
+- 除 `paper_auto_trade` / `screening` / `data_refresh` 会触发**模拟盘**交易外，任务不会自动交易、不会修改真实持仓或告警配置。
 - 任务执行失败只记录在运行记录与任务列表，不影响其他任务。
 - 多进程部署时依赖数据库唯一键去重；同一时间槽仍只执行一次。
 - `agent_prompt` 任务会在内部 `scheduled:` 会话中保留上下文，不会出现在问股历史列表。

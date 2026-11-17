@@ -1234,7 +1234,10 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '每次最多执行一轮，不会无限追单。',
     ],
     impact: ['影响模拟盘是否每天自动生成新的买卖成交。'],
-    notes: ['自动交易使用当日/信号对应交易日的日线价格，不保证与真实盘中成交一致。'],
+    notes: [
+      '自动交易使用当日/信号对应交易日的日线价格，不保证与真实盘中成交一致。',
+      '如果已在「定时任务」中配置「模拟盘自动交易」，建议关闭本项，避免同一时段重复执行。',
+    ],
   },
   'settings.base.PAPER_AUTO_TRADE_TIME': {
     title: '模拟盘自动交易时间',
@@ -2500,7 +2503,10 @@ const settingsHelpEnUS: SettingsHelpMap = {
       'One pass per trading day, no unbounded chasing.',
     ],
     impact: ['Controls whether the paper account creates new simulated trades automatically.'],
-    notes: ['Uses daily bars for the signal session; not a guarantee of real intraday fills.'],
+    notes: [
+      'Uses daily bars for the signal session; not a guarantee of real intraday fills.',
+      'If a scheduled Paper auto trade task already owns the cadence, turn this off to avoid running the pass twice.',
+    ],
   },
   'settings.base.PAPER_AUTO_TRADE_TIME': {
     title: 'Paper Auto Trade Time',

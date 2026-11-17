@@ -27,6 +27,8 @@ const TYPE_OPTIONS: ScheduledTaskType[] = [
   'stock_analysis',
   'market_review',
   'screening',
+  'data_refresh',
+  'paper_auto_trade',
   'backtest',
   'agent_prompt',
 ];
@@ -58,6 +60,7 @@ type FormState = {
   strategy: string;
   market: 'cn' | 'hk' | 'us';
   maxResults: string;
+  lookbackDays: string;
   code: string;
   limit: string;
   prompt: string;
@@ -80,6 +83,7 @@ const DEFAULT_FORM: FormState = {
   strategy: 'capital_heat',
   market: 'cn',
   maxResults: '20',
+  lookbackDays: '7',
   code: '',
   limit: '200',
   prompt: '',
@@ -123,6 +127,7 @@ function buildForm(task?: ScheduledTask): FormState {
     strategy: String(payload.strategy || 'capital_heat'),
     market: (['cn', 'hk', 'us'].includes(String(payload.market)) ? payload.market : 'cn') as FormState['market'],
     maxResults: String(payload.max_results ?? 20),
+    lookbackDays: String(payload.lookback_days ?? 7),
     code: String(payload.code ?? ''),
     limit: String(payload.limit ?? 200),
     prompt: String(payload.prompt ?? ''),
@@ -142,12 +147,15 @@ function buildPayload(form: FormState): Record<string, unknown> {
   if (form.taskType === 'market_review') {
     return { region: form.region, notify: form.notify };
   }
-  if (form.taskType === 'screening') {
+  if (form.taskType === 'screening' || form.taskType === 'data_refresh') {
     return {
       strategy: form.strategy.trim() || 'capital_heat',
       market: form.market,
       max_results: Number(form.maxResults) || 20,
     };
+  }
+  if (form.taskType === 'paper_auto_trade') {
+    return { lookback_days: Number(form.lookbackDays) || 7 };
   }
   if (form.taskType === 'backtest') {
     return {
@@ -234,6 +242,8 @@ const ScheduledTasksPage: React.FC = () => {
     if (type === 'stock_analysis') return text.typeStockAnalysis;
     if (type === 'market_review') return text.typeMarketReview;
     if (type === 'screening') return text.typeScreening;
+    if (type === 'data_refresh') return text.typeDataRefresh;
+    if (type === 'paper_auto_trade') return text.typePaperAutoTrade;
     if (type === 'backtest') return text.typeBacktest;
     return text.typeAgentPrompt;
   };
@@ -698,7 +708,7 @@ const ScheduledTasksPage: React.FC = () => {
             </div>
           ) : null}
 
-          {form.taskType === 'screening' ? (
+          {form.taskType === 'screening' || form.taskType === 'data_refresh' ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="block text-sm sm:col-span-1">
                 <span className="mb-1 block font-medium text-foreground">{text.strategy}</span>
@@ -729,7 +739,27 @@ const ScheduledTasksPage: React.FC = () => {
                   className="h-10 w-full rounded-lg border border-border/60 bg-background/50 px-3 text-sm text-foreground"
                 />
               </label>
+              {form.taskType === 'data_refresh' ? (
+                <p className="text-xs leading-relaxed text-muted-text sm:col-span-3">
+                  {text.dataRefreshHint}
+                </p>
+              ) : null}
             </div>
+          ) : null}
+
+          {form.taskType === 'paper_auto_trade' ? (
+            <label className="block max-w-xs text-sm">
+              <span className="mb-1 block font-medium text-foreground">{text.lookbackDays}</span>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={form.lookbackDays}
+                onChange={(event) => updateForm('lookbackDays', event.target.value)}
+                className="h-10 w-full rounded-lg border border-border/60 bg-background/50 px-3 text-sm text-foreground"
+              />
+              <span className="mt-1 block text-[11px] text-muted-text">{text.lookbackDaysHint}</span>
+            </label>
           ) : null}
 
           {form.taskType === 'backtest' ? (

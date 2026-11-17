@@ -122,6 +122,125 @@ def test_quick_mode_dispatch_skips_analysis_pipeline(tmp_path, monkeypatch):
     assert calls == [(["600519"], False)]
 
 
+def test_data_refresh_and_paper_auto_trade_payloads_are_normalized(tmp_path):
+    service, _ = _service(tmp_path)
+
+    refresh = service.create_task(
+        {
+            "name": "数据刷新",
+            "task_type": "data_refresh",
+            "time_of_day": "08:40",
+            "weekdays": [0, 1, 2, 3, 4],
+            "payload": {"strategy": "capital_heat", "market": "cn", "max_results": 20},
+        }
+    )
+    trade = service.create_task(
+        {
+            "name": "模拟盘执行",
+            "task_type": "paper_auto_trade",
+            "time_of_day": "16:30",
+            "weekdays": [0, 1, 2, 3, 4],
+            "payload": {"lookback_days": 7},
+        }
+    )
+
+    assert refresh["payload"] == {"strategy": "capital_heat", "market": "cn", "max_results": 20}
+    assert refresh["task_type"] == "data_refresh"
+    assert trade["payload"] == {"lookback_days": 7}
+
+    with pytest.raises(ScheduledTaskValidationError):
+        service.create_task(
+            {
+                "name": "bad",
+                "task_type": "paper_auto_trade",
+                "time_of_day": "16:30",
+                "weekdays": [0],
+                "payload": {"lookback_days": 0},
+            }
+        )
+
+
+def test_data_refresh_dispatch_runs_screening_and_hotspots(tmp_path, monkeypatch):
+    service, _ = _service(tmp_path)
+    task = service.create_task(
+        {
+            "name": "数据刷新",
+            "task_type": "data_refresh",
+            "time_of_day": "08:40",
+            "weekdays": [0, 1, 2, 3, 4],
+            "payload": {"strategy": "capital_heat", "market": "cn", "max_results": 20},
+            "trading_day_only": False,
+        }
+    )
+    calls = []
+
+    class FakeRefresh:
+        def __init__(self, config, *, db=None):
+            self.config = config
+            self.db = db
+
+        def run(self, *, slot, force, strategy, market, max_results):
+            calls.append((slot, force, strategy, market, max_results))
+            return {"status": "ok", "candidates": 5, "hotspots": 4}
+
+    class FakeQueue:
+        def submit_background_task(self, run_task, **_kwargs):
+            run_task()
+            return SimpleNamespace(task_id="refresh-task-1")
+
+    monkeypatch.setattr(
+        "src.services.proactive_data_refresh_service.ProactiveDataRefreshService",
+        FakeRefresh,
+    )
+    monkeypatch.setattr(
+        "src.services.task_queue.get_task_queue",
+        lambda: FakeQueue(),
+    )
+
+    status, message = service._dispatch(task)
+
+    assert status == "submitted"
+    assert "refresh-task-1" in message
+    assert calls == [(f"manual:{task['id']}", True, "capital_heat", "cn", 20)]
+
+
+def test_paper_auto_trade_dispatch_reports_retryable_failure(tmp_path, monkeypatch):
+    service, _ = _service(tmp_path)
+    task = service.create_task(
+        {
+            "name": "模拟盘执行",
+            "task_type": "paper_auto_trade",
+            "time_of_day": "16:30",
+            "weekdays": [0, 1, 2, 3, 4],
+            "payload": {"lookback_days": 7},
+            "trading_day_only": False,
+        }
+    )
+    calls = []
+
+    class FakePaper:
+        def __init__(self, db):
+            self.db = db
+
+        def auto_trade_once(self, *, lookback_days):
+            calls.append(lookback_days)
+            return {
+                "status": "ok",
+                "processed": 1,
+                "skipped": 2,
+                "unavailable": 1,
+                "errors": 0,
+            }
+
+    monkeypatch.setattr("src.services.paper_service.PaperService", FakePaper)
+
+    status, message = service._dispatch(task)
+
+    assert status == "failed"
+    assert "缺行情 1 条" in message
+    assert calls == [7]
+
+
 def test_calendar_returns_weekday_occurrences(tmp_path):
     service, _ = _service(tmp_path)
     service.create_task(

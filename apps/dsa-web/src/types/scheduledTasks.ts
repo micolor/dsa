@@ -2,6 +2,8 @@ export type ScheduledTaskType =
   | 'stock_analysis'
   | 'market_review'
   | 'screening'
+  | 'data_refresh'
+  | 'paper_auto_trade'
   | 'backtest'
   | 'agent_prompt';
 

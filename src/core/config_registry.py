@@ -3659,7 +3659,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "PAPER_AUTO_TRADE_ENABLED": {
         "title": "Paper Trading Auto Trade",
-        "description": "Run one daily paper-trading pass that consumes active decision signals. Sell/reduce signals are processed first, then buy/add signals by score; hold/watch/avoid signals are ignored. Only simulated trades are affected.",
+        "description": "Run the built-in daily paper-trading pass that consumes active decision signals. Sell/reduce signals are processed first, then buy/add signals by score; hold/watch/avoid signals are ignored. Turn this off when a scheduled paper-auto-trade task owns the cadence, so the pass does not run twice.",
         "category": "base",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -4823,7 +4823,7 @@ _FIELD_DEFINITIONS.update({
     ),
     "AGENT_DATA_REFRESH_ENABLED": _proactive_field(
         "Independent Data Refresh",
-        "Refresh the screening snapshot and hotspot cache before opportunity scans.",
+        "Refresh the screening snapshot and hotspot cache before opportunity scans. Turn this off when a scheduled data-refresh task owns the cadence, so screening does not run twice.",
         "boolean", "switch", "false", display_order=101,
     ),
     "AGENT_DATA_REFRESH_TIMES": _proactive_field(
