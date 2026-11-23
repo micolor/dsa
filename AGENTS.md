@@ -55,79 +55,10 @@
 python scripts/check_ai_assets.py
 ```
 
-## 3. 仓库速览
-
-- 项目定位：股票智能分析系统，覆盖 A 股、港股、美股。
-- 主流程：抓取数据 -> 技术分析/新闻检索 -> LLM 分析 -> 生成报告 -> 通知推送。
-- 关键入口：
-  - `main.py`：分析任务主入口
-  - `server.py`：FastAPI 服务入口
-  - `apps/dsa-web/`：Web 前端
-  - `apps/dsa-desktop/`：Electron 桌面端
-  - `.github/workflows/`：CI、发布、每日任务
-- 核心职责：
-  - `src/core/`：主流程编排
-  - `src/services/`：业务服务层
-  - `src/repositories/`：数据访问层
-  - `src/notification.py`、`src/services/report_renderer.py`、`src/services/history_service.py`、`src/share_image.py`：报告生成与渲染
-  - `src/schemas/`：Schema / 数据结构
-  - `data_provider/`：多数据源适配与 fallback
-  - `api/`：FastAPI API
-  - `bot/`：机器人接入
-  - `scripts/`：本地脚本
-  - `.github/scripts/`：GitHub 自动化脚本
-  - `tests/`：pytest 测试
-  - `docs/`：文档与说明
-
 ## 4. 常用命令
 
-### 运行应用
-
-> Python 环境用 `uv` 管理（仓库默认无 `.venv`，系统 `python3` 未装依赖）：
-> `uv venv .venv` → `uv pip install -r requirements.txt` → 后续用 `uv run python main.py ...`。
-
-```bash
-uv run python main.py
-python main.py --debug
-python main.py --dry-run
-python main.py --stocks 600519,hk00700,AAPL
-python main.py --market-review
-python main.py --schedule
-python main.py --serve
-python main.py --serve-only
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 后端验证
-
-```bash
-pip install -r requirements.txt
-pip install flake8 pytest
-./scripts/ci_gate.sh
-python -m pytest -m "not network"
-python -m py_compile <changed_python_files>
-```
-
-### Web / Desktop
-
-```bash
-cd apps/dsa-web
-npm ci
-npm run lint
-npm run build
-
-cd ../dsa-desktop
-npm install
-npm run build
-```
-
-### PR / CI 证据
-
-```bash
-gh pr view <pr_number>
-gh pr checks <pr_number>
-gh run view <run_id> --log-failed
-```
+> Python 环境用 `uv` 管理（仓库默认无 `.venv`）：`uv venv .venv` → `uv pip install -r requirements.txt` → 后续用 `uv run python main.py ...`。
+> 后端统一验证入口：`./scripts/ci_gate.sh`；Web 在 `apps/dsa-web` 下执行 `npm ci && npm run lint && npm test && npm run build`。
 
 ## 5. 默认工作流
 
@@ -150,16 +81,7 @@ gh run view <run_id> --log-failed
 
 ### CI 覆盖原则
 
-当前仓库 CI 主要包含：
-
-| 检查项 | 来源 | 说明 | 是否阻断 |
-| --- | --- | --- | --- |
-| `ai-governance` | `.github/workflows/ci.yml` | 校验 `AGENTS.md` / `CLAUDE.md` / `.github` 指令 / `.claude/skills` 关系 | 是 |
-| `backend-gate` | `.github/workflows/ci.yml` | 执行 `./scripts/ci_gate.sh` | 是 |
-| `docker-build` | `.github/workflows/ci.yml` | Docker 构建与关键模块导入 smoke | 是 |
-| `web-gate` | `.github/workflows/ci.yml` | 前端改动时执行 `npm run lint` + `npm test` + `npm run build` | 是（触发时） |
-| `network-smoke` | `.github/workflows/network-smoke.yml` | `pytest -m network` + `scripts/test.sh quick` | 否，观测项 |
-| `pr-review` | `.github/workflows/pr-review.yml` | PR 静态检查 + AI 审查 + 自动标签 | 否，辅助项 |
+阻断型检查以 `.github/workflows/ci.yml` 为准（`ai-governance`、`backend-gate`、`docker-build`、`web-gate`）；`network-smoke` 与 `pr-review` 为观测/辅助项。
 
 若 PR 上已有对应 CI 结果，可直接引用 CI 结论；若 CI 未覆盖改动面，或本地与 CI 环境差异较大，需要补充说明本地验证与缺口。
 

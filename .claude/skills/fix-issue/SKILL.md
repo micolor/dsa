@@ -1,3 +1,8 @@
+---
+name: fix-issue
+description: 基于 issue 分析结果实现修复，并按仓库规则补齐验证、风险与回滚说明。
+---
+
 # Fix Issue
 
 基于 issue 分析结果实现修复，并按仓库规则补齐验证、风险与回滚说明。

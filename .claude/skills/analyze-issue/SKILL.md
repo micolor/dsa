@@ -1,3 +1,8 @@
+---
+name: analyze-issue
+description: 分析 GitHub Issue，判断其真实性、优先级、仓库责任边界与建议动作。
+---
+
 # Analyze Issue
 
 分析 GitHub Issue，判断其真实性、优先级、仓库责任边界与建议动作。
