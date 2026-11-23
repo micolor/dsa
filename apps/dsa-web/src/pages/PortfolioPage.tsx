@@ -138,6 +138,13 @@ const PORTFOLIO_INPUT_CLASS =
   'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-[border-color,background-color,box-shadow] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+// 列表类区域统一用「限高 + 内部滚动 + 表头钉住」：持仓行数和事件流水会随记账不断增长，
+// 不限高会把下面的回撤 / 止损 / AI 风险信号一直往下顶，也让页面无法一眼扫完。
+// bg-card 是不透明 token（与 .glass-card 同色），sticky 表头滚过数据行时不会透出内容。
+const PORTFOLIO_LIST_SCROLL_CLASS = 'max-h-[min(44vh,28rem)] overflow-auto';
+const PORTFOLIO_EVENT_LIST_SCROLL_CLASS = 'max-h-[min(56vh,34rem)] overflow-auto';
+const PORTFOLIO_LIST_HEAD_CLASS =
+  'sticky top-0 z-10 bg-card text-xs text-muted-text border-b border-border/60';
 
 function getSignalTime(item: DecisionSignalItem): number {
   return parseDecisionSignalDate(item.createdAt)?.getTime()
@@ -968,16 +975,19 @@ const PortfolioPage: React.FC = () => {
   // 三态：有行业数据 / 无非零行业但有个股集中度（回退）/ 两者皆空。
   const concentrationMode = hasSectorData ? 'sector' : hasPositionData ? 'position' : 'none';
 
-  // 行业覆盖：已分类占比 + 未分类/失败明细，说明「行业数据暂不可用」的成因。
+  // 行业覆盖：已分类占比 + 未分类/失败/跳过明细，说明「行业数据暂不可用」的成因。
+  // skipped 是后端因板块源冷却或单次请求预算而未真正发起查询的持仓数，已经计入
+  // unclassified，单独展示才能区分「查了没结果」和「根本没查」。
   const sectorCoverageInfo = useMemo(() => {
     const coverage = risk?.sectorConcentration?.coverage;
     if (!coverage) return null;
     const classified = coverage.classifiedCount ?? 0;
     const unclassified = coverage.unclassifiedCount ?? 0;
     const failed = coverage.failedCount ?? 0;
+    const skipped = coverage.skippedCount ?? 0;
     const total = classified + unclassified + failed;
     const pct = total > 0 ? Math.round((classified / total) * 100) : 0;
-    return { pct, classified, unclassified, failed };
+    return { pct, classified, unclassified, failed, skipped };
   }, [risk?.sectorConcentration?.coverage]);
 
   // 行内风险提示：集中度告警标的 / 止损接近或触发 / 价格过期。
@@ -1651,9 +1661,9 @@ const PortfolioPage: React.FC = () => {
               className="h-64 flex flex-col items-center justify-center border-none bg-transparent px-4 py-0 shadow-none"
             />
           ) : (
-            <div className="overflow-x-auto">
+            <div className={PORTFOLIO_LIST_SCROLL_CLASS}>
               <table className="min-w-[860px] w-full text-sm">
-                <thead className="text-xs text-muted-text border-b border-border/60">
+                <thead className={PORTFOLIO_LIST_HEAD_CLASS}>
                   <tr>
                     <th className="text-left py-2 pr-2 whitespace-nowrap">{sortHeader(text.account, 'accountName')}</th>
                     <th className="text-left py-2 pr-2 whitespace-nowrap">{sortHeader(text.code, 'symbol')}</th>
@@ -1810,7 +1820,7 @@ const PortfolioPage: React.FC = () => {
             <MetricMetaRow
               label={text.sectorCoverage}
               value={sectorCoverageInfo
-                ? `${sectorCoverageInfo.pct}%（已分类 ${sectorCoverageInfo.classified} / 未分类 ${sectorCoverageInfo.unclassified}${sectorCoverageInfo.failed > 0 ? ` / 失败 ${sectorCoverageInfo.failed}` : ''}）`
+                ? `${sectorCoverageInfo.pct}%（已分类 ${sectorCoverageInfo.classified} / 未分类 ${sectorCoverageInfo.unclassified}${sectorCoverageInfo.failed > 0 ? ` / 失败 ${sectorCoverageInfo.failed}` : ''}${sectorCoverageInfo.skipped > 0 ? ` / 跳过 ${sectorCoverageInfo.skipped}` : ''}）`
                 : '--'}
             />
           </div>
@@ -2025,10 +2035,10 @@ const PortfolioPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex min-h-[24rem] flex-col overflow-x-auto rounded-lg border border-border/60">
+            <div className={`flex min-h-[min(24rem,48vh)] flex-col rounded-lg border border-border/60 ${PORTFOLIO_EVENT_LIST_SCROLL_CLASS}`}>
               {eventType === 'trade' ? (
                 <table className="w-full text-sm">
-                  <thead className="text-xs text-muted-text border-b border-border/60">
+                  <thead className={PORTFOLIO_LIST_HEAD_CLASS}>
                     <tr>
                       <th className="text-left py-2 pl-3 pr-2">账号</th>
                       <th className="text-left py-2 pr-2">日期</th>
@@ -2079,7 +2089,7 @@ const PortfolioPage: React.FC = () => {
 
               {eventType === 'cash' ? (
                 <table className="w-full text-sm">
-                  <thead className="text-xs text-muted-text border-b border-border/60">
+                  <thead className={PORTFOLIO_LIST_HEAD_CLASS}>
                     <tr>
                       <th className="text-left py-2 pl-3 pr-2">账号</th>
                       <th className="text-left py-2 pr-2">日期</th>
@@ -2120,7 +2130,7 @@ const PortfolioPage: React.FC = () => {
 
               {eventType === 'corporate' ? (
                 <table className="w-full text-sm">
-                  <thead className="text-xs text-muted-text border-b border-border/60">
+                  <thead className={PORTFOLIO_LIST_HEAD_CLASS}>
                     <tr>
                       <th className="text-left py-2 pl-3 pr-2">账号</th>
                       <th className="text-left py-2 pr-2">日期</th>

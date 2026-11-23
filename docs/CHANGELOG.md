@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- [改进] 持仓风险面板 `/api/v1/portfolio/risk` 的板块归类查询新增失败冷却与单次请求预算：板块来源失败或空结果后在进程内冷却 10 分钟，超出 3 秒预算的剩余持仓按 `UNCLASSIFIED` 跳过并计入 `coverage.skipped_count`。原先每次刷新都要为同一只失败代码重付 efinance 1.5~3s 限速休眠，本地实测重复请求从 2.1~2.7s 降到 5~9ms（首次仍需一次查询）
 - [修复] 模拟盘会把「复用 id 的新信号」误判为已处理而永久跳过：`decision_signals.id` 在 SQLite 上是 `INTEGER PRIMARY KEY` 且未开 AUTOINCREMENT，删除历史时联动删除决策信号会释放 id，新信号复用同一 id 后，`paper_signals` 按 (account_id, signal_id) 判重就当成「已处理」（本地库里 45 条消费记录中 30 条是孤儿、2 条 action 与现存同 id 信号不一致可复现）。三处修复：①新库 `DecisionSignalRecord` 启用 `sqlite_autoincrement`（老库不重建，靠 ②③ 兜底）；②`delete_analysis_history_records` 级联清理 `paper_signals`，不再留孤儿；③`PaperService` 判重同时比对 `action`，不一致视为新信号并替换旧记录（实时消费与历史回填两条路径共用 `_signal_already_consumed`）。验证：本地重跑模拟盘任务从「处理 0 条，跳过 1 条」变为「处理 1 条，跳过 0 条」，该信号记为 `no_position`（账户无持仓，减仓无仓可减）
+- [修复] 持仓页「AI 建议」列的信号徽标组不再贴左：`PortfolioSignalSummary` 的 flex 行补上 `w-full`（此前 Tooltip 包的是 `inline-flex`，内部 flex 不撑满导致 `justify-end` 是空操作，`持有` 徽标和 `3 日` 靠单元格左边缘，与右对齐的表头及其它数值列错位）
+- [改进] 持仓页把两个会随记账不断长高的列表改成「限高 + 内部滚动 + 表头固定」：持仓明细表滚动区上限 `min(44vh,28rem)`，事件记录弹窗内的交易 / 资金 / 公司行为表上限 `min(56vh,34rem)`，表头在容器滚动时钉在顶部（`bg-card` 不透明背景，行从下方滚过）。此前行数一多就把下面的回撤、止损接近、口径、AI 风险信号一路顶到屏外，页面越记越长；本地实测合成 61 行持仓后「持仓明细」卡从约 2900px 收到 486px，事件记录弹窗 41 行时表格区封顶 502px 且表头仍固定（1440×900 / 1280×800 两种视口均核对）
+- [改进] 持仓风险面板 `/api/v1/portfolio/risk` 的板块归类查询新增失败冷却与单次请求预算：板块来源失败或空结果后在进程内冷却 10 分钟，超出 3 秒预算的剩余持仓按 `UNCLASSIFIED` 跳过并计入 `coverage.skipped_count`。原先每次刷新都要为同一只失败代码重付 efinance 1.5~3s 限速休眠，本地实测重复请求从 2.1~2.7s 降到 5~9ms（首次仍需一次查询）
 - [新功能] 定时任务新增 `data_refresh`（选股 + 热点刷新）和 `paper_auto_trade`（模拟盘自动消费有效信号）两种类型：可以把原先 08:40/15:40 的内置数据刷新和 16:30 的模拟盘执行统一放进「定时任务」页面管理；接管后关闭 `AGENT_DATA_REFRESH_ENABLED` / `PAPER_AUTO_TRADE_ENABLED` 即可避免重复执行
 - [新功能] 每日选股结果自动买入模拟盘：每次选股完成后把排名前 `PAPER_SCREENING_TOP_N`（默认 3）的候选转成 `buy` 决策信号并自动消费，复用信号幂等、20% 目标仓位、现金/费用校验和跨进程账户锁；默认 `-5%` 止损、`+10%` 止盈。只在已有 active 模拟账户时执行，同一 `run_id` 重复运行不会重复买入；可用 `PAPER_SCREENING_AUTO_BUY_ENABLED=false` 关闭
 - [修复] 模拟盘账户写入新增跨进程文件锁：信号消费、每日估值、回填和重置在同一账户上串行执行，避免多 uvicorn worker / 调度器与手动请求并发时重复买卖或丢失现金更新；抢锁超时返回 `busy`（API 409），自动交易将其计入 `errors` 并留待下一轮重试

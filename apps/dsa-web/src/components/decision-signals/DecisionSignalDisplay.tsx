@@ -546,7 +546,9 @@ export const PortfolioSignalSummary: React.FC<PortfolioSignalSummaryProps> = ({ 
     <div className="min-w-[6rem] max-w-[11rem] text-left">
       {/* 用可访问的 Tooltip 承载完整建议文本，替代原生 title（键盘不可达且被治理规则禁止） */}
       <Tooltip content={fullText} className="w-full">
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {/* w-full 必须加在这层 flex 行：Tooltip 包的是 inline-flex，内部 flex 不撑满时
+            justify-end 是空操作，徽标组会贴在单元格左侧，与右侧对齐的表头错位。 */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
           <Badge variant={getActionVariant(item)}>{actionLabel}</Badge>
           {horizonLabel ? <span className="text-[11px] text-secondary-text">{horizonLabel}</span> : null}
         </div>
