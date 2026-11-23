@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
+from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import Config, get_config
@@ -23,9 +25,28 @@ DEFENSIVE_DECISION_SIGNAL_ACTIONS = ("sell", "reduce", "alert")
 # 后续调用再增量补齐历史，权衡为「首屏有界延迟 + 回撤窗口渐进完整」。
 DRAWDOWN_BACKFILL_BATCH_DAYS = 30
 
+# sector_concentration 只是风险面板的装饰性字段，但它依赖的板块归属查询目前只有
+# efinance 的 `get_belong_board` 一个来源：该接口对部分代码稳定失败，而 data provider
+# 每次真正调用前都要付限速休眠（efinance 1.5~3s）。失败一次后在同一进程内冷却一段时间，
+# 避免每次刷新风险面板都重复付这笔成本。成功结果由 DataFetcherManager 的 24h
+# belong-boards 缓存兜住（空结果不缓存，见 data_provider/base.py），不会走到这里。
+SECTOR_LOOKUP_FAILURE_COOLDOWN_SECONDS = 600.0
+
+# 单次风险面板请求内板块查询的时间预算（是否继续发起查询的门槛）。超出后剩余持仓按
+# UNCLASSIFIED 处理并计入 coverage["skipped_count"]，避免多只持仓时首屏被拖成几十秒。
+# 注意：已在进行的查询不会被中断，最坏耗时约为「预算 + 单次查询耗时」。
+SECTOR_LOOKUP_BUDGET_SECONDS = 3.0
+
 
 class PortfolioRiskService:
     """Compute portfolio risk blocks on top of replayed snapshot data."""
+
+    # 进程内共享：每个请求都会新建 service 实例，冷却状态必须落在类上。
+    sector_lookup_failure_cooldown_seconds = SECTOR_LOOKUP_FAILURE_COOLDOWN_SECONDS
+    sector_lookup_budget_seconds = SECTOR_LOOKUP_BUDGET_SECONDS
+    _sector_lookup_cooldown_lock = RLock()
+    _sector_lookup_cooldown_until: Dict[str, float] = {}
+    _SECTOR_LOOKUP_COOLDOWN_MAX_ENTRIES = 512
 
     def __init__(
         self,
@@ -363,9 +384,12 @@ class PortfolioRiskService:
             "classified_count": 0,
             "unclassified_count": 0,
             "failed_count": 0,
+            # 因冷却/预算而没真正发起板块查询的持仓数（unclassified_count 的子集）。
+            "skipped_count": 0,
         }
         errors: List[str] = []
         board_cache: Dict[Tuple[str, str], str] = {}
+        deadline = time.monotonic() + max(0.0, float(self.sector_lookup_budget_seconds or 0.0))
 
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
@@ -391,6 +415,7 @@ class PortfolioRiskService:
                     board_cache=board_cache,
                     coverage=coverage,
                     errors=errors,
+                    deadline=deadline,
                 )
                 sector_exposure[sector] = sector_exposure.get(sector, 0.0) + converted
                 sector_symbols.setdefault(sector, set()).add(key_symbol)
@@ -427,35 +452,105 @@ class PortfolioRiskService:
         board_cache: Dict[Tuple[str, str], str],
         coverage: Dict[str, int],
         errors: List[str],
+        deadline: Optional[float] = None,
     ) -> str:
         cache_key = (symbol, market)
         if cache_key in board_cache:
             return board_cache[cache_key]
 
         if market != "cn" or is_fund_code(symbol):
-            coverage["unclassified_count"] += 1
-            board_cache[cache_key] = "UNCLASSIFIED"
-            return board_cache[cache_key]
+            return self._mark_sector_unclassified(cache_key, board_cache, coverage)
+
+        # 失败冷却内先不发起查询：板块来源目前只有 efinance，失败一次后每次重试都要先付
+        # 限速休眠（1.5~3s），而风险面板每次刷新都会重新跑这个装饰性字段。
+        if self._is_sector_lookup_cooling_down(symbol):
+            return self._mark_sector_unclassified(cache_key, board_cache, coverage, skipped=True)
+
+        # 预算内未轮到查询时同样按 UNCLASSIFIED 处理，保证单次请求的有界延迟。
+        if deadline is not None and time.monotonic() >= deadline:
+            return self._mark_sector_unclassified(cache_key, board_cache, coverage, skipped=True)
 
         try:
             boards = self._fetch_belong_boards(symbol)
-            sector_name = self._pick_primary_board_name(boards)
-            if sector_name:
-                coverage["classified_count"] += 1
-                board_cache[cache_key] = sector_name
-                return board_cache[cache_key]
+            sector_name = self._pick_primary_board_name(boards or [])
         except Exception as exc:
+            self._mark_sector_lookup_failure(symbol)
             coverage["failed_count"] += 1
             errors.append(f"{symbol}: {exc}")
+            return self._mark_sector_unclassified(cache_key, board_cache, coverage)
 
+        if boards is None:
+            # data manager 不可用不是「这只代码没板块」，不写冷却，下次请求再试。
+            return self._mark_sector_unclassified(cache_key, board_cache, coverage)
+
+        if sector_name:
+            self._clear_sector_lookup_failure(symbol)
+            coverage["classified_count"] += 1
+            board_cache[cache_key] = sector_name
+            return sector_name
+
+        # 所有源都答不上来（空结果）与「该股确实无板块」无法区分，但两者都不应该
+        # 在同一个进程里反复重试，统一进入冷却。
+        self._mark_sector_lookup_failure(symbol)
+        return self._mark_sector_unclassified(cache_key, board_cache, coverage)
+
+    @staticmethod
+    def _mark_sector_unclassified(
+        cache_key: Tuple[str, str],
+        board_cache: Dict[Tuple[str, str], str],
+        coverage: Dict[str, int],
+        *,
+        skipped: bool = False,
+    ) -> str:
         coverage["unclassified_count"] += 1
+        if skipped:
+            coverage["skipped_count"] = coverage.get("skipped_count", 0) + 1
         board_cache[cache_key] = "UNCLASSIFIED"
         return board_cache[cache_key]
 
-    def _fetch_belong_boards(self, symbol: str) -> List[Dict[str, Any]]:
+    def _is_sector_lookup_cooling_down(self, symbol: str) -> bool:
+        cooldown = float(self.sector_lookup_failure_cooldown_seconds or 0.0)
+        if cooldown <= 0:
+            return False
+        now = time.monotonic()
+        with self._sector_lookup_cooldown_lock:
+            until = self._sector_lookup_cooldown_until.get(symbol)
+            if until is None:
+                return False
+            if until <= now:
+                self._sector_lookup_cooldown_until.pop(symbol, None)
+                return False
+            return True
+
+    def _mark_sector_lookup_failure(self, symbol: str) -> None:
+        cooldown = float(self.sector_lookup_failure_cooldown_seconds or 0.0)
+        if cooldown <= 0:
+            return
+        now = time.monotonic()
+        with self._sector_lookup_cooldown_lock:
+            # 冷却表是进程级共享的，只写入不清理的话会随着见过的代码数量缓涨；
+            # 超过上限时先剔掉已过期条目（正在冷却的保留）。
+            if len(self._sector_lookup_cooldown_until) >= self._SECTOR_LOOKUP_COOLDOWN_MAX_ENTRIES:
+                expired = [key for key, until in self._sector_lookup_cooldown_until.items() if until <= now]
+                for key in expired:
+                    self._sector_lookup_cooldown_until.pop(key, None)
+            self._sector_lookup_cooldown_until[symbol] = now + cooldown
+
+    def _clear_sector_lookup_failure(self, symbol: str) -> None:
+        with self._sector_lookup_cooldown_lock:
+            self._sector_lookup_cooldown_until.pop(symbol, None)
+
+    @classmethod
+    def clear_sector_lookup_cooldown_for_tests(cls) -> None:
+        """清空进程内失败冷却（测试隔离用，与 belong-boards 缓存的约定一致）。"""
+        with cls._sector_lookup_cooldown_lock:
+            cls._sector_lookup_cooldown_until.clear()
+
+    def _fetch_belong_boards(self, symbol: str) -> Optional[List[Dict[str, Any]]]:
+        """取标的所属板块；``None`` 表示 data manager 不可用（与「拿到了空结果」区分）。"""
         manager = self._get_data_manager()
         if manager is None:
-            return []
+            return None
         result = manager.get_belong_boards(symbol)
         if isinstance(result, list):
             return result

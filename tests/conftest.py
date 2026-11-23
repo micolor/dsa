@@ -107,6 +107,15 @@ def _reset_portfolio_cache():
         portfolio_endpoints._PRICE_HISTORY_REFRESHING.clear()
     except Exception:
         pass
+    try:
+        # 板块归属查询的失败冷却是进程级共享状态（每个 /risk 请求都会新建 service），
+        # 不清会跨测试污染：前一个用例失败过的代码在冷却期内会直接跳过查询，
+        # 让后一个 mock 了板块来源的用例拿到 UNCLASSIFIED。
+        from src.services.portfolio_risk_service import PortfolioRiskService
+
+        PortfolioRiskService.clear_sector_lookup_cooldown_for_tests()
+    except Exception:
+        pass
 
 
 T = TypeVar("T")
