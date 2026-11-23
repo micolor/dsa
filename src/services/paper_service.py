@@ -391,6 +391,29 @@ class PaperService:
                 "account_id": account.id,
             }
 
+    def _signal_already_consumed(self, account_id: int, signal: DecisionSignalRecord) -> bool:
+        """Return True when this exact signal (id + action) was already consumed.
+
+        ``decision_signals.id`` 在 SQLite 上没有 AUTOINCREMENT（见 ``src/storage.py``
+        的 ``DecisionSignalRecord``），历史被删除后会释放 id，新信号可能占用同一个 id。
+        ``paper_signals`` 的唯一键是 (account_id, signal_id)，只看 id 会把复用 id 的新
+        信号当成「已处理」永久跳过（表现为模拟盘一直不成交）。这里再比一次 action：
+        不一致说明旧记录属于另一条已被删除的信号，清掉后按新信号处理。
+        """
+        existing = self.paper_repo.get_signal_record(account_id, signal.id)
+        if existing is None:
+            return False
+        if existing.action == signal.action:
+            return True
+        logger.info(
+            "paper: signal #%s 的消费记录属于另一条已删除的信号（记录 action=%s，当前 action=%s），按新信号重新处理",
+            signal.id,
+            existing.action,
+            signal.action,
+        )
+        self.paper_repo.delete_signal_record(account_id, signal.id)
+        return False
+
     def _process_signal_locked(self, account, signal: DecisionSignalRecord) -> Dict[str, Any]:
         with self._account_write_lock(account.id):
             # The account row was read before the lock. A concurrent reset may
@@ -399,7 +422,7 @@ class PaperService:
             fresh = self.paper_repo.get_account(account.id)
             if fresh is None or fresh.status != "active":
                 return {"status": "account_not_found", "account_id": account.id}
-            if self.paper_repo.has_signal_record(account.id, signal.id):
+            if self._signal_already_consumed(account.id, signal):
                 return {"status": "skipped", "signal_id": signal.id}
 
             as_of = self._signal_trade_date(signal)
@@ -514,7 +537,7 @@ class PaperService:
         # signal consumption or the valuation task on the same account.
         with self._account_write_lock(account.id):
             for signal in signals:
-                if self.paper_repo.has_signal_record(account.id, signal.id):
+                if self._signal_already_consumed(account.id, signal):
                     continue
                 as_of = self._signal_trade_date(signal)
                 # 回填是重放，一次可能落几百笔成交，全程静音（notify=False）。

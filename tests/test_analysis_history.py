@@ -45,6 +45,8 @@ from src.storage import (
     DecisionSignalFeedbackRecord,
     DecisionSignalOutcomeRecord,
     DecisionSignalRecord,
+    PaperAccountRecord,
+    PaperSignalRecord,
 )
 from src.analyzer import AnalysisResult
 from src.daily_market_context_guardrail import apply_daily_market_context_guardrail
@@ -2111,6 +2113,17 @@ class AnalysisHistoryTestCase(unittest.TestCase):
                 plan_quality="minimal",
                 status="active",
             ))
+            # 模拟盘消费记录引用 signal_id：历史删除连带删信号后，这条记录会变成
+            # 孤儿，并让复用同一 id 的新信号被误判「已处理」。
+            paper_account = PaperAccountRecord(name="模拟盘", status="active")
+            session.add(paper_account)
+            session.flush()
+            session.add(PaperSignalRecord(
+                account_id=paper_account.id,
+                signal_id=linked_signal_id,
+                action="buy",
+                disposition="opened",
+            ))
 
         deleted = self.db.delete_analysis_history_records([record_id])
         self.assertEqual(deleted, 1)
@@ -2134,6 +2147,12 @@ class AnalysisHistoryTestCase(unittest.TestCase):
             self.assertEqual(
                 session.query(DecisionSignalFeedbackRecord).filter(
                     DecisionSignalFeedbackRecord.signal_id == linked_signal_id
+                ).count(),
+                0,
+            )
+            self.assertEqual(
+                session.query(PaperSignalRecord).filter(
+                    PaperSignalRecord.signal_id == linked_signal_id
                 ).count(),
                 0,
             )

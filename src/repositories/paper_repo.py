@@ -11,7 +11,7 @@ import logging
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select
 
 from src.storage import (
     DatabaseManager,
@@ -225,6 +225,32 @@ class PaperRepository:
                 )
             ).scalar_one()
             return int(exists) > 0
+
+    def get_signal_record(self, account_id: int, signal_id: int) -> Optional[PaperSignalRecord]:
+        """Return the consumption record for one (account, signal) pair, if any."""
+        with self.db.get_session() as session:
+            return session.execute(
+                select(PaperSignalRecord).where(
+                    PaperSignalRecord.account_id == account_id,
+                    PaperSignalRecord.signal_id == signal_id,
+                )
+            ).scalars().first()
+
+    def delete_signal_record(self, account_id: int, signal_id: int) -> int:
+        """Drop the consumption record for one (account, signal) pair.
+
+        用于复用 id 的脏记录清理：``decision_signals.id`` 在 SQLite 上没有
+        AUTOINCREMENT，旧信号被删后 id 会被新信号占用，旧消费记录不能挡住新信号。
+        """
+        with self.db.get_session() as session:
+            result = session.execute(
+                delete(PaperSignalRecord).where(
+                    PaperSignalRecord.account_id == account_id,
+                    PaperSignalRecord.signal_id == signal_id,
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
 
     def add_signal_record(
         self,

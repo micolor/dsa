@@ -1280,6 +1280,12 @@ class DecisionSignalRecord(Base):
             'decision_profile',
             'created_at',
         ),
+        # SQLite 默认的 INTEGER PRIMARY KEY 会复用被删除行释放的 id：历史删除会连带
+        # 删掉 decision_signals 后，新信号可能拿到旧 id，让按 id 关联的消费记录
+        # （paper_signals）把新信号误判成「已处理」。这里给到 AUTOINCREMENT，保证 id
+        # 单调不复用。注意：该参数只影响新建库；已存在的库表结构不重建（老库靠
+        # delete_history 的级联清理 + paper 侧 action 兜底校验保持正确）。
+        {'sqlite_autoincrement': True},
     )
 
 
@@ -3313,6 +3319,12 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     delete(DecisionSignalFeedbackRecord).where(
                         DecisionSignalFeedbackRecord.signal_id.in_(linked_signal_ids)
                     )
+                )
+                # paper_signals 引用 signal_id；不一起删会留下孤儿记录，而
+                # decision_signals.id 没有 AUTOINCREMENT，被删 id 会被新信号复用，
+                # 孤儿记录就会让模拟盘把复用 id 的新信号误判成「已处理」。
+                session.execute(
+                    delete(PaperSignalRecord).where(PaperSignalRecord.signal_id.in_(linked_signal_ids))
                 )
                 session.execute(
                     delete(DecisionSignalRecord).where(DecisionSignalRecord.id.in_(linked_signal_ids))
