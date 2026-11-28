@@ -57,6 +57,8 @@ class PaperTradeItem(BaseModel):
     amount: Optional[float] = None
     fee: float = 0.0
     trade_date: str
+    # 记录时间（带时区 ISO），用于前端展示成交流水的具体时分；老记录可能为空。
+    created_at: Optional[str] = None
     reason: Optional[str] = None
 
 

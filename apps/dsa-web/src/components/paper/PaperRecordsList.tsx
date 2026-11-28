@@ -135,7 +135,10 @@ export const PaperRecordsList: React.FC<Props> = ({
               </div>
               <div className="flex items-center gap-3">
                 {renderReason(trade.reason)}
-                <span className="text-xs text-secondary-text">{trade.tradeDate}</span>
+                {/* 优先显示记录时间（本地时区，到分钟）；老记录没有 created_at 时退回日期。 */}
+                <span className="text-xs text-secondary-text">
+                  {trade.createdAt ? formatDateTime(trade.createdAt) : trade.tradeDate}
+                </span>
               </div>
             </div>
           ))}

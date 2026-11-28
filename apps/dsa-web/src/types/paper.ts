@@ -49,6 +49,8 @@ export interface PaperTrade {
   /** 佣金+印花税+过户费；滑点已含在 price 里。旧记录为 0。 */
   fee: number;
   tradeDate: string;
+  /** 成交记录时间（UTC ISO，含时分）；老记录可能为 null。 */
+  createdAt: string | null;
   reason: string | null;
 }
 

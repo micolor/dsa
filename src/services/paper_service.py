@@ -980,6 +980,10 @@ class PaperService:
                 "amount": t.amount,
                 "fee": t.fee or 0.0,
                 "trade_date": t.trade_date.isoformat(),
+                # 记录时间（UTC，带时区）让前端能显示具体时分；老记录可能为 NULL。
+                "created_at": (
+                    t.created_at.replace(tzinfo=timezone.utc).isoformat() if t.created_at else None
+                ),
                 "reason": t.reason,
             }
             for t in trades

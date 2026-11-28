@@ -170,6 +170,9 @@ def test_auto_trade_orders_buys_by_score_and_is_idempotent(isolated_db, service)
     account_id = service.get_or_create_account()["account_id"]
     trades = service.get_trades(account_id)["items"]
     assert {trade["stock_code"] for trade in trades} == {"000001", "600519"}
+    # 成交流水带记录时间（UTC、带时区），前端据此显示具体时分。
+    created_at = trades[0]["created_at"]
+    assert created_at and datetime.fromisoformat(created_at).tzinfo is not None
 
     second = service.auto_trade_once(
         account_id,
